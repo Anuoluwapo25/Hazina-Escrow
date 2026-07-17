@@ -25,20 +25,18 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
    * @returns Array of test cases with amount, feeBps, expected contract results
    */
   function generateTestGrid() {
-    const testCases = [];
-
     // Boundary conditions
     const boundaryCases = [
       // Amount boundary: very small amounts
-      { amount: 1, feeBps: 5000 },      // 1 stroop, 50% fee
-      { amount: 10, feeBps: 5000 },     // 10 stroops, 50% fee
+      { amount: 1, feeBps: 5000 }, // 1 stroop, 50% fee
+      { amount: 10, feeBps: 5000 }, // 10 stroops, 50% fee
 
       // Small amounts that hit min-1-stroop rule
-      { amount: 10000, feeBps: 10 },   // 10k stroops (0.001 USDC), 0.1% fee
+      { amount: 10000, feeBps: 10 }, // 10k stroops (0.001 USDC), 0.1% fee
       { amount: 100000, feeBps: 100 }, // 100k stroops (0.01 USDC), 1% fee
 
       // Medium amounts
-      { amount: 1000000, feeBps: 500 },  // 1M stroops (0.1 USDC), 5% fee
+      { amount: 1000000, feeBps: 500 }, // 1M stroops (0.1 USDC), 5% fee
       { amount: 10000000, feeBps: 5000 }, // 10M stroops (1 USDC), 50% fee
 
       // Large amounts
@@ -48,17 +46,17 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
     // Float-precision boundary cases
     const floatCases = [
       // Cases where floating-point rounding will be significant
-      { amount: 1_000_000, feeBps: 1 },     // Small fee percentage
-      { amount: 100_000, feeBps: 1234 },   // 12.34% (2 decimal places in decimal)
+      { amount: 1_000_000, feeBps: 1 }, // Small fee percentage
+      { amount: 100_000, feeBps: 1234 }, // 12.34% (2 decimal places in decimal)
       { amount: 1_000_000_000, feeBps: 7 }, // Large amount, small fee
     ];
 
     // Min-1-stroop boundary (where contract sets fee to 1 even if calculation is 0)
     const minOneCases = [
-      { amount: 10000, feeBps: 1 },      // 10k stroops, 0.01% fee = 1 stroop (min rule)
-      { amount: 100000, feeBps: 1 },     // 100k stroops, 0.01% fee = 10 stroops (not min rule)
-      { amount: 10000, feeBps: 10 },     // 10k stroops, 0.1% fee = 1 stroop (min rule)
-      { amount: 1000000, feeBps: 1 },    // 1M stroops, 0.01% fee = 100 stroops (not min rule)
+      { amount: 10000, feeBps: 1 }, // 10k stroops, 0.01% fee = 1 stroop (min rule)
+      { amount: 100000, feeBps: 1 }, // 100k stroops, 0.01% fee = 10 stroops (not min rule)
+      { amount: 10000, feeBps: 10 }, // 10k stroops, 0.1% fee = 1 stroop (min rule)
+      { amount: 1000000, feeBps: 1 }, // 1M stroops, 0.01% fee = 100 stroops (not min rule)
     ];
 
     // Different fee rates
@@ -67,12 +65,7 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
       return { amount: 1_000_000, feeBps: feePercent * 100 }; // Convert to basis points
     });
 
-    return [
-      ...boundaryCases,
-      ...floatCases,
-      ...minOneCases,
-      ...rateCases,
-    ];
+    return [...boundaryCases, ...floatCases, ...minOneCases, ...rateCases];
   }
 
   const testGrid = generateTestGrid();
@@ -82,13 +75,12 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
 
     it(testName, () => {
       // Backend calculation (using floating-point)
-      const backendRate = feeBps / 10_000; // Convert basis points to decimal
       const backendPlatformFee = platformFee(amount);
       const backendSellerShare = sellerShare(amount);
 
       // Contract calculation (simulated integer arithmetic)
       const maxBasisPoints = 10_000;
-      let contractCalculatedCut = Math.floor(amount * feeBps / maxBasisPoints);
+      const contractCalculatedCut = Math.floor((amount * feeBps) / maxBasisPoints);
 
       // Apply min-1-stroop rule
       let contractPlatformFee;
@@ -109,21 +101,22 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
       console.log(`${testName}:`);
       console.log(`  Contract - Platform: ${contractPlatformFee}, Seller: ${contractSellerShare}`);
       console.log(`  Backend  - Platform: ${backendPlatformFee}, Seller: ${backendSellerShare}`);
-      console.log(`  Platform Div: ${Math.abs(backendPlatformFee - contractPlatformFee)}");
-      console.log(`  Seller Div: ${Math.abs(backendSellerShare - contractSellerShare)}");
+      console.log(`  Platform Div: ${Math.abs(backendPlatformFee - contractPlatformFee)}`);
+      console.log(`  Seller Div: ${Math.abs(backendSellerShare - contractSellerShare)}`);
       console.log();
     });
   });
 
   // Test specific boundaries explicitly
   describe('Boundary Conditions', () => {
-    it('should document min-1-stroop behavior (amount=10,000, fee=10 bps)', () => {
-      const amount = 10_000;
-      const feeBps = 10;
+    it('should document min-1-stroop behavior (amount=1,000, fee=1 bps)', () => {
+      const amount = 1_000;
+      const feeBps = 1;
 
       // Contract calculation (integer)
-      const contractCalculatedCut = Math.floor(amount * feeBps / 10_000);
-      const contractPlatformFee = (contractCalculatedCut === 0 && amount > 0 && feeBps > 0) ? 1 : contractCalculatedCut;
+      const contractCalculatedCut = Math.floor((amount * feeBps) / 10_000);
+      const contractPlatformFee =
+        contractCalculatedCut === 0 && amount > 0 && feeBps > 0 ? 1 : contractCalculatedCut;
       const contractSellerShare = amount - contractPlatformFee;
 
       // Backend calculation (float)
@@ -131,8 +124,10 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
       const backendSellerShare = sellerShare(amount);
 
       // The min-1-stroop rule makes this a clear divergence
-      console.log('Min-1-stroop case: (amount=10,000, fee=10 bps)');
-      console.log(`Contract: platformFee=${contractPlatformFee} (min rule applied), sellerShare=${contractSellerShare}`);
+      console.log('Min-1-stroop case: (amount=1,000, fee=1 bps)');
+      console.log(
+        `Contract: platformFee=${contractPlatformFee} (min rule applied), sellerShare=${contractSellerShare}`,
+      );
       console.log(`Backend:  platformFee=${backendPlatformFee}, sellerShare=${backendSellerShare}`);
 
       // Due to different rounding behaviors, these will differ
@@ -146,8 +141,9 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
       const feeBps = 1;
 
       // Contract calculation (integer)
-      const contractCalculatedCut = Math.floor(amount * feeBps / 10_000);
-      const contractPlatformFee = (contractCalculatedCut === 0 && amount > 0 && feeBps > 0) ? 1 : contractCalculatedCut;
+      const contractCalculatedCut = Math.floor((amount * feeBps) / 10_000);
+      const contractPlatformFee =
+        contractCalculatedCut === 0 && amount > 0 && feeBps > 0 ? 1 : contractCalculatedCut;
       const contractSellerShare = amount - contractPlatformFee;
 
       // Backend calculation (float)
@@ -155,7 +151,9 @@ describe('Fee Calculation Comparison (Contract vs Backend)', () => {
       const backendSellerShare = sellerShare(amount);
 
       console.log('Float-rounding case: (amount=1, feeBps=1)');
-      console.log(`Contract: platformFee=${contractPlatformFee}, sellerShare=${contractSellerShare}`);
+      console.log(
+        `Contract: platformFee=${contractPlatformFee}, sellerShare=${contractSellerShare}`,
+      );
       console.log(`Backend:  platformFee=${backendPlatformFee}, sellerShare=${backendSellerShare}`);
 
       // Contract may apply min-1-stroop rule
