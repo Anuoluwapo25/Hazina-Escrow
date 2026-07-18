@@ -1046,7 +1046,7 @@ mod tests {
 
     const INITIAL_BUYER_BALANCE: i128 = 10_000_000_000;
 
-    fn setup() -> (
+    pub(super) fn setup() -> (
         Env,
         HazinaEscrowClient<'static>,
         Address,
@@ -1073,7 +1073,7 @@ mod tests {
         (env, client, admin, buyer, seller, usdc)
     }
 
-    fn dataset_id(env: &Env, value: &str) -> String {
+    pub(super) fn dataset_id(env: &Env, value: &str) -> String {
         String::from_str(env, value)
     }
 
@@ -1774,10 +1774,9 @@ mod fuzz_tests {
     extern crate std;
 
     use super::*;
-    use proptest::prelude::*;
+    use super::tests::{setup, dataset_id};
     use soroban_sdk::{
-        Env, String,
-        testutils::Address as _,
+        testutils::{Address as _, Events as _},
         token::{Client as TokenClient, StellarAssetClient},
     };
 
