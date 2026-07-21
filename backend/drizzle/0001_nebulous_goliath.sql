@@ -1,0 +1,1 @@
+ALTER TABLE `payout_failures` ADD `payment_token` text DEFAULT 'USDC' NOT NULL;
