@@ -92,6 +92,7 @@ export interface PayoutFailure {
   sellerWallet: string;
   buyerTxHash: string;
   intendedAmount: number;
+  paymentToken?: string;
   sellerTxHash?: string;
   status: PayoutFailureStatus;
   retryCount: number;
@@ -238,6 +239,7 @@ function rowToPayoutFailure(row: any): PayoutFailure {
     sellerWallet: row.sellerWallet,
     buyerTxHash: row.buyerTxHash,
     intendedAmount: Number(row.intendedAmount),
+    paymentToken: row.paymentToken ?? undefined,
     sellerTxHash: row.sellerTxHash ?? undefined,
     status: row.status as PayoutFailureStatus,
     retryCount: Number(row.retryCount ?? 0),
@@ -255,6 +257,7 @@ function payoutFailureToRow(pf: PayoutFailure): Record<string, unknown> {
     sellerWallet: pf.sellerWallet,
     buyerTxHash: pf.buyerTxHash,
     intendedAmount: String(pf.intendedAmount),
+    paymentToken: pf.paymentToken ?? 'USDC',
     sellerTxHash: pf.sellerTxHash ?? null,
     status: pf.status,
     retryCount: pf.retryCount,
