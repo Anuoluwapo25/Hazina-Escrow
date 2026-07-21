@@ -8,7 +8,7 @@ import {
   type PayoutFailureStatus,
   updatePayoutFailure,
 } from '../common/storage';
-import { sendUsdcPayment } from '../agent/agent.wallet';
+import { sendTokenPayment } from '../agent/agent.wallet';
 import { notifySeller } from '../webhooks/webhook.service';
 import { logger } from '../lib/logger';
 
@@ -35,6 +35,7 @@ export async function recordPayoutFailure(params: {
   sellerWallet: string;
   buyerTxHash: string;
   intendedAmount: number;
+  paymentToken?: string;
   error: string;
 }): Promise<PayoutFailure> {
   const existing = await getPayoutFailureByBuyerTxHash(params.buyerTxHash);
@@ -56,6 +57,7 @@ export async function recordPayoutFailure(params: {
     sellerWallet: params.sellerWallet,
     buyerTxHash: params.buyerTxHash,
     intendedAmount: params.intendedAmount,
+    paymentToken: params.paymentToken || 'USDC',
     status: 'pending_retry',
     retryCount: 0,
     nextRetryAt: nowIso,
@@ -77,10 +79,12 @@ export async function recordPayoutFailure(params: {
 
 async function attemptRetry(failure: PayoutFailure): Promise<void> {
   try {
-    const payment = await sendUsdcPayment({
+    // Retry in the token the buyer originally paid in, not whatever is default today
+    const payment = await sendTokenPayment({
       destinationAddress: failure.sellerWallet,
       amount: failure.intendedAmount.toFixed(7),
       memo: `hazina-retry-${failure.datasetId.slice(0, 8)}`,
+      tokenCode: failure.paymentToken || 'USDC',
     });
 
     await updatePayoutFailure(failure.id, {

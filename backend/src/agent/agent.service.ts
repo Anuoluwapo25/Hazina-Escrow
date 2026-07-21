@@ -10,7 +10,7 @@ import {
   reserveTxHash,
 } from '../common/storage';
 import { verifyStellarPayment } from '../payments/stellar.service';
-import { sendUsdcPayment, getAgentPublicKey } from './agent.wallet';
+import { sendTokenPayment, getAgentPublicKey } from './agent.wallet';
 import { logger } from '../lib/logger';
 import { domainMetrics } from '../common/datadog';
 import {
@@ -252,22 +252,24 @@ async function _executeResearch(
 
   for (const { seller, dataset } of selectedSellers) {
     let txHash: string;
+    const tokenCode = dataset.paymentToken || 'USDC';
 
     if (demo) {
       // Demo: simulate payment, read data directly
       txHash = `demo-${seller.type}-${Date.now()}`;
       logger.info(
-        `[Agent][Demo] Simulating payment of ${dataset.pricePerQuery} USDC → ${dataset.sellerWallet} for ${dataset.name}`,
+        `[Agent][Demo] Simulating payment of ${dataset.pricePerQuery} ${tokenCode} → ${dataset.sellerWallet} for ${dataset.name}`,
       );
     } else {
-      // Real: send USDC from agent wallet → seller wallet
+      // Real: send the dataset's own token from agent wallet → seller wallet
       logger.info(
-        `[Agent] Paying ${dataset.pricePerQuery} USDC → ${dataset.sellerWallet} for ${dataset.name}`,
+        `[Agent] Paying ${dataset.pricePerQuery} ${tokenCode} → ${dataset.sellerWallet} for ${dataset.name}`,
       );
-      const payment = await sendUsdcPayment({
+      const payment = await sendTokenPayment({
         destinationAddress: dataset.sellerWallet,
         amount: dataset.pricePerQuery.toFixed(7),
         memo: `haz-agent-${jobId.slice(0, 8)}`,
+        tokenCode,
       });
       txHash = payment.txHash;
     }
@@ -304,6 +306,7 @@ async function _executeResearch(
       datasetId: dataset.id,
       txHash,
       amount: dataset.pricePerQuery,
+      paymentToken: tokenCode,
       sellerPaid: true,
       sellerAmount: parseFloat((dataset.pricePerQuery * 0.95).toFixed(7)),
       buyerQuery: `[Agent Job ${jobId}] ${query}`,

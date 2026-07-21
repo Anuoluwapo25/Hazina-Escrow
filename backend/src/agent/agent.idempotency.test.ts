@@ -5,7 +5,7 @@ vi.mock('uuid', () => ({
 }));
 
 import { runResearchAgent } from './agent.service';
-import { sendUsdcPayment } from './agent.wallet';
+import { sendTokenPayment } from './agent.wallet';
 import { verifyStellarPayment } from '../payments/stellar.service';
 
 vi.mock('../common/storage', () => {
@@ -63,7 +63,7 @@ vi.mock('../payments/stellar.service', () => ({
 
 vi.mock('./agent.wallet', () => ({
   getAgentPublicKey: vi.fn(() => 'GAGENT'),
-  sendUsdcPayment: vi.fn(() => Promise.resolve({ txHash: 'seller-payment-hash' })),
+  sendTokenPayment: vi.fn(() => Promise.resolve({ txHash: 'seller-payment-hash' })),
 }));
 
 vi.mock('../ai/research.service', () => ({
@@ -129,8 +129,8 @@ describe('runResearchAgent Idempotency', () => {
     // verifyStellarPayment should be called ONLY ONCE
     expect(verifyStellarPayment).toHaveBeenCalledTimes(1);
 
-    // sendUsdcPayment should be called once for each SELLER_TYPE (4 times)
+    // sendTokenPayment should be called once for each SELLER_TYPE (4 times)
     // if it was called twice (the bug), it would be 8 times.
-    expect(sendUsdcPayment).toHaveBeenCalledTimes(4);
+    expect(sendTokenPayment).toHaveBeenCalledTimes(4);
   });
 });

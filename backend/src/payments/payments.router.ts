@@ -25,7 +25,7 @@ import {
   runDuePayoutRetries,
   scheduleRetrySweep,
 } from './payout-retry.service';
-import { sendUsdcPayment } from '../agent/agent.wallet';
+import { sendTokenPayment } from '../agent/agent.wallet';
 import {
   deliverVerifiedPayment,
   markDeliveryFailure,
@@ -294,16 +294,19 @@ paymentsRouter.post(
         buyerQuestion,
       });
 
-      // Forward seller's share on-chain; failures enter the DLQ for retry
+      // Forward seller's share on-chain; failures enter the DLQ for retry.
+      // Sellers are paid in the same token the buyer paid in.
       const sellerAmount = sellerShare(dataset.pricePerQuery);
+      const tokenCode = dataset.paymentToken || 'USDC';
       try {
-        const payment = await sendUsdcPayment({
+        const payment = await sendTokenPayment({
           destinationAddress: dataset.sellerWallet,
           amount: sellerAmount.toFixed(7),
           memo: `hazina-${dataset.id.slice(0, 10)}`,
+          tokenCode,
         });
         console.log(
-          `[Escrow] Paid seller ${sellerAmount} USDC → ${dataset.sellerWallet} (${payment.txHash})`,
+          `[Escrow] Paid seller ${sellerAmount} ${tokenCode} → ${dataset.sellerWallet} (${payment.txHash})`,
         );
       } catch (payErr) {
         console.warn(
@@ -315,6 +318,7 @@ paymentsRouter.post(
           sellerWallet: dataset.sellerWallet,
           buyerTxHash: txHash,
           intendedAmount: sellerAmount,
+          paymentToken: tokenCode,
           error: payErr instanceof Error ? payErr.message : String(payErr),
         });
       }
