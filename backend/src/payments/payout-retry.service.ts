@@ -72,6 +72,7 @@ export async function recordPayoutFailure(params: {
     reason: params.error,
     buyerTxHash: params.buyerTxHash,
     intendedAmount: params.intendedAmount,
+    paymentToken: failure.paymentToken,
   }).catch(() => {});
   scheduleRetrySweep(100);
   return failure;
@@ -97,6 +98,7 @@ async function attemptRetry(failure: PayoutFailure): Promise<void> {
       datasetId: failure.datasetId,
       sellerTxHash: payment.txHash,
       amount: failure.intendedAmount,
+      paymentToken: payment.tokenCode,
       retried: true,
     }).catch(() => {});
     return;
@@ -117,6 +119,7 @@ async function attemptRetry(failure: PayoutFailure): Promise<void> {
         manualReviewNeeded: true,
         buyerTxHash: failure.buyerTxHash,
         intendedAmount: failure.intendedAmount,
+        paymentToken: failure.paymentToken,
       }).catch(() => {});
       return;
     }

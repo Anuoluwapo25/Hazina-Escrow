@@ -83,6 +83,7 @@ export async function deliverVerifiedPayment(params: {
     datasetName: dataset.name,
     txHash,
     amount: dataset.pricePerQuery,
+    paymentToken: dataset.paymentToken || 'USDC',
     buyerQuery: buyerQuestion,
   })
     .then(() => {
@@ -115,6 +116,7 @@ export async function deliverVerifiedPayment(params: {
       sellerAmount,
       txHash,
       timestamp: new Date().toISOString(),
+      paymentToken: dataset.paymentToken || 'USDC',
     }).catch((emailError: unknown) => {
       console.error(
         `[Escrow] Seller email notification failed for txHash=${txHash} dataset=${dataset.id}`,
