@@ -19,6 +19,14 @@ export const PLATFORM_FEE_RATE = PARSED_RATE;
 /** Fraction of every payment that goes to the seller (default 95 %). */
 export const SELLER_PAYOUT_RATE = 1 - PLATFORM_FEE_RATE;
 
+/**
+ * Platform fee expressed in basis points (bps) — the unit the on-chain escrow
+ * contract speaks. This is the single source of truth (#551): the same
+ * PLATFORM_FEE_RATE that drives off-chain math is what we pass to the
+ * contract's fee config, so the 95/5 split can never diverge between layers.
+ */
+export const PLATFORM_FEE_BPS = Math.round(PLATFORM_FEE_RATE * 10_000);
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /** Compute the seller's share of `pricePerQuery`, rounded to 7 decimals. */

@@ -68,6 +68,8 @@ export interface Transaction {
   deliveryError?: string;
   verifiedAt?: string;
   deliveredAt?: string;
+  /** On-chain escrow id (from the contract's lock()); undefined for demo/legacy txns. */
+  escrowId?: number;
   timestamp: string;
 }
 export type WebhookEvent =
@@ -173,6 +175,8 @@ function rowToTransaction(row: any): Transaction {
     deliveryError: row.deliveryError ?? undefined,
     verifiedAt: row.verifiedAt ?? undefined,
     deliveredAt: row.deliveredAt ?? undefined,
+    escrowId:
+      row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
     timestamp: row.timestamp,
   };
 }
@@ -200,6 +204,7 @@ function transactionToRow(tx: Transaction): Record<string, unknown> {
     deliveryError: tx.deliveryError ?? null,
     verifiedAt: tx.verifiedAt ?? null,
     deliveredAt: tx.deliveredAt ?? null,
+    escrowId: tx.escrowId ?? null,
     timestamp: tx.timestamp,
   };
 }

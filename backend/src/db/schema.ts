@@ -56,6 +56,7 @@ export const transactions = pgTable('transactions', {
   deliveryError: text('delivery_error'),
   verifiedAt: text('verified_at'),
   deliveredAt: text('delivered_at'),
+  escrowId: integer('escrow_id'),
   timestamp: text('timestamp').notNull(),
 });
 
@@ -136,6 +137,7 @@ export const transactionsSqlite = sqliteTable('transactions', {
   deliveryError: sqliteText('delivery_error'),
   verifiedAt: sqliteText('verified_at'),
   deliveredAt: sqliteText('delivered_at'),
+  escrowId: sqliteInteger('escrow_id'),
   timestamp: sqliteText('timestamp').notNull(),
 });
 

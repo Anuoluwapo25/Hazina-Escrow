@@ -27,9 +27,16 @@ import {
 } from './payout-retry.service';
 import { sendUsdcPayment } from '../agent/agent.wallet';
 import {
+  isEscrowContractConfigured,
+  getEscrowContractId,
+} from '../lib/stellar.config';
+import { releaseEscrow, refundEscrow, getEscrow } from '../lib/escrow.client';
+import { PLATFORM_FEE_BPS } from '../common/constants';
+import {
   deliverVerifiedPayment,
   markDeliveryFailure,
   processPayment,
+  processEscrowPayment,
   startSellerNotificationRetryWorker,
   stopSellerNotificationRetryWorker,
 } from './payments.service';
@@ -41,6 +48,18 @@ scheduleRetrySweep(1_000);
 
 const verifySchema = z.object({
   txHash: z.string().min(1),
+  buyerQuestion: z
+    .string()
+    .max(500)
+    .transform(value => {
+      const sanitized = sanitizeUserText(value);
+      return sanitized.length > 0 ? sanitized : undefined;
+    })
+    .optional(),
+});
+
+const verifyEscrowSchema = z.object({
+  escrowId: z.number().int().nonnegative(),
   buyerQuestion: z
     .string()
     .max(500)
@@ -189,15 +208,56 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
   });
 
   // x402 Payment Required response
+  const escrowEnabled = isEscrowContractConfigured();
+
+  // Non-custodial path: the buyer locks funds into the contract from their own
+  // wallet. We advertise the contract address + the build-lock endpoint instead
+  // of a plain payment address, so funds are never routed through a Hazina key.
+  if (escrowEnabled) {
+    return res.status(402).json({
+      error: 'Payment Required',
+      x402: true,
+      mode: 'escrow',
+      dataset: {
+        id: dataset.id,
+        name: dataset.name,
+        type: dataset.type,
+      },
+      payment: {
+        mode: 'escrow',
+        escrowContractId: getEscrowContractId(),
+        amount: dataset.pricePerQuery,
+        currency: tokenCode,
+        network: 'Stellar Testnet',
+        platformFeeBps: PLATFORM_FEE_BPS,
+        memo,
+        expiresIn: 300,
+        // Buyer flow: build → sign with own wallet → submit → verify
+        buildLockUrl: `/api/v1/payments/escrow/lock/build`,
+        submitLockUrl: `/api/v1/payments/escrow/lock/submit`,
+        instructions: [
+          `1. Connect your Stellar wallet (Freighter)`,
+          `2. Request the lock transaction from ${`/api/v1/payments/escrow/lock/build`} for this dataset`,
+          `3. Sign it in your wallet — your ${dataset.pricePerQuery} ${tokenCode} is locked in the escrow contract, not a Hazina wallet`,
+          `4. Submit the signed transaction; the returned escrow id proves your funds are held on-chain`,
+        ],
+      },
+    });
+  }
+
+  // Legacy/demo custodial path: buyer pays a plain wallet the backend controls.
+  // Retained only when no escrow contract is configured (labelled as such).
   return res.status(402).json({
     error: 'Payment Required',
     x402: true,
+    mode: 'custodial-demo',
     dataset: {
       id: dataset.id,
       name: dataset.name,
       type: dataset.type,
     },
     payment: {
+      mode: 'custodial-demo',
       paymentAddress: process.env.ESCROW_WALLET || dataset.sellerWallet,
       amount: dataset.pricePerQuery,
       currency: tokenCode,
@@ -205,6 +265,7 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
       memo,
       expiresIn: 300, // 5 minutes
       instructions: [
+        `NOTE: demo mode — funds route through a Hazina-controlled wallet. Set ESCROW_CONTRACT_ID for non-custodial escrow.`,
         `1. Open your Stellar wallet (Lobstr, StellarX, or testnet faucet)`,
         `2. Send exactly ${dataset.pricePerQuery} ${tokenCode} to the address above`,
         `3. Include memo: ${memo}`,
@@ -294,29 +355,34 @@ paymentsRouter.post(
         buyerQuestion,
       });
 
-      // Forward seller's share on-chain; failures enter the DLQ for retry
-      const sellerAmount = sellerShare(dataset.pricePerQuery);
-      try {
-        const payment = await sendUsdcPayment({
-          destinationAddress: dataset.sellerWallet,
-          amount: sellerAmount.toFixed(7),
-          memo: `hazina-${dataset.id.slice(0, 10)}`,
-        });
-        console.log(
-          `[Escrow] Paid seller ${sellerAmount} USDC → ${dataset.sellerWallet} (${payment.txHash})`,
-        );
-      } catch (payErr) {
-        console.warn(
-          '[Escrow] Seller payment failed (data still delivered):',
-          payErr instanceof Error ? payErr.message : payErr,
-        );
-        await recordPayoutFailure({
-          datasetId: dataset.id,
-          sellerWallet: dataset.sellerWallet,
-          buyerTxHash: txHash,
-          intendedAmount: sellerAmount,
-          error: payErr instanceof Error ? payErr.message : String(payErr),
-        });
+      // Forward seller's share on-chain from the Hazina hot wallet. This is the
+      // CUSTODIAL path and only runs when no escrow contract is configured — with
+      // ESCROW_CONTRACT_ID set, the contract performs the split via /verify/:id/escrow
+      // and no funds ever touch a Hazina-controlled key. Failures enter the DLQ.
+      if (!isEscrowContractConfigured()) {
+        const sellerAmount = sellerShare(dataset.pricePerQuery);
+        try {
+          const payment = await sendUsdcPayment({
+            destinationAddress: dataset.sellerWallet,
+            amount: sellerAmount.toFixed(7),
+            memo: `hazina-${dataset.id.slice(0, 10)}`,
+          });
+          console.log(
+            `[Escrow] (demo/custodial) Paid seller ${sellerAmount} USDC → ${dataset.sellerWallet} (${payment.txHash})`,
+          );
+        } catch (payErr) {
+          console.warn(
+            '[Escrow] Seller payment failed (data still delivered):',
+            payErr instanceof Error ? payErr.message : payErr,
+          );
+          await recordPayoutFailure({
+            datasetId: dataset.id,
+            sellerWallet: dataset.sellerWallet,
+            buyerTxHash: txHash,
+            intendedAmount: sellerAmount,
+            error: payErr instanceof Error ? payErr.message : String(payErr),
+          });
+        }
       }
 
       if (result.pendingDelivery) {
@@ -336,6 +402,74 @@ paymentsRouter.post(
       return res.status(500).json({ error: 'Payment verification failed — please try again' });
     } finally {
       releaseReservation();
+    }
+  },
+);
+
+/**
+ * @openapi
+ * /api/verify/{id}/escrow:
+ *   post:
+ *     summary: Verify an on-chain escrow lock and release data (non-custodial)
+ *     description: >
+ *       Confirms the buyer has locked funds in the escrow contract for this
+ *       dataset, delivers the data, then releases the escrow so the contract
+ *       performs the 95/5 split on-chain. No funds pass through a Hazina wallet.
+ *     responses:
+ *       200:
+ *         description: Escrow verified, data delivered, release triggered
+ *       400:
+ *         description: Escrow does not match this dataset or is already settled
+ *       404:
+ *         description: Dataset not found
+ *       503:
+ *         description: Escrow contract not configured
+ */
+// POST /api/verify/:id/escrow — non-custodial: verify on-chain lock, deliver, release
+paymentsRouter.post(
+  '/verify/:id/escrow',
+  validateBody(verifyEscrowSchema),
+  async (req: Request, res: Response) => {
+    if (!isEscrowContractConfigured()) {
+      return res.status(503).json({
+        error: 'Escrow contract not configured (ESCROW_CONTRACT_ID unset)',
+      });
+    }
+    const { escrowId, buyerQuestion } = req.body as z.infer<typeof verifyEscrowSchema>;
+    const id = req.params.id as string;
+
+    const dataset = await getDataset(id);
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+
+    try {
+      const result = await processEscrowPayment({ escrowId, datasetId: dataset.id, buyerQuestion });
+
+      // Data delivered — now release the escrow so the CONTRACT performs the
+      // 95/5 split. If release fails, the buyer still has their data and the
+      // escrow can be released later by an admin (funds remain safely on-chain).
+      try {
+        const releaseTx = await releaseEscrow(escrowId);
+        console.log(`[Escrow] Released escrow #${escrowId} on-chain (${releaseTx})`);
+      } catch (releaseErr) {
+        console.warn(
+          `[Escrow] Release failed for escrow #${escrowId} (data delivered, funds still locked on-chain):`,
+          releaseErr instanceof Error ? releaseErr.message : releaseErr,
+        );
+      }
+
+      if (result.pendingDelivery) {
+        return res.status(202).json(result);
+      }
+      return res.json({ ...result, warning: null });
+    } catch (err) {
+      if (err instanceof StellarTimeoutError) {
+        return res.status(503).json({ error: err.message });
+      }
+      if (err instanceof PaymentError) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error('[Verify/Escrow] Unexpected error:', err);
+      return res.status(500).json({ error: 'Escrow verification failed — please try again' });
     }
   },
 );

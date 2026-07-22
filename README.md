@@ -2,7 +2,7 @@
 
 > *Hazina* means **treasure** in Swahili.
 
-A Web3 data marketplace where **sellers** list valuable on-chain intelligence and **buyers** — including autonomous AI agents — purchase access using micropayments on Stellar. A Soroban smart contract enforces escrow on-chain. Claude AI synthesises every dataset into instant insights.
+A Web3 data marketplace where **sellers** list valuable on-chain intelligence and **buyers** — including autonomous AI agents — purchase access using micropayments on Stellar. A Soroban smart contract enforces escrow on-chain: buyers lock their own USDC into the contract, and it performs the 95/5 split on release — funds never route through a Hazina-controlled wallet. Claude AI synthesises every dataset into instant insights.
 
 ---
 
@@ -157,45 +157,54 @@ Buyer → /marketplace
   → Modal shows price, seller wallet, payment instructions
 ```
 
-### Step 3 — The x402 Payment Flow
+### Step 3 — The Non-Custodial Escrow Flow
+
+The buyer locks their own USDC **into the Soroban contract** from their own
+wallet. The backend never receives or forwards the buyer's funds — it only
+triggers the contract's pre-programmed 95/5 split once data is delivered.
 
 ```
-Browser                    Backend                  Stellar
+Browser (Freighter)        Backend (admin)          Escrow Contract
   │                           │                        │
   │  POST /api/query/:id       │                        │
   │ ─────────────────────────► │                        │
-  │                           │                        │
   │ ◄───────────────────────── │                        │
-  │  402 { address, amount,   │                        │
-  │         memo, expiresIn } │                        │
+  │  402 { mode: "escrow",    │                        │
+  │    escrowContractId,      │                        │
+  │    amount, memo }         │                        │
   │                           │                        │
-  │  [Buyer sends USDC]        │                        │
-  │ ──────────────────────────────────────────────────►│
+  │  POST /payments/escrow/lock/build                  │
+  │ ─────────────────────────► │  build unsigned lock() │
+  │ ◄───────────────────────── │                        │
+  │  { xdr }                  │                        │
   │                           │                        │
-  │  POST /api/verify/:id      │                        │
-  │  { txHash }               │                        │
-  │ ─────────────────────────► │                        │
-  │                           │  Horizon API check     │
-  │                           │ ──────────────────────►│
-  │                           │ ◄────────────────────── │
-  │                           │  Payment confirmed ✓   │
+  │  [Buyer signs in Freighter]                        │
+  │  POST /payments/escrow/lock/submit { signedXdr }   │
+  │ ─────────────────────────► │  lock(buyer,seller,…) │
+  │                           │ ──────────────────────►│  funds held on-chain
+  │ ◄───────────────────────── │ ◄──────────────────────│
+  │  { escrowId }             │  escrow_id             │
   │                           │                        │
+  │  POST /api/verify/:id/escrow { escrowId }          │
+  │ ─────────────────────────► │  get_escrow() ✓       │
   │                           │  [Claude AI summary]   │
-  │                           │  [Auto-pay seller 95%] │
-  │                           │ ──────────────────────►│
-  │                           │                        │
+  │                           │  release(escrow_id) ──►│  95% seller / 5% treasury
   │ ◄───────────────────────── │                        │
-  │  200 { data, AI summary,  │                        │
-  │   sellerTxHash }          │                        │
+  │  200 { data, AI summary } │                        │
 ```
 
-**Security checks on every payment:**
-1. Transaction exists and is confirmed on Stellar
-2. Payment destination is the correct escrow wallet
-3. Amount is exactly right (within 0.001 USDC tolerance)
-4. Memo matches this specific query (prevents payment reuse)
-5. Transaction is less than 5 minutes old
-6. Transaction hash has never been used before (replay attack prevention)
+**Verification on every escrow release:**
+1. The on-chain `EscrowRecord` is read from the contract (authoritative state)
+2. The escrow's `dataset_id` matches the dataset being unlocked
+3. The escrow's `seller` matches the dataset's seller wallet
+4. The locked `amount` equals the dataset price (within 0.001 tolerance)
+5. The escrow is not already `released` or `refunded`
+
+> **Demo / custodial fallback.** When `ESCROW_CONTRACT_ID` is **unset**, Hazina
+> falls back to a labelled custodial path: the buyer pays a Hazina-controlled
+> wallet and the backend forwards the seller's 95% from a hot wallet. The 402
+> response advertises `mode: "custodial-demo"` so this is never mistaken for the
+> non-custodial flow. Set `ESCROW_CONTRACT_ID` for real escrow.
 
 ### Step 4 — Data + AI Delivered
 
@@ -204,17 +213,17 @@ Buyer receives:
   ✓ Full raw dataset (JSON, downloadable)
   ✓ Claude AI executive summary (3 key insights)
   ✓ Answer to their custom question
-  ✓ On-chain proof of seller payment (sellerTxHash)
+  ✓ On-chain proof: the escrow release tx (funds split by the contract)
 ```
 
-### Step 5 — Seller Paid Automatically
+### Step 5 — Contract Splits the Funds On-Chain
 
 ```
-Every verified purchase:
-  → 95% → seller's Stellar wallet (on-chain, immediate)
-  → 5%  → platform escrow wallet
+On release(escrow_id) the CONTRACT (not the backend) transfers:
+  → 95% → seller's Stellar wallet
+  → 5%  → platform treasury
+  → Emits a `released` event, auditable on Stellar Expert
   → Stats updated (queriesServed, totalEarned)
-  → Transaction logged for /dashboard
 ```
 
 ---
@@ -532,12 +541,15 @@ HTTP's `402 Payment Required` status code — defined in 1991, never widely used
 ### Seller Payment Flow (Real Mode)
 
 ```
-1. Buyer sends 0.05 USDC to escrow wallet on Stellar (via Freighter)
-2. Buyer submits txHash to POST /api/verify/:id
-3. Backend checks Horizon API: amount ✓ destination ✓ memo ✓ expiry ✓
-4. Claude generates AI summary of the dataset
-5. Backend sends 0.0475 USDC → seller wallet (on-chain, new tx)
-6. Response includes: data + AI summary + sellerTxHash
+1. Buyer connects Freighter and requests an unsigned lock() tx from
+   POST /payments/escrow/lock/build
+2. Buyer signs it — 0.05 USDC is locked INTO the escrow contract (not a Hazina wallet)
+3. Buyer submits the signed tx via POST /payments/escrow/lock/submit → gets escrowId
+4. Buyer calls POST /api/verify/:id/escrow { escrowId }
+5. Backend reads get_escrow() (amount ✓ seller ✓ dataset ✓), Claude generates the summary
+6. Backend calls release(escrowId) — the CONTRACT sends 95% to seller, 5% to treasury
+7. Response includes: data + AI summary
+   (When ESCROW_CONTRACT_ID is unset, the legacy custodial demo path is used instead.)
 ```
 
 ### Agent Payment Flow (Real Mode)
@@ -546,9 +558,11 @@ HTTP's `402 Payment Required` status code — defined in 1991, never widely used
 1. User sends 1 USDC to agent escrow wallet
 2. POST /api/agent/research { query, txHash }
 3. Agent verifies incoming payment on Stellar
-4. Agent signs 4 outgoing Stellar transactions (one per seller)
+4. For each seller, the agent locks funds in the escrow contract, then the
+   backend releases — the contract performs the 95/5 split on-chain
+   (falls back to a direct hot-wallet payment when no contract is configured)
 5. Claude synthesises all 4 datasets into research report
-6. Response: report + payment trail (4 txHashes) + agent profit
+6. Response: report + payment trail + agent profit
 ```
 
 ---

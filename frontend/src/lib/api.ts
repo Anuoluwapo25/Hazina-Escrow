@@ -94,6 +94,23 @@ export interface AgentSellerPayment {
   onChain: boolean;
 }
 
+/** Live on-chain escrow state, as returned by GET /payments/escrow/:id (#548). */
+export interface EscrowState {
+  escrowId: number;
+  datasetId: string;
+  buyer: string;
+  seller: string;
+  amountStroops: string;
+  amount: number;
+  token: string;
+  deadline: number;
+  buyerConfirmed: boolean;
+  platformFeeBps: number;
+  released: boolean;
+  refunded: boolean;
+  disputed: boolean;
+}
+
 export interface AgentReport {
   topOpportunity: {
     protocol: string;
@@ -409,6 +426,61 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ buyerQuestion }),
     }).then(r => parseApiResponse(QueryResultSchema, r)),
+
+  // ── Non-custodial escrow (#547/#548) ─────────────────────────────────────
+
+  /** Ask the backend to assemble an unsigned lock() transaction for the buyer. */
+  buildEscrowLock: (buyer: string, datasetId: string, amount?: number) =>
+    request<{ success: boolean; xdr: string; contractId: string; amount: number }>(
+      `${getApiBaseUrl()}/payments/escrow/lock/build`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, datasetId, amount }),
+      },
+    ),
+
+  /** Relay a buyer-signed lock() transaction and receive the on-chain escrow id. */
+  submitEscrowLock: (signedXdr: string) =>
+    request<{ success: boolean; txHash: string; escrowId: number }>(
+      `${getApiBaseUrl()}/payments/escrow/lock/submit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ signedXdr }),
+      },
+    ),
+
+  /** Read live on-chain escrow state (#548). */
+  getEscrow: (escrowId: number) =>
+    request<{ success: boolean; escrow: EscrowState }>(
+      `${getApiBaseUrl()}/payments/escrow/${escrowId}`,
+    ).then(r => r.escrow),
+
+  /** Verify a locked escrow, deliver the dataset, and trigger on-chain release. */
+  verifyEscrowPayment: (id: string, escrowId: number, buyerQuestion?: string) =>
+    request<unknown>(`${getApiBaseUrl()}/verify/${id}/escrow`, {
+      method: 'POST',
+      body: JSON.stringify({ escrowId, buyerQuestion }),
+    }).then(r => parseApiResponse(QueryResultSchema, r)),
+
+  /** Build an unsigned confirm_delivery() transaction for the buyer to sign. */
+  buildConfirmDelivery: (buyer: string, escrowId: number) =>
+    request<{ success: boolean; xdr: string }>(
+      `${getApiBaseUrl()}/payments/escrow/confirm/build`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, escrowId }),
+      },
+    ),
+
+  /** Build an unsigned raise_dispute() transaction for the buyer to sign. */
+  buildRaiseDispute: (buyer: string, escrowId: number, evidenceHash?: string) =>
+    request<{ success: boolean; xdr: string }>(
+      `${getApiBaseUrl()}/payments/escrow/dispute/build`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, escrowId, evidenceHash }),
+      },
+    ),
 
   submitRating: (id: string, txHash: string, score: number, comment?: string) =>
     request<{ success: boolean; ratings: unknown }>(`${getApiBaseUrl()}/datasets/${id}/ratings`, {
