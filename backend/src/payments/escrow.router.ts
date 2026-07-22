@@ -46,7 +46,12 @@ const lockBuildSchema = z.object({
   buyer: STELLAR_ADDRESS,
   datasetId: z.string().min(1),
   amount: z.number().positive().optional(),
-  expirySeconds: z.number().int().positive().max(30 * 24 * 60 * 60).optional(),
+  expirySeconds: z
+    .number()
+    .int()
+    .positive()
+    .max(30 * 24 * 60 * 60)
+    .optional(),
 });
 
 const lockSubmitSchema = z.object({
@@ -91,9 +96,7 @@ escrowRouter.post(
   validateBody(lockBuildSchema),
   async (req: Request, res: Response) => {
     if (!ensureContract(res)) return;
-    const { buyer, datasetId, amount, expirySeconds } = req.body as z.infer<
-      typeof lockBuildSchema
-    >;
+    const { buyer, datasetId, amount, expirySeconds } = req.body as z.infer<typeof lockBuildSchema>;
 
     const dataset = await getDataset(datasetId);
     if (!dataset) return res.status(404).json({ error: 'Dataset not found' });

@@ -464,23 +464,17 @@ export const api = {
 
   /** Build an unsigned confirm_delivery() transaction for the buyer to sign. */
   buildConfirmDelivery: (buyer: string, escrowId: number) =>
-    request<{ success: boolean; xdr: string }>(
-      `${getApiBaseUrl()}/payments/escrow/confirm/build`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ buyer, escrowId }),
-      },
-    ),
+    request<{ success: boolean; xdr: string }>(`${getApiBaseUrl()}/payments/escrow/confirm/build`, {
+      method: 'POST',
+      body: JSON.stringify({ buyer, escrowId }),
+    }),
 
   /** Build an unsigned raise_dispute() transaction for the buyer to sign. */
   buildRaiseDispute: (buyer: string, escrowId: number, evidenceHash?: string) =>
-    request<{ success: boolean; xdr: string }>(
-      `${getApiBaseUrl()}/payments/escrow/dispute/build`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ buyer, escrowId, evidenceHash }),
-      },
-    ),
+    request<{ success: boolean; xdr: string }>(`${getApiBaseUrl()}/payments/escrow/dispute/build`, {
+      method: 'POST',
+      body: JSON.stringify({ buyer, escrowId, evidenceHash }),
+    }),
 
   submitRating: (id: string, txHash: string, score: number, comment?: string) =>
     request<{ success: boolean; ratings: unknown }>(`${getApiBaseUrl()}/datasets/${id}/ratings`, {

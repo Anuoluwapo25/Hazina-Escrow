@@ -16,7 +16,12 @@ const STATUS_META: Record<
   ReturnType<typeof escrowStatusLabel>,
   { label: string; color: string; bg: string; Icon: typeof Lock }
 > = {
-  locked: { label: 'Funds locked on-chain', color: 'text-sky-400', bg: 'bg-sky-400/10', Icon: Lock },
+  locked: {
+    label: 'Funds locked on-chain',
+    color: 'text-sky-400',
+    bg: 'bg-sky-400/10',
+    Icon: Lock,
+  },
   confirmed: {
     label: 'Delivery confirmed',
     color: 'text-emerald-400',
@@ -92,7 +97,9 @@ export function EscrowStatus({ escrowId, pollMs = 5000, className }: EscrowStatu
   if (error && !escrow) {
     return (
       <div className={clsx('rounded-lg border border-red-400/20 bg-red-400/10 p-3', className)}>
-        <p className="text-xs font-body text-red-400">Escrow #{escrowId}: {error}</p>
+        <p className="text-xs font-body text-red-400">
+          Escrow #{escrowId}: {error}
+        </p>
       </div>
     );
   }

@@ -21,9 +21,8 @@ vi.mock('../agent/agent.wallet', () => ({
 // Use the real Stellar SDK for encoding helpers, but stub the RPC server so no
 // network call is made during simulation-backed reads/builds.
 vi.mock('@stellar/stellar-sdk', async () => {
-  const actual = await vi.importActual<typeof import('@stellar/stellar-sdk')>(
-    '@stellar/stellar-sdk',
-  );
+  const actual =
+    await vi.importActual<typeof import('@stellar/stellar-sdk')>('@stellar/stellar-sdk');
   class MockRpcServer {
     simulateTransaction = mockSimulate;
     getAccount = mockGetAccount;
@@ -214,7 +213,13 @@ describe('escrow.client', () => {
     it('throws when no SAC address is configured for the token', async () => {
       mockGetAccount.mockResolvedValue(new StellarSdk.Account(BUYER, '0'));
       await expect(
-        buildLockTx({ buyer: BUYER, seller: SELLER, amount: 1, datasetId: 'ds', tokenCode: 'EURC' }),
+        buildLockTx({
+          buyer: BUYER,
+          seller: SELLER,
+          amount: 1,
+          datasetId: 'ds',
+          tokenCode: 'EURC',
+        }),
       ).rejects.toThrow('EURC_SAC_ADDRESS');
     });
   });

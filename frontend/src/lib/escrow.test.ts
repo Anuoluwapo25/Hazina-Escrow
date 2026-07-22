@@ -88,9 +88,9 @@ describe('escrow (buyer-side)', () => {
       expect(escrowStatusLabel({ ...base, refunded: true })).toBe('refunded');
       expect(escrowStatusLabel({ ...base, released: true })).toBe('released');
       // released wins over everything
-      expect(escrowStatusLabel({ released: true, refunded: true, disputed: true, buyerConfirmed: true })).toBe(
-        'released',
-      );
+      expect(
+        escrowStatusLabel({ released: true, refunded: true, disputed: true, buyerConfirmed: true }),
+      ).toBe('released');
     });
   });
 });

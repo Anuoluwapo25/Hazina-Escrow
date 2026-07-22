@@ -253,9 +253,7 @@ export async function resolveDispute(escrowId: number, favourBuyer: boolean): Pr
     throw new Error('AGENT_WALLET_SECRET not configured — cannot resolve dispute as arbitrator');
   }
   const contractId = getEscrowContractId();
-  logger.info(
-    `[Escrow] Resolving dispute for escrow #${escrowId} (favourBuyer=${favourBuyer})`,
-  );
+  logger.info(`[Escrow] Resolving dispute for escrow #${escrowId} (favourBuyer=${favourBuyer})`);
   return callContract(contractId, 'resolve_dispute', [
     new StellarSdk.Address(arbitrator).toScVal(),
     StellarSdk.nativeToScVal(escrowId, { type: 'u64' }),
@@ -350,9 +348,7 @@ export async function getEscrow(escrowId: number): Promise<EscrowState> {
     fee: StellarSdk.BASE_FEE,
     networkPassphrase: getNetworkPassphrase(),
   })
-    .addOperation(
-      contract.call('get_escrow', StellarSdk.nativeToScVal(escrowId, { type: 'u64' })),
-    )
+    .addOperation(contract.call('get_escrow', StellarSdk.nativeToScVal(escrowId, { type: 'u64' })))
     .setTimeout(30)
     .build();
 
