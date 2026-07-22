@@ -61,6 +61,21 @@ describe('sendSellerNotificationEmail', () => {
     );
   });
 
+  it('labels the earnings with the dataset payment token', async () => {
+    process.env.RESEND_API_KEY = 'test-key';
+    sendMock.mockResolvedValue({ data: { id: 'email-2' }, error: null });
+
+    await sendSellerNotificationEmail({ ...notification, paymentToken: 'EURC' });
+
+    expect(sendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: 'Your dataset "Whale "Signals"" was queried — 1 EURC earned',
+        text: expect.stringContaining('You earned 0.95 EURC'),
+        html: expect.stringContaining('0.95 EURC'),
+      }),
+    );
+  });
+
   it('throws when Resend returns an API error', async () => {
     process.env.RESEND_API_KEY = 'test-key';
     sendMock.mockResolvedValue({ data: null, error: { message: 'delivery rejected' } });

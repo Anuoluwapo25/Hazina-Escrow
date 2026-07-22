@@ -1,7 +1,10 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import {
+  addPayoutFailure,
   addTransaction,
+  getPayoutFailureByBuyerTxHash,
   readStore,
+  updatePayoutFailure,
   txHashUsed,
   updateDataset,
   writeStore,
@@ -95,6 +98,39 @@ describe('storage', () => {
     const txs = (await readStore()).transactions;
     expect(txs).toHaveLength(25);
     expect(new Set(txs.map(tx => tx.txHash)).size).toBe(25);
+  });
+
+  it('round-trips the payout failure payment token, defaulting to USDC', async () => {
+    const nowIso = new Date().toISOString();
+    const base = {
+      datasetId: FIXTURE_DATASET.id,
+      sellerWallet: FIXTURE_DATASET.sellerWallet,
+      intendedAmount: 0.0475,
+      status: 'pending_retry' as const,
+      retryCount: 0,
+      nextRetryAt: nowIso,
+      lastError: 'no trustline',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    await addPayoutFailure({
+      ...base,
+      id: 'payout-failure-eurc',
+      buyerTxHash: 'buyer-hash-eurc',
+      paymentToken: 'EURC',
+    });
+    await addPayoutFailure({
+      ...base,
+      id: 'payout-failure-legacy',
+      buyerTxHash: 'buyer-hash-legacy',
+    });
+
+    expect((await getPayoutFailureByBuyerTxHash('buyer-hash-eurc'))?.paymentToken).toBe('EURC');
+    expect((await getPayoutFailureByBuyerTxHash('buyer-hash-legacy'))?.paymentToken).toBe('USDC');
+
+    await updatePayoutFailure('payout-failure-eurc', { retryCount: 1 });
+    expect((await getPayoutFailureByBuyerTxHash('buyer-hash-eurc'))?.paymentToken).toBe('EURC');
   });
 
   it('keeps reads and writes consistent under concurrent load', async () => {
