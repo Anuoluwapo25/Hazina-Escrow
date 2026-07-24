@@ -212,12 +212,23 @@ describe('WebSocket Server', () => {
 
   it('should track connected clients', () =>
     new Promise<void>(resolve => {
+      // Connect sequentially. Opening both clients up front races: client2 can
+      // register server-side before client1's 'open' fires, making the first
+      // count already 2 so that count2 > count is false. It can also emit
+      // 'open' before the handler below is attached, which would hang the test.
       const client1 = new WebSocket(wsUrl);
-      const client2 = new WebSocket(wsUrl);
+      client1.on('error', () => {
+        /* ignore */
+      });
 
       client1.on('open', () => {
         const count = wsServer.getConnectedClients();
         expect(count).toBeGreaterThan(0);
+
+        const client2 = new WebSocket(wsUrl);
+        client2.on('error', () => {
+          /* ignore */
+        });
 
         client2.on('open', () => {
           const count2 = wsServer.getConnectedClients();
@@ -226,13 +237,6 @@ describe('WebSocket Server', () => {
           client2.close();
           resolve();
         });
-      });
-
-      client1.on('error', () => {
-        /* ignore */
-      });
-      client2.on('error', () => {
-        /* ignore */
       });
     }));
 
