@@ -1,11 +1,11 @@
 import { useState } from 'react';
 
 import { Link } from 'react-router-dom';
-import { ShoppingCart, TrendingUp, User, Zap, Clock, ImageOff, Star } from 'lucide-react';
+import { ShoppingCart, TrendingUp, User, Zap, Clock, ImageOff, Star, Radio } from 'lucide-react';
 
 import clsx from 'clsx';
 import { DatasetMeta } from '../../lib/api';
-import { truncateAddress, formatUSDC, getTypeMeta } from '../../lib/utils';
+import { truncateAddress, formatUSDC, getTypeMeta, formatTimeAgo } from '../../lib/utils';
 
 import { useI18n } from '../../i18n';
 
@@ -78,6 +78,16 @@ export default function DatasetCard({ dataset, onBuy }: Props) {
             {typeLabel}
           </span>
         </div>
+
+        {/* Live feed badge */}
+        {dataset.live && (
+          <div className="absolute top-4 right-4 z-10">
+            <span className="type-badge backdrop-blur-md border border-emerald-400/30 bg-emerald-400/10 text-emerald-400 shadow-lg">
+              <Radio className="w-3 h-3 animate-pulse" />
+              {t('marketplace.live.badge')}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="p-6">
@@ -133,12 +143,26 @@ export default function DatasetCard({ dataset, onBuy }: Props) {
           )}
           <div className="w-px h-3 bg-border" />
           <div className="flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-muted" />
+            <Clock
+              className={clsx('w-3.5 h-3.5', dataset.live ? 'text-emerald-400' : 'text-muted')}
+            />
             <span className="text-xs font-body text-foreground-muted">
-              {new Date(dataset.createdAt).toLocaleDateString(locale, { dateStyle: 'medium' })}
+              {dataset.live && dataset.lastRefreshedAt
+                ? t('marketplace.live.updated', {
+                    time: formatTimeAgo(dataset.lastRefreshedAt, locale),
+                  })
+                : new Date(dataset.createdAt).toLocaleDateString(locale, { dateStyle: 'medium' })}
             </span>
           </div>
         </div>
+
+        {dataset.provider && (
+          <div className="-mt-3 mb-4">
+            <span className="text-[10px] uppercase tracking-wide font-body text-muted-2">
+              {t('marketplace.live.source', { provider: dataset.provider })}
+            </span>
+          </div>
+        )}
 
         {/* Earnings bar */}
         <div className="mb-5">

@@ -232,6 +232,27 @@ export const en = {
     resultsCount: '{count} datasets found',
     noResultsTitle: 'No datasets found',
     noResultsBody: 'Try adjusting your filters',
+    live: {
+      badge: 'LIVE',
+      updated: 'Updated {time}',
+      source: 'Source: {provider}',
+      liveOnly: 'Live feeds only',
+      preview: 'Live preview',
+      previewLoading: 'Loading live sample...',
+      previewError: 'Live preview unavailable',
+      noPreview: 'No live sample available for this dataset.',
+    },
+    categories: {
+      all: 'All',
+      label: 'Category',
+      'defi-yields': 'DeFi Yields',
+      'market-sentiment': 'Market Sentiment',
+      'on-chain-flows': 'On-chain Flows',
+      'risk-intelligence': 'Risk Intelligence',
+      'trading-signals': 'Trading Signals',
+      'nft-analytics': 'NFT Analytics',
+      other: 'Other',
+    },
   },
   sell: {
     messages: {
