@@ -165,6 +165,7 @@ function withoutRawData(dataset: Dataset) {
   const { data: _data, ...meta } = dataset;
   return {
     ...meta,
+    active: meta.active !== false,
     ratings: meta.ratings ?? { score: 0, count: 0 },
     priceHistory: meta.priceHistory ?? [
       { price: dataset.pricePerQuery, changedAt: dataset.createdAt },
@@ -333,7 +334,9 @@ datasetsRouter.get('/', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Minimum price cannot exceed maximum price' });
   }
 
-  let datasets = (await getAllDatasets()).map(withoutRawData);
+  let datasets = (await getAllDatasets())
+    .filter(d => d.active !== false)
+    .map(withoutRawData);
 
   // Filter
   if (search) {
@@ -748,5 +751,135 @@ datasetsRouter.post(
 
     const { data: _d, notificationEmail: _notificationEmail, ...meta } = dataset;
     return res.status(201).json({ success: true, dataset: meta });
+  },
+);
+
+const updateDatasetSchema = z.object({
+  name: makeSanitizedTextField('name', 200).optional(),
+  description: makeSanitizedTextField('description', 2000).optional(),
+  pricePerQuery: z.coerce.number().finite().positive().optional(),
+  paymentToken: z.enum(['USDC', 'EURC', 'XLM']).optional(),
+  notificationEmail: z.preprocess(
+    value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    z.string().trim().email().max(320).optional(),
+  ),
+});
+
+/**
+ * @openapi
+ * /api/datasets/{id}:
+ *   patch:
+ *     summary: Update a dataset (owner only)
+ *     description: Partially update seller-controlled fields. Only the owning seller may edit.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               pricePerQuery:
+ *                 type: number
+ *               paymentToken:
+ *                 type: string
+ *                 enum: [USDC, EURC, XLM]
+ *               notificationEmail:
+ *                 type: string
+ *                 format: email
+ *     responses:
+ *       200:
+ *         description: Dataset updated
+ *       400:
+ *         description: Validation error
+ *       403:
+ *         description: Not the dataset owner
+ *       404:
+ *         description: Dataset not found
+ */
+datasetsRouter.patch(
+  '/:id',
+  requireSellerMutationAuth,
+  validateBody(updateDatasetSchema),
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'Missing dataset id' });
+
+    const dataset = await getDataset(id);
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+
+    if (dataset.sellerWallet !== req.sellerAuth?.sellerWallet) {
+      return res.status(403).json({ error: 'Dataset does not belong to authenticated seller' });
+    }
+
+    const body = req.body as z.infer<typeof updateDatasetSchema>;
+    const updates: Partial<Dataset> = {};
+    if (body.name !== undefined) updates.name = body.name;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.notificationEmail !== undefined) updates.notificationEmail = body.notificationEmail;
+    if (body.paymentToken !== undefined) updates.paymentToken = body.paymentToken;
+
+    if (body.pricePerQuery !== undefined && body.pricePerQuery !== dataset.pricePerQuery) {
+      updates.pricePerQuery = body.pricePerQuery;
+      const history = dataset.priceHistory ?? [
+        { price: dataset.pricePerQuery, changedAt: dataset.createdAt },
+      ];
+      history.push({ price: body.pricePerQuery, changedAt: new Date().toISOString() });
+      updates.priceHistory = history;
+    }
+
+    const updated = await updateDataset(id, updates);
+    if (!updated) return res.status(404).json({ error: 'Dataset not found' });
+
+    const { data: _d, ...meta } = updated;
+    return res.json({ success: true, dataset: meta });
+  },
+);
+
+/**
+ * @openapi
+ * /api/datasets/{id}:
+ *   delete:
+ *     summary: Soft-delete a dataset (owner only)
+ *     description: Sets the dataset active flag to false, hiding it from the marketplace listing.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Dataset deactivated
+ *       403:
+ *         description: Not the dataset owner
+ *       404:
+ *         description: Dataset not found
+ */
+datasetsRouter.delete(
+  '/:id',
+  requireSellerMutationAuth,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'Missing dataset id' });
+
+    const dataset = await getDataset(id);
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+
+    if (dataset.sellerWallet !== req.sellerAuth?.sellerWallet) {
+      return res.status(403).json({ error: 'Dataset does not belong to authenticated seller' });
+    }
+
+    await updateDataset(id, { active: false });
+    return res.json({ success: true, message: 'Dataset deactivated' });
   },
 );

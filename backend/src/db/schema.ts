@@ -26,6 +26,7 @@ export const datasets = pgTable(
     createdAt: text('created_at').notNull(),
     ratings: text('ratings'),
     priceHistory: text('price_history'),
+    active: boolean('active').notNull().default(true),
   },
   table => ({
     typeIdx: index('datasets_type_idx').on(table.type),
@@ -106,6 +107,7 @@ export const datasetsSqlite = sqliteTable(
     createdAt: sqliteText('created_at').notNull(),
     ratings: sqliteText('ratings'),
     priceHistory: sqliteText('price_history'),
+    active: sqliteInteger('active').notNull().default(1),
   },
   table => ({
     typeIdx: sqliteIndex('datasets_type_idx').on(table.type),

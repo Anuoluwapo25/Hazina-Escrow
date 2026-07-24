@@ -38,6 +38,7 @@ export interface Dataset {
   createdAt: string;
   ratings?: DatasetRating;
   priceHistory?: DatasetPricePoint[];
+  active?: boolean;
 }
 export interface Transaction {
   id: string;
@@ -126,6 +127,7 @@ function rowToDataset(row: any): Dataset {
     createdAt: row.createdAt,
     ratings: row.ratings ? JSON.parse(row.ratings) : undefined,
     priceHistory: row.priceHistory ? JSON.parse(row.priceHistory) : undefined,
+    active: row.active === null || row.active === undefined ? undefined : Boolean(row.active),
   };
 }
 
@@ -145,6 +147,7 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     createdAt: dataset.createdAt,
     ratings: dataset.ratings !== undefined ? JSON.stringify(dataset.ratings) : null,
     priceHistory: dataset.priceHistory !== undefined ? JSON.stringify(dataset.priceHistory) : null,
+    active: dataset.active === undefined ? 1 : dataset.active ? 1 : 0,
   };
 }
 
