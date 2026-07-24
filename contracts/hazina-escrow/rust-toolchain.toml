@@ -1,0 +1,10 @@
+# Pin the Rust toolchain used to build and test the escrow contract.
+#
+# CI previously resolved the toolchain via `dtolnay/rust-toolchain@stable`,
+# i.e. always-newest Rust, while Cargo.lock pinned an exact dependency set.
+# That combination broke the build with no code change on our side: a newer
+# rustc rejected `ethnum` 1.5.2 with E0512 (zero-sized transmute), failing
+# every contract PR. Pinning here keeps builds reproducible for CI and for
+# contributors locally. Bump this deliberately, together with Cargo.lock.
+[toolchain]
+channel = "1.95.0"
