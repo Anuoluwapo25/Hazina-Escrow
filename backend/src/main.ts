@@ -38,6 +38,7 @@ import {
   createPaymentsRateLimitMiddleware,
 } from './common/rateLimit';
 import { initializeWebSocketServer } from './websocket/ws-server';
+import { startDataRefreshWorker, stopDataRefreshWorker } from './providers/refresh.scheduler';
 import { HORIZON_URL } from './lib/stellar.config';
 import { createCorsOptions } from './common/cors';
 
@@ -333,6 +334,7 @@ app.use(
 
 startDeliveryRetryWorker();
 startSellerNotificationRetryWorker();
+startDataRefreshWorker();
 
 // Create HTTP server and attach Express app
 const server = http.createServer(app);
@@ -370,6 +372,7 @@ server.listen(PORT, () => {
 process.on('SIGTERM', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
+  stopDataRefreshWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -380,6 +383,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
+  stopDataRefreshWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');

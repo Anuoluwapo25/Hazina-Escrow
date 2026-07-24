@@ -1,74 +1,136 @@
 {
   "datasets": [
     {
-      "id": "seller-ds-1",
-      "name": "Seller Dataset One",
-      "description": "First seller dataset",
+      "id": "ds-defillama-yields",
+      "name": "DeFi Stablecoin Yields",
+      "description": "Live stablecoin lending & LP yields across major protocols, ranked by TVL. Refreshed continuously from DeFiLlama.",
       "type": "yield-data",
-      "pricePerQuery": 2,
-      "sellerWallet": "GSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+      "category": "defi-yields",
+      "pricePerQuery": 0.75,
+      "sellerWallet": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "provider": "defillama",
+      "live": true,
+      "tags": ["yield", "stablecoin", "defi", "apy"],
       "data": {},
-      "queriesServed": 2,
-      "totalEarned": 3.8,
-      "createdAt": "2026-05-01T00:00:00.000Z"
+      "queriesServed": 0,
+      "totalEarned": 0,
+      "createdAt": "2026-01-05T00:00:00.000Z"
     },
     {
-      "id": "seller-ds-2",
-      "name": "Seller Dataset Two",
-      "description": "Second seller dataset",
+      "id": "ds-market-sentiment",
+      "name": "Crypto Market Sentiment",
+      "description": "Real-time market sentiment derived from price action and 24h volume across XLM, BTC and ETH. Powered by CoinGecko.",
       "type": "sentiment",
-      "pricePerQuery": 3,
-      "sellerWallet": "GSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+      "category": "market-sentiment",
+      "pricePerQuery": 0.5,
+      "sellerWallet": "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "provider": "coingecko",
+      "live": true,
+      "tags": ["sentiment", "market", "price", "volume"],
       "data": {},
-      "queriesServed": 1,
-      "totalEarned": 2.85,
-      "createdAt": "2026-05-02T00:00:00.000Z"
+      "queriesServed": 0,
+      "totalEarned": 0,
+      "createdAt": "2026-01-06T00:00:00.000Z"
     },
     {
-      "id": "other-ds",
-      "name": "Other Seller Dataset",
-      "description": "Must not leak into analytics",
-      "type": "wallets",
-      "pricePerQuery": 9,
-      "sellerWallet": "GOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+      "id": "ds-stellar-whales",
+      "name": "Stellar Whale Movements",
+      "description": "Live large-value payment flows on the Stellar network. Tracks whale-sized transfers straight from Horizon.",
+      "type": "whale-wallets",
+      "category": "on-chain-flows",
+      "pricePerQuery": 1.25,
+      "sellerWallet": "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "provider": "stellar-horizon",
+      "live": true,
+      "tags": ["whales", "stellar", "on-chain", "flows"],
       "data": {},
-      "queriesServed": 1,
-      "totalEarned": 8.55,
-      "createdAt": "2026-05-03T00:00:00.000Z"
+      "queriesServed": 0,
+      "totalEarned": 0,
+      "createdAt": "2026-01-07T00:00:00.000Z"
+    },
+    {
+      "id": "ds-protocol-risk",
+      "name": "Protocol Risk Scores",
+      "description": "Transparent, TVL- and volatility-weighted risk scores for leading DeFi protocols. Derived from live DeFiLlama data.",
+      "type": "risk-scores",
+      "category": "risk-intelligence",
+      "pricePerQuery": 1.0,
+      "sellerWallet": "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "provider": "defillama-risk",
+      "live": true,
+      "tags": ["risk", "protocol", "tvl", "defi"],
+      "data": {},
+      "queriesServed": 0,
+      "totalEarned": 0,
+      "createdAt": "2026-01-08T00:00:00.000Z"
+    },
+    {
+      "id": "ds-momentum-signals",
+      "name": "Momentum Trading Signals",
+      "description": "Rules-based momentum and mean-reversion signals for the top Stellar ecosystem assets, updated daily.",
+      "type": "trading-signals",
+      "category": "trading-signals",
+      "pricePerQuery": 1.5,
+      "sellerWallet": "GEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+      "live": false,
+      "tags": ["signals", "momentum", "trading"],
+      "data": {
+        "source": "Hazina Signals",
+        "generatedAt": "2026-01-09T00:00:00.000Z",
+        "signals": [
+          { "asset": "XLM", "signal": "buy", "strength": 0.72, "horizon": "swing", "rationale": "Reclaimed 50d MA on rising volume" },
+          { "asset": "AQUA", "signal": "hold", "strength": 0.41, "horizon": "swing", "rationale": "Consolidating in range, low conviction" },
+          { "asset": "yXLM", "signal": "buy", "strength": 0.63, "horizon": "position", "rationale": "Positive funding, TVL inflows" }
+        ]
+      },
+      "queriesServed": 128,
+      "totalEarned": 182.4,
+      "createdAt": "2026-01-09T00:00:00.000Z"
+    },
+    {
+      "id": "ds-nft-floor",
+      "name": "Stellar NFT Floor Index",
+      "description": "Daily floor prices and 7-day volume for leading Stellar NFT collections.",
+      "type": "nft-data",
+      "category": "nft-analytics",
+      "pricePerQuery": 0.6,
+      "sellerWallet": "GFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+      "live": false,
+      "tags": ["nft", "floor", "collections"],
+      "data": {
+        "source": "Hazina NFT Index",
+        "generatedAt": "2026-01-10T00:00:00.000Z",
+        "collections": [
+          { "collection": "Litemint Genesis", "floorXlm": 1450, "volume7dXlm": 82000, "change7d": 4.2 },
+          { "collection": "StellarQuest Badges", "floorXlm": 320, "volume7dXlm": 15400, "change7d": -1.8 },
+          { "collection": "AquaPunks", "floorXlm": 210, "volume7dXlm": 9800, "change7d": 6.1 }
+        ]
+      },
+      "queriesServed": 64,
+      "totalEarned": 36.48,
+      "createdAt": "2026-01-10T00:00:00.000Z"
     }
   ],
   "transactions": [
     {
-      "id": "tx-1",
-      "datasetId": "seller-ds-1",
-      "txHash": "hash-1",
-      "buyerWallet": "GBUYER1111111111111111111111111111111111111111111111111",
-      "amount": 2,
-      "timestamp": "2026-06-15T10:00:00.000Z"
+      "id": "tx-seed-1",
+      "datasetId": "ds-momentum-signals",
+      "txHash": "seed-hash-momentum-1",
+      "amount": 1.5,
+      "sellerPaid": true,
+      "buyerQuery": "What are the strongest momentum signals right now?",
+      "aiSummary": "XLM shows the strongest buy signal (0.72) after reclaiming its 50-day moving average on rising volume.",
+      "timestamp": "2026-01-11T10:00:00.000Z"
     },
     {
-      "id": "tx-2",
-      "datasetId": "seller-ds-1",
-      "txHash": "hash-2",
-      "buyerWallet": "GBUYER1111111111111111111111111111111111111111111111111",
-      "amount": 2,
-      "timestamp": "2026-06-15T12:00:00.000Z"
-    },
-    {
-      "id": "tx-3",
-      "datasetId": "seller-ds-2",
-      "txHash": "hash-3",
-      "buyerWallet": "GBUYER2222222222222222222222222222222222222222222222222",
-      "amount": 3,
-      "timestamp": "2026-06-16T09:00:00.000Z"
-    },
-    {
-      "id": "tx-other",
-      "datasetId": "other-ds",
-      "txHash": "hash-other",
-      "buyerWallet": "GOTHERBUYER",
-      "amount": 9,
-      "timestamp": "2026-06-15T09:00:00.000Z"
+      "id": "tx-seed-2",
+      "datasetId": "ds-nft-floor",
+      "txHash": "seed-hash-nft-1",
+      "amount": 0.6,
+      "sellerPaid": true,
+      "buyerQuery": "Which NFT collection is gaining momentum?",
+      "aiSummary": "AquaPunks leads 7-day gains at +6.1% with growing volume, though floor remains modest at 210 XLM.",
+      "timestamp": "2026-01-12T14:00:00.000Z"
     }
   ],
   "webhooks": [],

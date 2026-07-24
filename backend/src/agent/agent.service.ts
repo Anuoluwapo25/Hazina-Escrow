@@ -187,9 +187,15 @@ async function _executeResearch(
 
   const allDatasets = await getAllDatasets();
 
-  // 2. Find which seller types have matching datasets
+  // 2. For each seller type, pick the best matching dataset: prefer live
+  //    (provider-backed) feeds, then cheapest, then most battle-tested.
   const availableSellers = SELLER_TYPES.map(seller => {
-    const dataset = allDatasets.find(d => d.type === seller.type);
+    const candidates = allDatasets.filter(d => d.type === seller.type);
+    const dataset = candidates.sort((a, b) => {
+      if (Boolean(b.live) !== Boolean(a.live)) return b.live ? 1 : -1;
+      if (a.pricePerQuery !== b.pricePerQuery) return a.pricePerQuery - b.pricePerQuery;
+      return b.queriesServed - a.queriesServed;
+    })[0];
     return { seller, dataset };
   });
 
