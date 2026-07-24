@@ -2,25 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Module mocks (hoisted before imports) ────────────────────────────────────
 
-vi.mock('../../lib/escrow.client', () => ({
+vi.mock('../lib/escrow.client', () => ({
   getEscrow: vi.fn(),
 }));
 
-vi.mock('../../ai/claude.service', () => ({
+vi.mock('../ai/claude.service', () => ({
   generateDataSummary: vi.fn(() =>
     Promise.resolve({ summary: 'Executive summary', answer: 'Answer' }),
   ),
 }));
 
-vi.mock('../../webhooks/webhook.service', () => ({
+vi.mock('../webhooks/webhook.service', () => ({
   notifySeller: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('../../notifications/email.service', () => ({
+vi.mock('../notifications/email.service', () => ({
   sendSellerNotificationEmail: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('../../common/datadog', () => ({
+vi.mock('../common/datadog', () => ({
   domainMetrics: {
     paymentVerified: vi.fn(),
     datasetQueried: vi.fn(),
@@ -29,12 +29,12 @@ vi.mock('../../common/datadog', () => ({
   },
 }));
 
-vi.mock('../../common/storage', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../common/storage')>();
+vi.mock('../common/storage', async importOriginal => {
+  const actual = await importOriginal<typeof import('../common/storage')>();
   return {
     ...actual,
     getDataset: vi.fn(),
-    getTransactionByHash: vi.fn(() => Promise.resolve(null)),
+    getTransactionByHash: vi.fn(() => Promise.resolve(undefined)),
     addTransaction: vi.fn(() => Promise.resolve()),
     updateDataset: vi.fn(() => Promise.resolve()),
     updateTransactionByHash: vi.fn(() => Promise.resolve(null)),
@@ -43,11 +43,11 @@ vi.mock('../../common/storage', async importOriginal => {
 
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
-import { processEscrowPayment } from '../payments.service';
-import { PaymentError } from '../stellar.service';
-import { getEscrow } from '../../lib/escrow.client';
-import { getDataset, getTransactionByHash } from '../../common/storage';
-import type { Dataset } from '../../common/storage';
+import { processEscrowPayment } from './payments.service';
+import { PaymentError } from './stellar.service';
+import { getEscrow } from '../lib/escrow.client';
+import { getDataset, getTransactionByHash } from '../common/storage';
+import type { Dataset } from '../common/storage';
 
 const SELLER = `G${'A'.repeat(55)}`;
 const BUYER = `G${'B'.repeat(55)}`;
@@ -87,7 +87,7 @@ function escrowState(overrides = {}) {
 describe('processEscrowPayment', () => {
   beforeEach(() => {
     vi.mocked(getDataset).mockResolvedValue(DATASET);
-    vi.mocked(getTransactionByHash).mockResolvedValue(null);
+    vi.mocked(getTransactionByHash).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
