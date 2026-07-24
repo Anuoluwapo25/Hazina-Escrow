@@ -38,6 +38,9 @@ A Web3 data marketplace where **sellers** list valuable on-chain intelligence an
 
 The Hazina escrow contract is written in **Rust**, compiled to **WebAssembly**, and deployed on the **Stellar Soroban** smart contract platform.
 
+> **⚠️ Current status — the on-chain escrow is not yet wired into the live payment flow.**
+> The contract below is deployed and fully tested, but the running application does **not** invoke it today. In the current flow, buyers send USDC to a Hazina-controlled wallet, the backend verifies the payment on Horizon, and the backend forwards the seller's share from a hot wallet — a **custodial** model, not the trustless on-chain escrow described in this section. Making this section true is tracked in the non-custodial escrow epic ([#545](https://github.com/Hazina-Escrow/Hazina-Escrow/issues/545)). The rest of this section describes the **intended** design once that work lands.
+
 ### Deployed Contract
 
 | | |
@@ -51,7 +54,7 @@ The Hazina escrow contract is written in **Rust**, compiled to **WebAssembly**, 
 
 ### What the Contract Does
 
-The contract is a **trustless escrow** — it holds a buyer's USDC payment and only releases it when the Hazina backend confirms data delivery. Neither the buyer nor the seller can cheat:
+The contract is designed as a **trustless escrow** — it is meant to hold a buyer's USDC payment and only release it when the Hazina backend confirms data delivery, so that neither the buyer nor the seller can cheat. This is the target design (see status note above); the diagram below shows the intended flow, not the current one:
 
 ```
 Buyer           Contract              Seller
@@ -91,8 +94,10 @@ Buyer           Contract              Seller
 
 ### Why Soroban?
 
-- **On-chain enforcement** — the payment routing (95/5 split) is code, not promises.
-- **Trustless** — buyers don't have to trust the Hazina server to route their money correctly.
+Once the escrow is wired into the live flow ([#545](https://github.com/Hazina-Escrow/Hazina-Escrow/issues/545)), it gives:
+
+- **On-chain enforcement** — the payment routing (95/5 split) becomes code, not promises.
+- **Trustless** — buyers won't have to trust the Hazina server to route their money correctly.
 - **Auditable** — every `lock`, `release`, and `refund` emits an on-chain event visible to anyone.
 - **Native USDC** — operates directly on Stellar's USDC, same asset as the x402 payments.
 

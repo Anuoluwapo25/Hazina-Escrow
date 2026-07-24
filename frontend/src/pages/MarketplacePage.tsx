@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Check,
   RotateCcw,
+  Radio,
 } from 'lucide-react';
 import { api, DatasetMeta, PaginatedDatasets } from '../lib/api';
 import { DATA_TYPE_META } from '../lib/utils';
@@ -38,6 +39,8 @@ export default function MarketplacePage() {
   const [maxPrice, setMaxPrice] = useState(searchParams.get('maxPrice') || '');
   const [minQueries, setMinQueries] = useState(searchParams.get('minQueries') || '');
   const [sort, setSort] = useState(searchParams.get('sort') || 'popular');
+  const [category, setCategory] = useState(searchParams.get('category') || '');
+  const [liveOnly, setLiveOnly] = useState(searchParams.get('live') === 'true');
 
   const pageParam = parseInt(searchParams.get('page') || '1', 10);
   const page = Number.isFinite(pageParam) && pageParam >= 1 ? pageParam : 1;
@@ -95,25 +98,63 @@ export default function MarketplacePage() {
     // Update sort
     updatedParams.set('sort', sort);
 
+    // Update category
+    if (category) {
+      updatedParams.set('category', category);
+    } else {
+      updatedParams.delete('category');
+    }
+
+    // Update live-only filter
+    if (liveOnly) {
+      updatedParams.set('live', 'true');
+    } else {
+      updatedParams.delete('live');
+    }
+
     // Only update if params changed to avoid infinite loop
     const paramString = updatedParams.toString();
     if (paramString !== searchParams.toString()) {
       setSearchParams(updatedParams);
     }
-  }, [search, selectedTypes, minPrice, maxPrice, minQueries, sort, searchParams, setSearchParams]);
+  }, [
+    search,
+    selectedTypes,
+    minPrice,
+    maxPrice,
+    minQueries,
+    sort,
+    category,
+    liveOnly,
+    searchParams,
+    setSearchParams,
+  ]);
 
   const {
     data,
     isLoading: loading,
     refetch,
   } = useQuery<PaginatedDatasets>({
-    queryKey: ['datasets', page, search, selectedTypes, minPrice, maxPrice, minQueries, sort],
+    queryKey: [
+      'datasets',
+      page,
+      search,
+      selectedTypes,
+      minPrice,
+      maxPrice,
+      minQueries,
+      sort,
+      category,
+      liveOnly,
+    ],
     queryFn: () =>
       api.getDatasets({
         page,
         limit: requestedPageSize,
         search,
         types: selectedTypes,
+        category: category || undefined,
+        live: liveOnly || undefined,
         minPrice: minPrice ? Number(minPrice) : undefined,
         maxPrice: maxPrice ? Number(maxPrice) : undefined,
         minQueries: minQueries ? Number(minQueries) : undefined,
@@ -153,6 +194,8 @@ export default function MarketplacePage() {
     minPrice,
     maxPrice,
     minQueries,
+    category,
+    liveOnly,
     page,
     searchParams,
     setSearchParams,
@@ -179,8 +222,18 @@ export default function MarketplacePage() {
     { value: 'sentiment', label: t('dataTypes.sentiment') },
   ];
 
+  const categoryFilters = [
+    { value: 'defi-yields', label: t('marketplace.categories.defi-yields') },
+    { value: 'market-sentiment', label: t('marketplace.categories.market-sentiment') },
+    { value: 'on-chain-flows', label: t('marketplace.categories.on-chain-flows') },
+    { value: 'risk-intelligence', label: t('marketplace.categories.risk-intelligence') },
+    { value: 'trading-signals', label: t('marketplace.categories.trading-signals') },
+    { value: 'nft-analytics', label: t('marketplace.categories.nft-analytics') },
+  ];
+
   const hasActiveFilters =
-    selectedTypes.length > 0 || Boolean(minPrice || maxPrice || minQueries || searchInput);
+    selectedTypes.length > 0 ||
+    Boolean(minPrice || maxPrice || minQueries || searchInput || category || liveOnly);
 
   const toggleTypeFilter = (type: string) => {
     setSelectedTypes((current: string[]) =>
@@ -198,6 +251,8 @@ export default function MarketplacePage() {
     setMaxPrice('');
     setMinQueries('');
     setSort('popular');
+    setCategory('');
+    setLiveOnly(false);
     setPage(1);
   };
 
@@ -236,6 +291,56 @@ export default function MarketplacePage() {
             {datasets.length > 0 && <WebSocketStatus connected={wsConnected} error={wsError} />}
           </div>
           <p className="text-foreground-muted font-body text-lg">{t('marketplace.subtitle')}</p>
+        </div>
+
+        {/* Category tabs + live toggle */}
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <button
+            type="button"
+            onClick={() => setCategory('')}
+            aria-pressed={category === ''}
+            className={clsx(
+              'px-4 py-2 rounded-lg text-sm font-body font-medium transition-all duration-200',
+              category === ''
+                ? 'bg-gold text-void'
+                : 'bg-void/60 border border-border/60 text-foreground-muted hover:text-foreground hover:border-gold/30',
+            )}
+          >
+            {t('marketplace.categories.all')}
+          </button>
+          {categoryFilters.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setCategory(current => (current === value ? '' : value))}
+              aria-pressed={category === value}
+              className={clsx(
+                'px-4 py-2 rounded-lg text-sm font-body font-medium transition-all duration-200',
+                category === value
+                  ? 'bg-gold text-void'
+                  : 'bg-void/60 border border-border/60 text-foreground-muted hover:text-foreground hover:border-gold/30',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setLiveOnly(current => !current)}
+            aria-pressed={liveOnly}
+            className={clsx(
+              'ml-auto inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-body font-medium transition-all duration-200',
+              liveOnly
+                ? 'bg-emerald-400/15 border border-emerald-400/40 text-emerald-400'
+                : 'bg-void/60 border border-border/60 text-foreground-muted hover:text-foreground hover:border-emerald-400/30',
+            )}
+          >
+            <Radio
+              className={clsx('w-3.5 h-3.5', liveOnly && 'animate-pulse')}
+              aria-hidden="true"
+            />
+            {t('marketplace.live.liveOnly')}
+          </button>
         </div>
 
         {/* Search + Filters */}
