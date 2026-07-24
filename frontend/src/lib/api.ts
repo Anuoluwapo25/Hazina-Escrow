@@ -165,6 +165,12 @@ export const DatasetMetaSchema = z.object({
   createdAt: z.string(),
   thumbnail: z.string().optional(),
 
+  category: z.string().optional(),
+  provider: z.string().nullish(),
+  live: z.boolean().optional(),
+  lastRefreshedAt: z.string().nullish(),
+  tags: z.array(z.string()).optional(),
+
   ratings: z.object({ score: z.number(), count: z.number() }).optional(),
   priceHistory: z.array(z.object({ price: z.number(), changedAt: z.string() })).optional(),
 });
@@ -195,6 +201,16 @@ export const DatasetDetailSchema = DatasetMetaSchema.extend({
 });
 export type DatasetDetail = z.infer<typeof DatasetDetailSchema>;
 export type DatasetMeta = z.infer<typeof DatasetMetaSchema>;
+
+export const DatasetPreviewSchema = z.object({
+  sample: z.unknown(),
+  points: z.array(z.object({ label: z.string(), value: z.number() })).catch([]),
+  headline: z.string().nullish(),
+  live: z.boolean(),
+  provider: z.string().nullish(),
+  lastRefreshedAt: z.string().nullish(),
+});
+export type DatasetPreview = z.infer<typeof DatasetPreviewSchema>;
 
 export const TransactionSchema = z.object({
   id: z.string(),
@@ -333,6 +349,8 @@ export const api = {
     search?: string;
     type?: string | string[];
     types?: string[];
+    category?: string | string[];
+    live?: boolean;
     minPrice?: number;
     maxPrice?: number;
     minQueries?: number;
@@ -350,6 +368,15 @@ export const api = {
       typeValues.forEach(type => {
         if (type) searchParams.append('type', type);
       });
+      const categoryValues = Array.isArray(params.category)
+        ? params.category
+        : params.category
+          ? [params.category]
+          : [];
+      categoryValues.forEach(category => {
+        if (category) searchParams.append('category', category);
+      });
+      if (params.live) searchParams.append('live', 'true');
       if (params.minPrice !== undefined)
         searchParams.append('minPrice', params.minPrice.toString());
       if (params.maxPrice !== undefined)
@@ -372,6 +399,11 @@ export const api = {
     request<{ success: boolean; dataset: unknown }>(`${getApiBaseUrl()}/datasets/${id}`).then(r =>
       parseApiResponse(DatasetDetailSchema, r.dataset),
     ),
+
+  getDatasetPreview: (id: string) =>
+    request<{ success: boolean; preview: unknown }>(
+      `${getApiBaseUrl()}/datasets/${id}/preview`,
+    ).then(r => parseApiResponse(DatasetPreviewSchema, r.preview)),
 
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(
