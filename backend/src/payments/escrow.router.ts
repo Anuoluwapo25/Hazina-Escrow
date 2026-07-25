@@ -26,6 +26,7 @@ import { validateBody } from '../common/validate';
 import { requireAdminKey } from '../common/auth.middleware';
 import { logger } from '../lib/logger';
 import { isEscrowContractConfigured } from '../lib/stellar.config';
+import { PaymentError } from './stellar.service';
 import {
   buildLockTx,
   submitSignedLock,
@@ -87,6 +88,13 @@ function ensureContract(res: Response): boolean {
 function reportError(res: Response, err: unknown, context: string) {
   const message = err instanceof Error ? err.message : String(err);
   logger.error(`[Escrow] ${context}: ${message}`);
+  // PaymentError messages are ones we authored ourselves (see escrow.client.ts's
+  // contract panic-code mapping) and are safe to show as-is with a 400 — every
+  // other error path there is already sanitized before it reaches here, but
+  // still isn't a client mistake, so it gets a 502.
+  if (err instanceof PaymentError) {
+    return res.status(400).json({ error: message });
+  }
   return res.status(502).json({ error: `Escrow ${context} failed`, detail: message });
 }
 

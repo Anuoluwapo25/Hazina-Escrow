@@ -284,6 +284,25 @@ export async function retryFailedDeliveries(): Promise<void> {
           datasetId: transaction.datasetId,
           buyerQuestion: transaction.buyerQuery,
         });
+
+        // Escrow-backed purchase: the initial /verify/:id/escrow request only
+        // releases on an immediate success — a transaction that lands here
+        // (delivered on a later retry) still needs its on-chain release
+        // triggered, or the funds stay locked despite the buyer having data.
+        if (transaction.escrowId !== undefined) {
+          try {
+            const releaseTx = await releaseEscrow(transaction.escrowId);
+            logger.info(
+              `[Escrow] Released escrow #${transaction.escrowId} on-chain after delivery retry (${releaseTx})`,
+            );
+          } catch (releaseErr) {
+            logger.warn(
+              `[Escrow] Release failed for escrow #${transaction.escrowId} after delivery retry (data delivered, funds still locked on-chain): ${
+                releaseErr instanceof Error ? releaseErr.message : releaseErr
+              }`,
+            );
+          }
+        }
       } catch (error) {
         await markDeliveryFailure({
           transactionId: transaction.id,

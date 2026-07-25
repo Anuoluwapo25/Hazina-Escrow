@@ -24,8 +24,11 @@ import {
   getEscrowContractId,
   getTokenSacAddress,
 } from './stellar.config';
-import { callContract, getAgentPublicKey } from '../agent/agent.wallet';
+import { callContract, getAgentPublicKey, ContractCallError } from '../agent/agent.wallet';
+import { getCircuitBreaker } from '../common/circuit-breaker';
+import { PaymentError } from '../payments/stellar.service';
 import { logger } from './logger';
+import { u64ToScVal, i128ToScVal, addressToScVal, stringToScVal, boolToScVal } from './scval';
 
 /** Decimals used by USDC/EURC/XLM on Stellar — amounts are i128 stroops. */
 const TOKEN_DECIMALS = 7;
@@ -33,6 +36,77 @@ const STROOPS_PER_UNIT = 10 ** TOKEN_DECIMALS;
 
 /** Default escrow expiry when the caller does not specify one (24h, seconds). */
 export const DEFAULT_ESCROW_EXPIRY_SECONDS = 24 * 60 * 60;
+
+// Shares the 'soroban-rpc' breaker instance with agent.wallet.ts's callContract
+// (getCircuitBreaker returns the existing registry entry by name) so admin
+// writes and read-only simulations trip the same breaker on RPC outage.
+const sorobanBreaker = getCircuitBreaker('soroban-rpc', {
+  failureThreshold: 5,
+  resetTimeoutMs: 60_000,
+});
+
+/**
+ * Maps the Hazina escrow contract's panic codes (see HazinaEscrowError in
+ * contracts/hazina-escrow/src/lib.rs) to safe, specific messages. None of
+ * these reveal anything beyond escrow business state, so they're safe to
+ * forward to an HTTP caller via PaymentError.
+ */
+const CONTRACT_ERROR_MESSAGES: Record<number, string> = {
+  1: 'Escrow contract already initialized',
+  2: 'Escrow contract not initialized',
+  3: 'Caller is not the escrow admin',
+  4: 'Invalid platform fee',
+  5: 'Invalid escrow amount',
+  6: 'Escrow already released',
+  7: 'Escrow already refunded',
+  8: 'Escrow not found',
+  9: 'Address is blacklisted',
+  10: 'Address is not whitelisted',
+  11: 'Dataset id cannot be empty',
+  12: 'Escrow contract is paused',
+  13: 'Amount exceeds the escrow circuit breaker limit',
+  14: 'Escrow rate limit exceeded for this ledger — try again shortly',
+  15: 'Escrow contract is not paused',
+  16: 'Caller is not the escrow buyer',
+  17: 'Buyer has not confirmed delivery yet',
+  18: 'Delivery already confirmed',
+  19: 'Caller is not the escrow seller',
+  20: 'Escrow has not expired yet',
+  21: 'Escrow already disputed',
+  22: 'Dispute window has passed',
+  23: 'Caller is not the arbitrator',
+  24: 'Escrow is under dispute',
+  25: 'Escrow is not under dispute',
+};
+
+function extractContractErrorCode(rawDetail: string): number | null {
+  const match = rawDetail.match(/Error\(Contract,\s*#(\d+)\)/);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Throw either a PaymentError with a specific, safe message — when
+ * `rawDetail` contains a recognised contract panic code — or a generic
+ * sanitized Error otherwise. `rawDetail` (the raw sim/submit payload, which
+ * can contain account ids and sequence numbers) is never included in the
+ * thrown message; log it at the call site before calling this.
+ */
+function throwSanitized(rawDetail: string, fallbackMessage: string): never {
+  const code = extractContractErrorCode(rawDetail);
+  const knownMessage = code !== null ? CONTRACT_ERROR_MESSAGES[code] : undefined;
+  throw knownMessage ? new PaymentError(knownMessage) : new Error(fallbackMessage);
+}
+
+/**
+ * Translate a ContractCallError (thrown by callContract) the same way —
+ * used by the admin-signed write paths (release/refund/resolve_dispute).
+ */
+function translateContractError(err: unknown, fallbackMessage: string): never {
+  if (err instanceof ContractCallError) {
+    throwSanitized(err.rawDetail, fallbackMessage);
+  }
+  throw new Error(fallbackMessage);
+}
 
 /**
  * On-chain escrow record, decoded from the contract's EscrowRecord struct.
@@ -101,15 +175,15 @@ export async function buildLockTx(params: {
 
   const rpc = getRpc();
   const contract = new StellarSdk.Contract(contractId);
-  const buyerAccount = await rpc.getAccount(buyer);
+  const buyerAccount = await sorobanBreaker.execute(() => rpc.getAccount(buyer));
 
   const args: StellarSdk.xdr.ScVal[] = [
-    new StellarSdk.Address(buyer).toScVal(),
-    new StellarSdk.Address(seller).toScVal(),
-    new StellarSdk.Address(tokenAddress).toScVal(),
-    StellarSdk.nativeToScVal(toStroops(amount), { type: 'i128' }),
-    StellarSdk.nativeToScVal(datasetId, { type: 'string' }),
-    StellarSdk.nativeToScVal(expirySeconds, { type: 'u64' }),
+    addressToScVal(buyer),
+    addressToScVal(seller),
+    addressToScVal(tokenAddress),
+    i128ToScVal(toStroops(amount)),
+    stringToScVal(datasetId),
+    u64ToScVal(expirySeconds),
   ];
 
   const tx = new StellarSdk.TransactionBuilder(buyerAccount, {
@@ -120,9 +194,11 @@ export async function buildLockTx(params: {
     .setTimeout(300)
     .build();
 
-  const sim = await rpc.simulateTransaction(tx);
+  const sim = await sorobanBreaker.execute(() => rpc.simulateTransaction(tx));
   if (!StellarSdk.rpc.Api.isSimulationSuccess(sim)) {
-    throw new Error(`lock() simulation failed: ${JSON.stringify(sim)}`);
+    const rawDetail = JSON.stringify(sim);
+    logger.error(`[Escrow] lock() simulation failed: ${rawDetail}`);
+    throwSanitized(rawDetail, 'lock() simulation failed — please try again');
   }
 
   const assembled = StellarSdk.rpc.assembleTransaction(tx, sim).build();
@@ -144,15 +220,18 @@ export async function submitSignedLock(
   const rpc = getRpc();
   const tx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, getNetworkPassphrase());
 
-  const sendResult = await rpc.sendTransaction(tx as StellarSdk.Transaction);
+  const sendResult = await sorobanBreaker.execute(() =>
+    rpc.sendTransaction(tx as StellarSdk.Transaction),
+  );
   if (sendResult.status === 'ERROR') {
-    throw new Error(`lock() submit error: ${JSON.stringify(sendResult.errorResult)}`);
+    logger.error(`[Escrow] lock() submit error: ${JSON.stringify(sendResult.errorResult)}`);
+    throw new Error('lock() submit error — please try again');
   }
 
   const txHash = sendResult.hash;
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    const result = await rpc.getTransaction(txHash);
+    const result = await sorobanBreaker.execute(() => rpc.getTransaction(txHash));
     if (result.status === StellarSdk.rpc.Api.GetTransactionStatus.SUCCESS) {
       if (!result.returnValue) {
         throw new Error('lock() succeeded but returned no escrow id');
@@ -162,7 +241,8 @@ export async function submitSignedLock(
       return { txHash, escrowId };
     }
     if (result.status === StellarSdk.rpc.Api.GetTransactionStatus.FAILED) {
-      throw new Error(`lock() failed on-chain (${txHash})`);
+      logger.error(`[Escrow] lock() failed on-chain (${txHash})`);
+      throw new Error('lock() failed on-chain');
     }
     await new Promise(r => setTimeout(r, 1_000));
   }
@@ -181,10 +261,14 @@ export async function releaseEscrow(escrowId: number): Promise<string> {
   }
   const contractId = getEscrowContractId();
   logger.info(`[Escrow] Releasing escrow #${escrowId} on ${contractId}`);
-  return callContract(contractId, 'release', [
-    new StellarSdk.Address(admin).toScVal(),
-    StellarSdk.nativeToScVal(escrowId, { type: 'u64' }),
-  ]);
+  try {
+    return await callContract(contractId, 'release', [
+      addressToScVal(admin),
+      u64ToScVal(escrowId),
+    ]);
+  } catch (err) {
+    translateContractError(err, `Failed to release escrow #${escrowId} — please try again`);
+  }
 }
 
 /**
@@ -198,10 +282,11 @@ export async function refundEscrow(escrowId: number): Promise<string> {
   }
   const contractId = getEscrowContractId();
   logger.info(`[Escrow] Refunding escrow #${escrowId} on ${contractId}`);
-  return callContract(contractId, 'refund', [
-    new StellarSdk.Address(admin).toScVal(),
-    StellarSdk.nativeToScVal(escrowId, { type: 'u64' }),
-  ]);
+  try {
+    return await callContract(contractId, 'refund', [addressToScVal(admin), u64ToScVal(escrowId)]);
+  } catch (err) {
+    translateContractError(err, `Failed to refund escrow #${escrowId} — please try again`);
+  }
 }
 
 /**
@@ -254,11 +339,18 @@ export async function resolveDispute(escrowId: number, favourBuyer: boolean): Pr
   }
   const contractId = getEscrowContractId();
   logger.info(`[Escrow] Resolving dispute for escrow #${escrowId} (favourBuyer=${favourBuyer})`);
-  return callContract(contractId, 'resolve_dispute', [
-    new StellarSdk.Address(arbitrator).toScVal(),
-    StellarSdk.nativeToScVal(escrowId, { type: 'u64' }),
-    StellarSdk.nativeToScVal(favourBuyer, { type: 'bool' }),
-  ]);
+  try {
+    return await callContract(contractId, 'resolve_dispute', [
+      addressToScVal(arbitrator),
+      u64ToScVal(escrowId),
+      boolToScVal(favourBuyer),
+    ]);
+  } catch (err) {
+    translateContractError(
+      err,
+      `Failed to resolve dispute for escrow #${escrowId} — please try again`,
+    );
+  }
 }
 
 /**
@@ -270,8 +362,8 @@ export async function buildConfirmDeliveryTx(params: {
   escrowId: number;
 }): Promise<{ xdr: string }> {
   return buildBuyerSignedCall('confirm_delivery', params.buyer, [
-    StellarSdk.nativeToScVal(params.escrowId, { type: 'u64' }),
-    new StellarSdk.Address(params.buyer).toScVal(),
+    u64ToScVal(params.escrowId),
+    addressToScVal(params.buyer),
   ]);
 }
 
@@ -290,8 +382,8 @@ export async function buildRaiseDisputeTx(params: {
     throw new Error('evidenceHash must be exactly 32 bytes');
   }
   return buildBuyerSignedCall('raise_dispute', params.buyer, [
-    new StellarSdk.Address(params.buyer).toScVal(),
-    StellarSdk.nativeToScVal(params.escrowId, { type: 'u64' }),
+    addressToScVal(params.buyer),
+    u64ToScVal(params.escrowId),
     StellarSdk.xdr.ScVal.scvBytes(evidence),
   ]);
 }
@@ -308,7 +400,7 @@ async function buildBuyerSignedCall(
   const contractId = getEscrowContractId();
   const rpc = getRpc();
   const contract = new StellarSdk.Contract(contractId);
-  const account = await rpc.getAccount(sourceAddress);
+  const account = await sorobanBreaker.execute(() => rpc.getAccount(sourceAddress));
 
   const tx = new StellarSdk.TransactionBuilder(account, {
     fee: StellarSdk.BASE_FEE,
@@ -318,9 +410,11 @@ async function buildBuyerSignedCall(
     .setTimeout(300)
     .build();
 
-  const sim = await rpc.simulateTransaction(tx);
+  const sim = await sorobanBreaker.execute(() => rpc.simulateTransaction(tx));
   if (!StellarSdk.rpc.Api.isSimulationSuccess(sim)) {
-    throw new Error(`${method}() simulation failed: ${JSON.stringify(sim)}`);
+    const rawDetail = JSON.stringify(sim);
+    logger.error(`[Escrow] ${method}() simulation failed: ${rawDetail}`);
+    throwSanitized(rawDetail, `${method}() simulation failed — please try again`);
   }
   const assembled = StellarSdk.rpc.assembleTransaction(tx, sim).build();
   return { xdr: assembled.toXDR(), contractId };
@@ -339,22 +433,26 @@ export async function getEscrow(escrowId: number): Promise<EscrowState> {
 
   const rpc = getRpc();
   const contract = new StellarSdk.Contract(contractId);
-  const account = await rpc.getAccount(sourceAddr).catch(() => {
-    // Simulation only needs a well-formed account; a fresh one is fine.
-    return new StellarSdk.Account(sourceAddr, '0');
-  });
+  const account = await sorobanBreaker
+    .execute(() => rpc.getAccount(sourceAddr))
+    .catch(() => {
+      // Simulation only needs a well-formed account; a fresh one is fine.
+      return new StellarSdk.Account(sourceAddr, '0');
+    });
 
   const tx = new StellarSdk.TransactionBuilder(account, {
     fee: StellarSdk.BASE_FEE,
     networkPassphrase: getNetworkPassphrase(),
   })
-    .addOperation(contract.call('get_escrow', StellarSdk.nativeToScVal(escrowId, { type: 'u64' })))
+    .addOperation(contract.call('get_escrow', u64ToScVal(escrowId)))
     .setTimeout(30)
     .build();
 
-  const sim = await rpc.simulateTransaction(tx);
+  const sim = await sorobanBreaker.execute(() => rpc.simulateTransaction(tx));
   if (!StellarSdk.rpc.Api.isSimulationSuccess(sim) || !sim.result?.retval) {
-    throw new Error(`get_escrow(${escrowId}) simulation failed: ${JSON.stringify(sim)}`);
+    const rawDetail = JSON.stringify(sim);
+    logger.error(`[Escrow] get_escrow(${escrowId}) simulation failed: ${rawDetail}`);
+    throwSanitized(rawDetail, 'get_escrow() simulation failed — please try again');
   }
 
   return decodeEscrowRecord(sim.result.retval);
