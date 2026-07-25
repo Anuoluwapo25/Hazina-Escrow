@@ -6,6 +6,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     fileParallelism: false,
+    // Only run TypeScript source tests; never the compiled copies under dist/
+    // (vitest 4 no longer excludes dist/ by default, and it is CommonJS).
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
