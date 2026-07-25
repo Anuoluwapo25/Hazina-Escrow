@@ -23,6 +23,7 @@ import {
   startSellerNotificationRetryWorker,
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
+import { escrowRouter } from './payments/escrow.router';
 import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
@@ -276,6 +277,9 @@ v1Router.use('/datasets', datasetsRouter);
 v1Router.use('/agent', requireApiKey, agentRouter);
 v1Router.use('/webhooks', webhooksRouter);
 v1Router.use('/payments', requireApiKey, paymentsRouter);
+// Escrow routes are buyer-facing (build/submit/read need no API key); the
+// admin release/refund/resolve endpoints self-protect with requireAdminKey.
+v1Router.use('/payments', escrowRouter);
 v1Router.use('/backups', backupRouter);
 
 app.use('/api/v1', v1Router);
@@ -295,6 +299,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 // Routes
 app.use('/api/datasets', datasetsRouter);
 app.use('/api', paymentsRouter);
+app.use('/api', escrowRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
