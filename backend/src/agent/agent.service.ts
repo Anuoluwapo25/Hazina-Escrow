@@ -12,7 +12,7 @@ import {
 import { verifyStellarPayment } from '../payments/stellar.service';
 import { sendUsdcPayment, getAgentPublicKey } from './agent.wallet';
 import { isEscrowContractConfigured } from '../lib/stellar.config';
-import { lockAsAgent, releaseEscrow } from '../lib/escrow.client';
+import { lockAsAgent, releaseEscrow, refundEscrow } from '../lib/escrow.client';
 import { logger } from '../lib/logger';
 import { domainMetrics } from '../common/datadog';
 import {
@@ -83,6 +83,10 @@ export interface PurchaseRecord {
   amountPaid: number;
   txHash: string;
   demo: boolean;
+  /** On-chain escrow id when this purchase went through the escrow contract. */
+  escrowId?: number;
+  /** True when the escrow was refunded (retrieval or release failed) instead of released. */
+  refunded?: boolean;
 }
 
 /**
@@ -177,6 +181,25 @@ export async function runResearchAgentDemo(query: string): Promise<AgentJob> {
   return _executeResearch(query, demoTxHash, true);
 }
 
+/**
+ * Best-effort refund of an escrow the agent locked but could not settle
+ * (dataset retrieval or release failed). If the refund itself fails the
+ * funds stay locked on-chain — visible via GET /escrow/:id — for manual
+ * reconciliation rather than being lost.
+ */
+async function refundLockedEscrow(escrowId: number, datasetName: string): Promise<void> {
+  try {
+    const refundTx = await refundEscrow(escrowId);
+    logger.info(`[Agent] Refunded escrow #${escrowId} for ${datasetName} (${refundTx})`);
+  } catch (refundErr) {
+    logger.error(
+      `[Agent] Escrow #${escrowId} refund failed for ${datasetName} — funds remain locked on-chain, needs manual reconciliation: ${
+        refundErr instanceof Error ? refundErr.message : String(refundErr)
+      }`,
+    );
+  }
+}
+
 async function _executeResearch(
   query: string,
   humanTxHash: string,
@@ -260,6 +283,11 @@ async function _executeResearch(
 
   for (const { seller, dataset } of selectedSellers) {
     let txHash: string;
+    let escrowId: number | undefined;
+    let sellerPaid = true;
+    let sellerAmount: number | undefined = parseFloat((dataset.pricePerQuery * 0.95).toFixed(7));
+    let refunded = false;
+    let purchasedData: Record<string, unknown> | undefined;
 
     if (demo) {
       // Demo: simulate payment, read data directly
@@ -267,10 +295,16 @@ async function _executeResearch(
       logger.info(
         `[Agent][Demo] Simulating payment of ${dataset.pricePerQuery} USDC → ${dataset.sellerWallet} for ${dataset.name}`,
       );
+      purchasedData = (await getDataset(dataset.id))?.data ?? {};
     } else if (isEscrowContractConfigured()) {
-      // Real + non-custodial (#550): the agent locks funds into the escrow
-      // contract as buyer, then the backend releases so the contract performs
-      // the 95/5 split on-chain — the agent never pays the seller 100% directly.
+      // Real + non-custodial (#550): the agent locks its own funds into the
+      // escrow contract as buyer, confirms the purchased data can actually be
+      // retrieved, and ONLY THEN releases so the contract performs the 95/5
+      // split on-chain. If retrieval or release fails, the lock is refunded
+      // instead — sellerPaid is set true only once release confirms, never
+      // optimistically. This already runs inside the serialised
+      // agentJobQueue (see runResearchAgent), so escrow lock/release for a
+      // given job never races another job's.
       logger.info(
         `[Agent] Locking ${dataset.pricePerQuery} USDC in escrow → seller ${dataset.sellerWallet} for ${dataset.name}`,
       );
@@ -281,17 +315,35 @@ async function _executeResearch(
         tokenCode: dataset.paymentToken || 'USDC',
       });
       txHash = locked.txHash;
-      try {
-        const releaseTx = await releaseEscrow(locked.escrowId);
-        logger.info(
-          `[Agent] Released escrow #${locked.escrowId} on-chain for ${dataset.name} (${releaseTx})`,
-        );
-      } catch (releaseErr) {
+      escrowId = locked.escrowId;
+
+      const fresh = await getDataset(dataset.id);
+      if (!fresh?.data) {
         logger.warn(
-          `[Agent] Escrow #${locked.escrowId} locked but release failed (funds safe on-chain): ${
-            releaseErr instanceof Error ? releaseErr.message : String(releaseErr)
-          }`,
+          `[Agent] Escrow #${locked.escrowId} locked but dataset ${dataset.id} retrieval failed — refunding`,
         );
+        await refundLockedEscrow(locked.escrowId, dataset.name);
+        sellerPaid = false;
+        sellerAmount = undefined;
+        refunded = true;
+      } else {
+        try {
+          const releaseTx = await releaseEscrow(locked.escrowId);
+          logger.info(
+            `[Agent] Released escrow #${locked.escrowId} on-chain for ${dataset.name} (${releaseTx})`,
+          );
+          purchasedData = fresh.data;
+        } catch (releaseErr) {
+          logger.warn(
+            `[Agent] Escrow #${locked.escrowId} release failed for ${dataset.name} — refunding: ${
+              releaseErr instanceof Error ? releaseErr.message : String(releaseErr)
+            }`,
+          );
+          await refundLockedEscrow(locked.escrowId, dataset.name);
+          sellerPaid = false;
+          sellerAmount = undefined;
+          refunded = true;
+        }
       }
     } else {
       // Real + custodial (demo): send USDC from agent wallet → seller wallet.
@@ -305,9 +357,10 @@ async function _executeResearch(
         memo: `haz-agent-${jobId.slice(0, 8)}`,
       });
       txHash = payment.txHash;
+      purchasedData = (await getDataset(dataset.id))?.data ?? {};
     }
 
-    // Record the purchase
+    // Record the purchase (kept in the audit trail even when refunded)
     purchases.push({
       datasetId: dataset.id,
       datasetName: dataset.name,
@@ -316,9 +369,15 @@ async function _executeResearch(
       amountPaid: dataset.pricePerQuery,
       txHash,
       demo,
+      escrowId,
+      refunded,
     });
 
-    totalSpent += dataset.pricePerQuery;
+    // A refunded purchase returns the funds to the agent — it was never
+    // truly spent, so it shouldn't count against the job's spend/profit.
+    if (!refunded) {
+      totalSpent += dataset.pricePerQuery;
+    }
 
     // Track agent dataset purchase
     domainMetrics.agentDatasetPurchase({
@@ -327,49 +386,56 @@ async function _executeResearch(
       amountPaid: dataset.pricePerQuery,
     });
 
-    // Update dataset stats
-    await updateDataset(dataset.id, {
-      queriesServed: dataset.queriesServed + 1,
-      totalEarned: parseFloat((dataset.totalEarned + dataset.pricePerQuery * 0.95).toFixed(4)),
-    });
+    if (sellerPaid) {
+      // Update dataset stats — only once the seller has actually been paid
+      await updateDataset(dataset.id, {
+        queriesServed: dataset.queriesServed + 1,
+        totalEarned: parseFloat((dataset.totalEarned + dataset.pricePerQuery * 0.95).toFixed(4)),
+      });
+    }
 
-    // Log individual transaction
+    // Log individual transaction — sellerPaid/sellerAmount only ever reflect
+    // a confirmed on-chain release, never set optimistically (#550).
     await addTransaction({
       id: `tx-agent-${uuidv4()}`,
       datasetId: dataset.id,
       txHash,
       amount: dataset.pricePerQuery,
-      sellerPaid: true,
-      sellerAmount: parseFloat((dataset.pricePerQuery * 0.95).toFixed(7)),
+      sellerPaid,
+      sellerAmount,
+      escrowId,
+      status: refunded ? 'refunded' : undefined,
       buyerQuery: `[Agent Job ${jobId}] ${query}`,
       timestamp: new Date().toISOString(),
     });
 
-    // Notify seller via webhook
-    notifySeller(dataset.sellerWallet, 'dataset.queried', {
-      datasetId: dataset.id,
-      datasetName: dataset.name,
-      type: dataset.type,
-      txHash,
-      amount: dataset.pricePerQuery,
-      agentJobId: jobId,
-      demo,
-    }).catch(() => {});
+    if (sellerPaid) {
+      // Notify seller via webhook
+      notifySeller(dataset.sellerWallet, 'dataset.queried', {
+        datasetId: dataset.id,
+        datasetName: dataset.name,
+        type: dataset.type,
+        txHash,
+        amount: dataset.pricePerQuery,
+        agentJobId: jobId,
+        demo,
+      }).catch(() => {});
 
-    domainMetrics.datasetQueried({
-      datasetType: dataset.type,
-      mode: demo ? 'demo' : 'real',
-      source: 'agent',
-    });
+      domainMetrics.datasetQueried({
+        datasetType: dataset.type,
+        mode: demo ? 'demo' : 'real',
+        source: 'agent',
+      });
+    }
 
-    // Read the actual data
-    const fresh = await getDataset(dataset.id);
-    sellerData.push({
-      role: seller.role,
-      displayName: seller.description,
-      data: fresh?.data ?? {},
-      cost: dataset.pricePerQuery,
-    });
+    if (purchasedData !== undefined) {
+      sellerData.push({
+        role: seller.role,
+        displayName: seller.description,
+        data: purchasedData,
+        cost: dataset.pricePerQuery,
+      });
+    }
   }
 
   const agentProfit = parseFloat((AGENT_FEE_USDC - totalSpent).toFixed(4));
