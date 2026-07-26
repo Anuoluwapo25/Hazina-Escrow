@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { I18nProvider, getLocaleDirection } from './I18nProvider';
+import { I18nProvider } from './I18nProvider';
+import { getLocaleDirection } from './locale';
 import LocaleSwitcher from './LocaleSwitcher';
 import { I18N_STORAGE_KEY, detectBrowserLocale, normalizeLocale } from './config';
 import { translate } from './translate';

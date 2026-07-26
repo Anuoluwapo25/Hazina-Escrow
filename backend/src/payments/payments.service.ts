@@ -5,7 +5,7 @@ import { notifySeller } from '../webhooks/webhook.service';
 import { transactionEventEmitter } from '../websocket/transaction-events';
 import { domainMetrics } from '../common/datadog';
 import { verifyStellarPayment, PaymentError } from './stellar.service';
-import { getEscrow } from '../lib/escrow.client';
+import { getEscrow, refundEscrow } from '../lib/escrow.client';
 import { logger } from '../lib/logger';
 import {
   getDataset,
@@ -31,14 +31,24 @@ export interface DeliveryResult {
   };
   transaction: {
     hash: string;
-    status: 'completed' | 'delivery_failed' | 'verified' | 'pending';
-    deliveryStatus: 'delivered' | 'failed' | 'pending';
+    status: 'completed' | 'delivery_failed' | 'verified' | 'pending' | 'refunded';
+    deliveryStatus: 'delivered' | 'failed' | 'pending' | 'refunded';
     amount: number;
     sellerReceived: number;
     platformFee: number;
     deliveryError?: string;
   };
 }
+
+/**
+ * Delivery retries for an escrow-backed purchase are bounded — unlike the
+ * legacy custodial seller-payout retry (payout-retry.service.ts), which keeps
+ * a failed payout in 'manual_review_needed' forever, an escrow buyer's funds
+ * are locked on-chain and must not stay stuck indefinitely. After this many
+ * failed delivery attempts we refund the buyer instead of retrying forever.
+ * Matches the 3-attempt shape of payout-retry.service.ts's RETRY_BACKOFF_MS.
+ */
+const MAX_ESCROW_DELIVERY_ATTEMPTS = 3;
 
 export async function deliverVerifiedPayment(params: {
   transactionId: string;
@@ -167,6 +177,66 @@ export async function markDeliveryFailure(params: {
   const message = error instanceof Error ? error.message : String(error);
   const existing = await getTransactionByHash(txHash);
   const attempts = (existing?.deliveryAttempts ?? 0) + 1;
+
+  // Escrow-backed purchase whose delivery has permanently failed: refund the
+  // buyer instead of retrying forever, since (unlike the custodial demo path)
+  // their funds are genuinely locked on-chain, not just a pending DB record.
+  if (existing?.escrowId !== undefined && attempts >= MAX_ESCROW_DELIVERY_ATTEMPTS) {
+    try {
+      const refundTxHash = await refundEscrow(existing.escrowId);
+      await updateTransactionByHash(txHash, {
+        status: 'refunded',
+        deliveryStatus: 'refunded',
+        deliveryError: message,
+        deliveryAttempts: attempts,
+        buyerQuery: buyerQuestion,
+      });
+
+      logger.warn(
+        `[Escrow] Delivery permanently failed for escrow #${existing.escrowId} after ${attempts} attempts — refunded buyer (${refundTxHash})`,
+      );
+      Sentry.captureMessage(
+        `Escrow delivery failure exhausted retries — refunded #${existing.escrowId}`,
+        {
+          level: 'warning',
+          tags: { component: 'escrow-delivery-refund' },
+          extra: { escrowId: existing.escrowId, txHash, attempts, refundTxHash },
+        },
+      );
+
+      transactionEventEmitter.updateTransactionStatus(transactionId, dataset.id, 'refunded', {
+        amount: dataset.pricePerQuery.toString(),
+        buyerQuery: buyerQuestion,
+        deliveryStatus: 'failed',
+        error: message,
+      });
+
+      return {
+        success: true,
+        transaction: {
+          hash: txHash,
+          status: 'refunded',
+          deliveryStatus: 'refunded',
+          amount: dataset.pricePerQuery,
+          sellerReceived: 0,
+          platformFee: 0,
+          deliveryError: message,
+        },
+      };
+    } catch (refundErr) {
+      // The refund itself failed — fall through to the normal delivery_failed
+      // marking below. deliveryStatus stays 'failed' so the retry sweep picks
+      // this transaction up again and re-attempts the refund next pass.
+      const refundErrMsg = refundErr instanceof Error ? refundErr.message : String(refundErr);
+      logger.error(
+        `[Escrow] Refund attempt failed for escrow #${existing.escrowId} after exhausted delivery retries: ${refundErrMsg}`,
+      );
+      Sentry.captureException(refundErr, {
+        tags: { component: 'escrow-delivery-refund' },
+        extra: { escrowId: existing.escrowId, txHash, attempts },
+      });
+    }
+  }
 
   await updateTransactionByHash(txHash, {
     status: 'delivery_failed',
