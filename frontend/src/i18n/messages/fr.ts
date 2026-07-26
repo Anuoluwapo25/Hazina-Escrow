@@ -233,6 +233,27 @@ export const fr: EnglishMessages = {
     resultsCount: '{count} datasets trouvés',
     noResultsTitle: 'Aucun dataset trouvé',
     noResultsBody: "Essayez d'ajuster vos filtres",
+    live: {
+      badge: 'EN DIRECT',
+      updated: 'Mis à jour {time}',
+      source: 'Source : {provider}',
+      liveOnly: 'Flux en direct uniquement',
+      preview: 'Aperçu en direct',
+      previewLoading: "Chargement de l'échantillon en direct...",
+      previewError: 'Aperçu en direct indisponible',
+      noPreview: 'Aucun échantillon en direct disponible pour ce dataset.',
+    },
+    categories: {
+      all: 'Toutes',
+      label: 'Catégorie',
+      'defi-yields': 'Rendements DeFi',
+      'market-sentiment': 'Sentiment du marché',
+      'on-chain-flows': 'Flux on-chain',
+      'risk-intelligence': 'Renseignement sur les risques',
+      'trading-signals': 'Signaux de trading',
+      'nft-analytics': 'Analytique NFT',
+      other: 'Autres',
+    },
   },
   sell: {
     messages: {
