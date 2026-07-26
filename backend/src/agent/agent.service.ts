@@ -11,6 +11,8 @@ import {
 } from '../common/storage';
 import { verifyStellarPayment } from '../payments/stellar.service';
 import { sendUsdcPayment, getAgentPublicKey } from './agent.wallet';
+import { isEscrowContractConfigured } from '../lib/stellar.config';
+import { lockAsAgent, releaseEscrow } from '../lib/escrow.client';
 import { logger } from '../lib/logger';
 import { domainMetrics } from '../common/datadog';
 import {
@@ -187,9 +189,15 @@ async function _executeResearch(
 
   const allDatasets = await getAllDatasets();
 
-  // 2. Find which seller types have matching datasets
+  // 2. For each seller type, pick the best matching dataset: prefer live
+  //    (provider-backed) feeds, then cheapest, then most battle-tested.
   const availableSellers = SELLER_TYPES.map(seller => {
-    const dataset = allDatasets.find(d => d.type === seller.type);
+    const candidates = allDatasets.filter(d => d.type === seller.type);
+    const dataset = candidates.sort((a, b) => {
+      if (Boolean(b.live) !== Boolean(a.live)) return b.live ? 1 : -1;
+      if (a.pricePerQuery !== b.pricePerQuery) return a.pricePerQuery - b.pricePerQuery;
+      return b.queriesServed - a.queriesServed;
+    })[0];
     return { seller, dataset };
   });
 
@@ -259,10 +267,37 @@ async function _executeResearch(
       logger.info(
         `[Agent][Demo] Simulating payment of ${dataset.pricePerQuery} USDC → ${dataset.sellerWallet} for ${dataset.name}`,
       );
-    } else {
-      // Real: send USDC from agent wallet → seller wallet
+    } else if (isEscrowContractConfigured()) {
+      // Real + non-custodial (#550): the agent locks funds into the escrow
+      // contract as buyer, then the backend releases so the contract performs
+      // the 95/5 split on-chain — the agent never pays the seller 100% directly.
       logger.info(
-        `[Agent] Paying ${dataset.pricePerQuery} USDC → ${dataset.sellerWallet} for ${dataset.name}`,
+        `[Agent] Locking ${dataset.pricePerQuery} USDC in escrow → seller ${dataset.sellerWallet} for ${dataset.name}`,
+      );
+      const locked = await lockAsAgent({
+        seller: dataset.sellerWallet,
+        amount: dataset.pricePerQuery,
+        datasetId: dataset.id,
+        tokenCode: dataset.paymentToken || 'USDC',
+      });
+      txHash = locked.txHash;
+      try {
+        const releaseTx = await releaseEscrow(locked.escrowId);
+        logger.info(
+          `[Agent] Released escrow #${locked.escrowId} on-chain for ${dataset.name} (${releaseTx})`,
+        );
+      } catch (releaseErr) {
+        logger.warn(
+          `[Agent] Escrow #${locked.escrowId} locked but release failed (funds safe on-chain): ${
+            releaseErr instanceof Error ? releaseErr.message : String(releaseErr)
+          }`,
+        );
+      }
+    } else {
+      // Real + custodial (demo): send USDC from agent wallet → seller wallet.
+      // Only used when no escrow contract is configured.
+      logger.info(
+        `[Agent] (custodial) Paying ${dataset.pricePerQuery} USDC → ${dataset.sellerWallet} for ${dataset.name}`,
       );
       const payment = await sendUsdcPayment({
         destinationAddress: dataset.sellerWallet,

@@ -14,12 +14,61 @@ export const SOROBAN_RPC_URL =
     ? 'https://soroban.stellar.org'
     : 'https://soroban-testnet.stellar.org');
 
+// ── Escrow contract ───────────────────────────────────────────────────────
+
+// Read escrow-related env per-call (not at module load) so tests and runtime
+// config changes take effect without re-importing the module — matching the
+// pattern used elsewhere (e.g. STELLAR_TIMEOUT_MS in stellar.service.ts).
+
+/** Default testnet Soroban Asset Contract (SAC) addresses. */
+const DEFAULT_USDC_SAC = 'CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU';
+const DEFAULT_XLM_SAC = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+
+/** True when a real escrow contract is configured (non-custodial flow available). */
+export function isEscrowContractConfigured(): boolean {
+  return (process.env.ESCROW_CONTRACT_ID ?? '').trim().length > 0;
+}
+
+/**
+ * Returns the configured escrow contract ID or throws. Use at the call site so
+ * the failure names the missing env var instead of surfacing a cryptic RPC error.
+ */
+export function getEscrowContractId(): string {
+  const id = (process.env.ESCROW_CONTRACT_ID ?? '').trim();
+  if (!id) {
+    throw new Error(
+      'ESCROW_CONTRACT_ID is not configured — the non-custodial escrow flow ' +
+        'requires the deployed contract address. Set ESCROW_CONTRACT_ID or use demo mode.',
+    );
+  }
+  return id;
+}
+
 // ── Multi-token support ──────────────────────────────────────────────────────
 
 export interface StellarToken {
   code: 'USDC' | 'EURC' | 'XLM';
   issuer?: string; // undefined for XLM (native)
-  address?: string; // Soroban contract address
+  address?: string; // Soroban token contract (SAC) address — required for on-chain escrow
+}
+
+/**
+ * Resolve the Soroban token contract (SAC) address for a token code, or null
+ * when none is configured (the token cannot be used with on-chain escrow).
+ * The escrow contract's `lock(token: Address, …)` needs the token *contract*
+ * address, not the classic issuer account.
+ */
+export function getTokenSacAddress(code: string): string | null {
+  switch (code) {
+    case 'USDC':
+      return (process.env.USDC_SAC_ADDRESS ?? DEFAULT_USDC_SAC) || null;
+    case 'EURC':
+      return (process.env.EURC_SAC_ADDRESS ?? '') || null;
+    case 'XLM':
+      return (process.env.XLM_SAC_ADDRESS ?? DEFAULT_XLM_SAC) || null;
+    default:
+      return null;
+  }
 }
 
 export const USDC_ISSUER =

@@ -8,6 +8,7 @@ type DatasetRow = {
   name: string;
   description: string;
   type: string;
+  category: string | null;
   pricePerQuery: string;
   sellerWallet: string;
   notificationEmail: string | null;
@@ -15,6 +16,10 @@ type DatasetRow = {
   queriesServed: number;
   totalEarned: string;
   createdAt: string;
+  provider: string | null;
+  live: number | boolean | null;
+  lastRefreshedAt: string | null;
+  tags: string | null;
 };
 
 type TransactionRow = {
@@ -33,6 +38,7 @@ function mapDataset(row: DatasetRow): Dataset {
     name: row.name,
     description: row.description,
     type: row.type,
+    category: row.category ?? undefined,
     pricePerQuery: Number(row.pricePerQuery),
     sellerWallet: row.sellerWallet,
     notificationEmail: row.notificationEmail ?? undefined,
@@ -40,6 +46,10 @@ function mapDataset(row: DatasetRow): Dataset {
     queriesServed: row.queriesServed,
     totalEarned: Number(row.totalEarned),
     createdAt: row.createdAt,
+    provider: row.provider ?? undefined,
+    live: row.live === null || row.live === undefined ? undefined : Boolean(row.live),
+    lastRefreshedAt: row.lastRefreshedAt ?? undefined,
+    tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
   };
 }
 
@@ -71,6 +81,7 @@ export async function addDataset(dataset: Dataset): Promise<void> {
     name: dataset.name,
     description: dataset.description,
     type: dataset.type,
+    category: dataset.category ?? 'other',
     pricePerQuery: dataset.pricePerQuery.toString(),
     sellerWallet: dataset.sellerWallet,
     notificationEmail: dataset.notificationEmail,
@@ -78,6 +89,10 @@ export async function addDataset(dataset: Dataset): Promise<void> {
     queriesServed: dataset.queriesServed,
     totalEarned: dataset.totalEarned.toString(),
     createdAt: dataset.createdAt,
+    provider: dataset.provider ?? null,
+    live: dataset.live ?? false,
+    lastRefreshedAt: dataset.lastRefreshedAt ?? null,
+    tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
   });
 }
 

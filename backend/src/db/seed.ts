@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import db from './client';
 import { datasets, transactions, datasetsSqlite, transactionsSqlite } from './schema';
 import { logger } from '../lib/logger';
+import { getProviderById } from '../providers/registry';
 
 const isPostgres =
   (process.env.DATABASE_URL ?? '').startsWith('postgres://') ||
@@ -17,12 +18,16 @@ interface DatasetFromJSON {
   name: string;
   description: string;
   type: string;
+  category?: string;
   pricePerQuery: number;
   sellerWallet: string;
   data: Record<string, unknown>;
   queriesServed: number;
   totalEarned: number;
   createdAt: string;
+  provider?: string;
+  live?: boolean;
+  tags?: string[];
 }
 
 interface TransactionFromJSON {
@@ -52,17 +57,47 @@ async function seedDatasets(jsonData: Record<string, unknown>): Promise<void> {
       continue;
     }
 
+    // Bootstrap live datasets with an initial provider snapshot so the
+    // marketplace has real (or fallback) data immediately after seeding.
+    let data = dataset.data;
+    let lastRefreshedAt: string | null = null;
+    if (dataset.live && dataset.provider) {
+      const provider = getProviderById(dataset.provider);
+      if (provider) {
+        try {
+          const snapshot = await provider.refresh();
+          data = {
+            ...snapshot.data,
+            _points: snapshot.points,
+            _headline: snapshot.headline,
+            _live: snapshot.live,
+            _fetchedAt: snapshot.fetchedAt,
+          };
+          lastRefreshedAt = snapshot.fetchedAt;
+        } catch (err) {
+          logger.warn(
+            `Could not bootstrap live snapshot for ${dataset.id}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+
     await db.insert(datasetsTable as typeof datasets).values({
       id: dataset.id,
       name: dataset.name,
       description: dataset.description,
       type: dataset.type,
+      category: dataset.category ?? 'other',
       pricePerQuery: dataset.pricePerQuery.toString(),
       sellerWallet: dataset.sellerWallet,
-      data: JSON.stringify(dataset.data),
+      data: JSON.stringify(data),
       queriesServed: dataset.queriesServed,
       totalEarned: dataset.totalEarned.toString(),
       createdAt: dataset.createdAt,
+      provider: dataset.provider ?? null,
+      live: (isPostgres ? (dataset.live ?? false) : dataset.live ? 1 : 0) as never,
+      lastRefreshedAt,
+      tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
     });
     logger.info(`✓ Inserted dataset: ${dataset.id}`);
   }
