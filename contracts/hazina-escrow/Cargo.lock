@@ -660,6 +660,7 @@ name = "hazina-escrow"
 version = "0.2.0"
 dependencies = [
  "dotenvy",
+ "ethnum",
  "proptest",
  "serde_json",
  "soroban-sdk",
