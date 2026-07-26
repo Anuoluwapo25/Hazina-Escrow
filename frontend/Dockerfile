@@ -15,6 +15,9 @@ COPY . .
 RUN npm run build
 
 FROM nginx:1.27-alpine AS production
+# Pick up patched OS packages (openssl, libxml2, libpng, etc.) beyond what's
+# baked into this image tag's layer.
+RUN apk update && apk upgrade --no-cache
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80

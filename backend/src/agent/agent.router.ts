@@ -298,7 +298,7 @@ agentRouter.post(
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Research agent error';
-      logger.error('[Agent][Demo] Error:', err);
+      logger.error({ err }, '[Agent][Demo] Error:');
       return res.status(500).json({ error: message });
     }
   },

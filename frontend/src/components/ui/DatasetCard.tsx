@@ -1,8 +1,6 @@
 import { useState } from 'react';
 
 import { Link } from 'react-router-dom';
-import { ShoppingCart, TrendingUp, User, Zap, Clock, ImageOff } from 'lucide-react';
-
 import { ShoppingCart, TrendingUp, User, Zap, Clock, ImageOff, Star } from 'lucide-react';
 
 import clsx from 'clsx';

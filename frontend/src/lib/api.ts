@@ -146,71 +146,11 @@ export interface AgentInfo {
   };
 }
 
-export interface DatasetMeta {
-  id: string;
-  name: string;
-  description: string;
-  type: string;
-  pricePerQuery: number;
-  sellerWallet: string;
-  queriesServed: number;
-  totalEarned: number;
-  createdAt: string;
-  thumbnail?: string;
-
-  ratings?: { score: number; count: number };
-  priceHistory?: { price: number; changedAt: string }[];
-
-  ratings?: {
-    score: number;
-    count: number;
-    reviews: Array<{ txHash: string; score: number; comment?: string; timestamp: string }>;
-  };
-
-}
-
-export interface Transaction {
-  id: string;
-  datasetId: string;
-  txHash: string;
-  amount: number;
-  buyerQuery?: string;
-  aiSummary?: string;
-  timestamp: string;
-}
-
 export interface SellerAnalytics {
   revenueSeries: { date: string; usdc: number }[];
   queryVolumeSeries: { date: string; count: number }[];
   datasetBreakdown: { id: string; name: string; earned: number; queries: number }[];
   topBuyers: { wallet: string; count: number }[];
-}
-
-export interface Stats {
-  totalDatasets: number;
-  totalQueries: number;
-  totalUsdcEarned: number;
-  totalTransactions: number;
-}
-
-export interface PaginatedDatasets {
-  data: DatasetMeta[];
-  total: number;
-  page: number;
-  totalPages: number;
-}
-
-export interface QueryResult {
-  success: boolean;
-  demo?: boolean;
-  data: Record<string, unknown>;
-  ai: { summary: string; answer?: string };
-  transaction: {
-    hash: string;
-    amount: number;
-    sellerReceived: number;
-    platformFee: number;
-  };
 }
 
 export const DatasetMetaSchema = z.object({
@@ -238,17 +178,20 @@ export const DatasetDetailSchema = DatasetMetaSchema.extend({
   }),
   preview: z.unknown(),
 
-  ratings: z.object({
-    score: z.number(),
-    count: z.number(),
-    reviews: z.array(z.object({
-      txHash: z.string(),
+  ratings: z
+    .object({
       score: z.number(),
-      comment: z.string().optional(),
-      timestamp: z.string()
-    }))
-  }).optional(),
-
+      count: z.number(),
+      reviews: z.array(
+        z.object({
+          txHash: z.string(),
+          score: z.number(),
+          comment: z.string().optional(),
+          timestamp: z.string(),
+        }),
+      ),
+    })
+    .optional(),
 });
 export type DatasetDetail = z.infer<typeof DatasetDetailSchema>;
 export type DatasetMeta = z.infer<typeof DatasetMetaSchema>;
@@ -258,6 +201,7 @@ export const TransactionSchema = z.object({
   datasetId: z.string(),
   txHash: z.string(),
   amount: z.number(),
+  sellerReceived: z.number().optional(),
   buyerQuery: z.string().optional(),
   aiSummary: z.string().optional(),
   timestamp: z.string(),
@@ -429,15 +373,9 @@ export const api = {
       parseApiResponse(DatasetDetailSchema, r.dataset),
     ),
 
-  submitDatasetRating: (id: string, score: number) =>
-    request<{ success: boolean; ratings: { score: number; count: number } }>(
-      `${getApiBaseUrl()}/datasets/${id}/ratings`,
-      { method: 'POST', body: JSON.stringify({ score }) },
-    ).then(r => r.ratings),
-
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(
-      `${BASE}/analytics/seller/${encodeURIComponent(wallet)}`,
+      `${getApiBaseUrl()}/analytics/seller/${encodeURIComponent(wallet)}`,
     ).then(r => ({
       revenueSeries: r.revenueSeries,
       queryVolumeSeries: r.queryVolumeSeries,
@@ -479,9 +417,14 @@ export const api = {
     }),
 
   getRatings: (id: string, page = 1, limit = 10) =>
-    request<{ success: boolean; score: number; count: number; reviews: Array<{ txHash: string; score: number; comment?: string; timestamp: string }>; page: number; totalPages: number }>(
-      `${getApiBaseUrl()}/datasets/${id}/ratings?page=${page}&limit=${limit}`,
-    ),
+    request<{
+      success: boolean;
+      score: number;
+      count: number;
+      reviews: Array<{ txHash: string; score: number; comment?: string; timestamp: string }>;
+      page: number;
+      totalPages: number;
+    }>(`${getApiBaseUrl()}/datasets/${id}/ratings?page=${page}&limit=${limit}`),
 
   agentInfo: () => request<AgentInfo>(`${getApiBaseUrl()}/agent/info`),
 
@@ -504,6 +447,7 @@ export const api = {
     description: string;
     type: string;
     pricePerQuery: number;
+    paymentToken?: 'USDC' | 'EURC' | 'XLM';
     sellerWallet: string;
     notificationEmail?: string;
     data: unknown;

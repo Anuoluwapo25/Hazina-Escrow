@@ -9,7 +9,7 @@ const meta: Meta<typeof WalletConnectButton> = {
   },
   tags: ['autodocs'],
   decorators: [
-    (Story) => (
+    Story => (
       <div className="w-80 p-4 glass-card">
         <Story />
       </div>
@@ -29,9 +29,9 @@ const mockPayment = {
 export const Default: Story = {
   args: {
     payment: mockPayment,
-    onTxHash: (hash) => console.log('Tx hash received:', hash),
-    onStatusChange: (status) => console.log('Status:', status),
-    onError: (error) => console.log('Error:', error),
+    onTxHash: hash => console.log('Tx hash received:', hash),
+    onStatusChange: status => console.log('Status:', status),
+    onError: error => console.log('Error:', error),
   },
 };
 
@@ -41,7 +41,7 @@ export const SmallAmount: Story = {
       ...mockPayment,
       amount: 0.05,
     },
-    onTxHash: (hash) => console.log('Tx hash received:', hash),
-    onStatusChange: (status) => console.log('Status:', status),
+    onTxHash: hash => console.log('Tx hash received:', hash),
+    onStatusChange: status => console.log('Status:', status),
   },
 };

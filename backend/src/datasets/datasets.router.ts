@@ -10,11 +10,10 @@ import {
   getDataset,
   getTransactions,
   getTransactionsCount,
-
   getTransactionByHash,
-n
   updateDataset,
   type Dataset,
+  type Transaction,
 } from '../common/storage';
 import { requireSellerJwt, requireSellerMutationAuth } from '../common/auth.middleware';
 import { domainMetrics } from '../common/datadog';
@@ -82,6 +81,7 @@ const createDatasetSchema = z.object({
   description: makeSanitizedTextField('description', 2000),
   type: makeSanitizedTextField('type', 100),
   pricePerQuery: z.coerce.number().finite().positive(),
+  paymentToken: z.enum(['USDC', 'EURC', 'XLM']).optional(),
   sellerWallet: z
     .string()
     .trim()
@@ -162,7 +162,6 @@ function getSampleSize(data: Record<string, unknown>): number {
 }
 
 function withoutRawData(dataset: Dataset) {
-
   const { data: _data, ...meta } = dataset;
   return {
     ...meta,
@@ -187,7 +186,14 @@ function toDatasetDetail(dataset: Dataset) {
 
   const { data: _data, notificationEmail: _notificationEmail, ...meta } = dataset;
   return meta;
+}
 
+function toTransactionResponse(tx: Transaction) {
+  const { sellerAmount, ...rest } = tx;
+  return {
+    ...rest,
+    ...(sellerAmount !== undefined ? { sellerReceived: sellerAmount } : {}),
+  };
 }
 
 async function getSellerDashboardData(sellerWallet: string) {
@@ -200,7 +206,7 @@ async function getSellerDashboardData(sellerWallet: string) {
 
   return {
     datasets: sellerDatasets.map(withoutRawData),
-    transactions,
+    transactions: transactions.map(toTransactionResponse),
     stats: {
       totalDatasets: sellerDatasets.length,
       totalQueries: sellerDatasets.reduce((sum, dataset) => sum + dataset.queriesServed, 0),
@@ -508,29 +514,12 @@ datasetsRouter.get('/transactions', requireSellerJwt, async (req: Request, res: 
  *         description: Dataset not found
  */
 datasetsRouter.get('/:id', async (req: Request, res: Response) => {
-  const dataset = await getDataset(req.params.id);
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'Missing dataset id' });
+  const dataset = await getDataset(id);
   if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
   return res.json({ success: true, dataset: toDatasetDetail(dataset) });
 });
-
-const ratingSchema = z.object({ score: z.coerce.number().int().min(1).max(5) });
-
-datasetsRouter.post(
-  '/:id/ratings',
-  validateBody(ratingSchema),
-  async (req: Request, res: Response) => {
-    const dataset = await getDataset(req.params.id);
-    if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
-    const { score } = req.body as z.infer<typeof ratingSchema>;
-    const current = dataset.ratings ?? { score: 0, count: 0 };
-    const count = current.count + 1;
-    const average = Number(((current.score * current.count + score) / count).toFixed(2));
-    const updated = await updateDataset(dataset.id, { ratings: { score: average, count } });
-    return res
-      .status(201)
-      .json({ success: true, ratings: updated?.ratings ?? { score: average, count } });
-  },
-);
 
 /**
  * @openapi
@@ -560,7 +549,9 @@ datasetsRouter.post(
  *                     type: object
  */
 datasetsRouter.get('/:id/transactions', requireSellerJwt, async (req: Request, res: Response) => {
-  const dataset = await getDataset(req.params.id);
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'Missing dataset id' });
+  const dataset = await getDataset(id);
   if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
   if (dataset.sellerWallet !== req.sellerAuth?.sellerWallet) {
     return res.status(403).json({ error: 'Dataset does not belong to authenticated seller' });
@@ -568,10 +559,16 @@ datasetsRouter.get('/:id/transactions', requireSellerJwt, async (req: Request, r
 
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
   const offset = parseInt(req.query.offset as string) || 0;
-  const transactions = await getTransactions(req.params.id, limit, offset);
-  const total = await getTransactionsCount(req.params.id);
+  const transactions = await getTransactions(id, limit, offset);
+  const total = await getTransactionsCount(id);
 
-  return res.json({ success: true, transactions, total, limit, offset });
+  return res.json({
+    success: true,
+    transactions: transactions.map(toTransactionResponse),
+    total,
+    limit,
+    offset,
+  });
 });
 
 /**
@@ -584,44 +581,49 @@ datasetsRouter.get('/:id/transactions', requireSellerJwt, async (req: Request, r
 const createRatingSchema = z.object({
   txHash: z.string().trim().min(1),
   score: z.number().int().min(1).max(5),
-  comment: makeSanitizedTextField('comment', 500).optional()
+  comment: makeSanitizedTextField('comment', 500).optional(),
 });
 
-datasetsRouter.post('/:id/ratings', validateBody(createRatingSchema), async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { txHash, score, comment } = req.body as z.infer<typeof createRatingSchema>;
+datasetsRouter.post(
+  '/:id/ratings',
+  validateBody(createRatingSchema),
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'Missing dataset id' });
+    const { txHash, score, comment } = req.body as z.infer<typeof createRatingSchema>;
 
-  const dataset = await getDataset(id);
-  if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+    const dataset = await getDataset(id);
+    if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
 
-  const tx = await getTransactionByHash(txHash);
-  if (!tx || tx.datasetId !== id) {
-    return res.status(403).json({ error: 'Invalid transaction hash for this dataset' });
-  }
-  if (tx.deliveryStatus !== 'delivered') {
-    return res.status(403).json({ error: 'Data must be delivered before rating' });
-  }
+    const tx = await getTransactionByHash(txHash);
+    if (!tx || tx.datasetId !== id) {
+      return res.status(403).json({ error: 'Invalid transaction hash for this dataset' });
+    }
+    if (tx.deliveryStatus !== 'delivered') {
+      return res.status(403).json({ error: 'Data must be delivered before rating' });
+    }
 
-  const ratings = dataset.ratings || { score: 0, count: 0, reviews: [] };
-  if (ratings.reviews.some(r => r.txHash === txHash)) {
-    return res.status(409).json({ error: 'Duplicate rating for this transaction' });
-  }
+    const ratings = dataset.ratings || { score: 0, count: 0, reviews: [] };
+    if (ratings.reviews.some(r => r.txHash === txHash)) {
+      return res.status(409).json({ error: 'Duplicate rating for this transaction' });
+    }
 
-  ratings.reviews.push({
-    txHash,
-    score,
-    comment,
-    timestamp: new Date().toISOString()
-  });
+    ratings.reviews.push({
+      txHash,
+      score,
+      comment,
+      timestamp: new Date().toISOString(),
+    });
 
-  const totalScore = ratings.reviews.reduce((sum, r) => sum + r.score, 0);
-  ratings.count = ratings.reviews.length;
-  ratings.score = totalScore / ratings.count;
+    const totalScore = ratings.reviews.reduce((sum, r) => sum + r.score, 0);
+    ratings.count = ratings.reviews.length;
+    ratings.score = totalScore / ratings.count;
 
-  await updateDataset(id, { ratings });
+    await updateDataset(id, { ratings });
 
-  return res.status(201).json({ success: true, ratings });
-});
+    return res.status(201).json({ success: true, ratings });
+  },
+);
 
 /**
  * @openapi
@@ -632,11 +634,12 @@ datasetsRouter.post('/:id/ratings', validateBody(createRatingSchema), async (req
  */
 datasetsRouter.get('/:id/ratings', async (req: Request, res: Response) => {
   const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'Missing dataset id' });
   const dataset = await getDataset(id);
   if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
 
   const ratings = dataset.ratings || { score: 0, count: 0, reviews: [] };
-  
+
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 10;
   const start = (page - 1) * limit;
@@ -648,7 +651,7 @@ datasetsRouter.get('/:id/ratings', async (req: Request, res: Response) => {
     count: ratings.count,
     reviews: paginatedReviews,
     page,
-    totalPages: Math.ceil(ratings.reviews.length / limit)
+    totalPages: Math.ceil(ratings.reviews.length / limit),
   });
 });
 
@@ -698,8 +701,16 @@ datasetsRouter.post(
   requireSellerMutationAuth,
   validateBody(createDatasetSchema),
   async (req: Request, res: Response) => {
-    const { name, description, type, pricePerQuery, sellerWallet, notificationEmail, data } =
-      req.body as z.infer<typeof createDatasetSchema>;
+    const {
+      name,
+      description,
+      type,
+      pricePerQuery,
+      paymentToken,
+      sellerWallet,
+      notificationEmail,
+      data,
+    } = req.body as z.infer<typeof createDatasetSchema>;
 
     const now = new Date().toISOString();
     const dataset: Dataset = {
@@ -708,13 +719,14 @@ datasetsRouter.post(
       description,
       type,
       pricePerQuery,
+      paymentToken,
       sellerWallet,
       notificationEmail,
       data,
       queriesServed: 0,
       totalEarned: 0,
       createdAt: now,
-      ratings: { score: 0, count: 0 },
+      ratings: { score: 0, count: 0, reviews: [] },
       priceHistory: [{ price: pricePerQuery, changedAt: now }],
     };
 

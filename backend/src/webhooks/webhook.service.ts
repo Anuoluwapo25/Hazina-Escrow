@@ -100,7 +100,7 @@ export async function dispatchWebhook(
     }
 
     if (attempt < MAX_RETRIES - 1) {
-      await sleep(RETRY_DELAYS_MS[attempt]);
+      await sleep(RETRY_DELAYS_MS[attempt] ?? 1000);
     }
   }
 

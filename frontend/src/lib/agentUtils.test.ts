@@ -79,7 +79,7 @@ describe('localizeScale', () => {
         fc.constantFrom(
           (s: string) => s,
           (s: string) => s.toUpperCase(),
-          (s: string) => s[0]!.toUpperCase() + s.slice(1),
+          (s: string) => s.charAt(0).toUpperCase() + s.slice(1),
         ),
         (value, transform) => {
           const v1 = localizeScale(value, t);

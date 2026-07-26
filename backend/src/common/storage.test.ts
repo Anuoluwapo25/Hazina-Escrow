@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import {
   addTransaction,
@@ -11,9 +9,6 @@ import {
   type Store,
   type Transaction,
 } from './storage';
-
-const DATA_PATH = path.join(__dirname, '../../../data/datasets.json');
-const BACKUP_PATH = path.join(__dirname, '../../../data/datasets.json.storage.test.bak');
 
 const FIXTURE_DATASET: Dataset = {
   id: 'ds-storage-test',
@@ -43,17 +38,11 @@ async function seedStore(overrides?: Partial<Store>): Promise<void> {
 
 describe('storage', () => {
   beforeEach(async () => {
-    if (fs.existsSync(DATA_PATH)) {
-      fs.copyFileSync(DATA_PATH, BACKUP_PATH);
-    }
     await seedStore();
   });
 
-  afterEach(() => {
-    if (fs.existsSync(BACKUP_PATH)) {
-      fs.copyFileSync(BACKUP_PATH, DATA_PATH);
-      fs.unlinkSync(BACKUP_PATH);
-    }
+  afterEach(async () => {
+    await writeStore({ datasets: [], transactions: [], webhooks: [], payoutFailures: [] });
   });
 
   it('txHashUsed returns true only for existing hashes', async () => {

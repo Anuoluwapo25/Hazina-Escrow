@@ -54,8 +54,10 @@ function fillRequiredFields() {
   });
   // Blur wallet input to trigger validation
   fireEvent.blur(screen.getByPlaceholderText('G... (56-character Stellar public key)'));
-  // Set dataset type
-  fireEvent.change(screen.getByRole('combobox'), {
+  // Set dataset type (first combobox; the second is the payment token select)
+  const [typeSelect] = screen.getAllByRole('combobox');
+  if (!typeSelect) throw new Error('Expected dataset type combobox to exist');
+  fireEvent.change(typeSelect, {
     target: { value: 'whale-wallets' },
   });
   // Set a valid price by directly changing the input
@@ -190,12 +192,10 @@ describe('SellPage', () => {
   describe('Draft auto-save and restoration', () => {
     beforeEach(() => {
       localStorage.clear();
-      vi.useFakeTimers();
     });
 
     afterEach(() => {
       localStorage.clear();
-      vi.useRealTimers();
     });
 
     it('persists form data to localStorage when fields change', async () => {
@@ -256,7 +256,7 @@ describe('SellPage', () => {
 
       expect(screen.getByDisplayValue('Saved Dataset')).toBeTruthy();
       expect(screen.getByDisplayValue('Saved description')).toBeTruthy();
-      expect(screen.getByDisplayValue('0.1')).toBeTruthy();
+      expect(screen.getByDisplayValue('0.10')).toBeTruthy();
     });
 
     it('shows draft restored toast notification when draft is loaded', async () => {

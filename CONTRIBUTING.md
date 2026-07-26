@@ -229,8 +229,8 @@ type AsyncState<T> =
 const sellerAmount = dataset.pricePerQuery * 0.95;
 
 // Good
-import { PLATFORM_FEE_BPS } from '../lib/constants';
-const sellerAmount = dataset.pricePerQuery * (1 - PLATFORM_FEE_BPS / 10_000);
+import { PLATFORM_FEE_RATE } from '../lib/constants';
+const sellerAmount = dataset.pricePerQuery * (1 - PLATFORM_FEE_RATE);
 ```
 
 ### Rust / Smart Contract

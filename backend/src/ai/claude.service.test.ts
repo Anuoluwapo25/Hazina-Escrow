@@ -10,9 +10,9 @@ vi.mock('@anthropic-ai/sdk', () => {
     }
   }
 
-  const MockAnthropic = vi.fn().mockImplementation(() => ({
-    messages: { create: mockCreate },
-  })) as unknown as { new (): object; APITimeoutError: typeof APITimeoutError };
+  const MockAnthropic = vi.fn().mockImplementation(function () {
+    return { messages: { create: mockCreate } };
+  }) as unknown as { new (): object; APITimeoutError: typeof APITimeoutError };
   MockAnthropic.APITimeoutError = APITimeoutError;
 
   return { default: MockAnthropic };

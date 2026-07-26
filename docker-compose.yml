@@ -10,7 +10,7 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
-      - ./data/datasets.json:/app/data/datasets.json
+      - ./data:/app/data
 
   frontend:
     build:

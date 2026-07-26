@@ -262,6 +262,7 @@ export const sw: EnglishMessages = {
       dataType: 'Aina ya data',
       pricePerQuery: 'Bei / swali (USDC)',
       pricePerQueryError: 'Bei lazima iwe kubwa kuliko 0',
+      paymentToken: 'Tokeni ya malipo',
       quickPricePresets: 'Bei za haraka:',
       sellerWallet: 'Anwani yako ya Stellar Wallet',
       sellerWalletPlaceholder: 'G... (ufunguo wa umma wa Stellar wa herufi 56)',

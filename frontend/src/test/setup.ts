@@ -7,20 +7,19 @@ vi.stubGlobal('import.meta.env', {
   VITE_STELLAR_NETWORK: 'testnet',
 });
 
-// Mock window.matchMedia
-vi.stubGlobal(
-  'matchMedia',
-  vi.fn().mockImplementation((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  })),
-);
+// Mock window.matchMedia with a plain function — not a `vi.fn()` — so that
+// `vi.restoreAllMocks()`/`vi.resetAllMocks()` in individual test files can't
+// wipe its implementation mid-suite and leave later mounts calling `undefined`.
+vi.stubGlobal('matchMedia', (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addListener: () => {},
+  removeListener: () => {},
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  dispatchEvent: () => false,
+}));
 
 // Mock WebSocket
 class MockWebSocket {

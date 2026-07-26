@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockCreate = vi.fn();
 
 vi.mock('@anthropic-ai/sdk', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    messages: {
-      create: mockCreate,
-    },
-  })),
+  default: vi.fn().mockImplementation(function () {
+    return {
+      messages: {
+        create: mockCreate,
+      },
+    };
+  }),
 }));
 
 import { parseBudget, parseRiskTolerance, synthesizeResearch } from './research.service';
@@ -95,11 +97,7 @@ describe('synthesizeResearch', () => {
       userQuery: 'Find a safe USDC vault',
       budget: 500,
       riskTolerance: 'low',
-      yieldData: {},
-      whaleData: {},
-      riskData: {},
-      sentimentData: {},
-      datasetCosts: {},
+      availableSellers: [],
     });
 
     expect(result.topOpportunity.protocol).toBe('Aave');
@@ -137,11 +135,7 @@ describe('synthesizeResearch', () => {
       userQuery: 'Find a balanced USDC vault',
       budget: 500,
       riskTolerance: 'medium',
-      yieldData: {},
-      whaleData: {},
-      riskData: {},
-      sentimentData: {},
-      datasetCosts: {},
+      availableSellers: [],
     });
 
     expect(mockCreate).toHaveBeenCalledWith(

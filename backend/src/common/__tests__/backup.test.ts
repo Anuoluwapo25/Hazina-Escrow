@@ -55,8 +55,8 @@ describe('BackupService', () => {
 
     const backups = await backupService.listBackups();
     expect(backups.length).toBe(2);
-    expect(backups[0].filename).toBeDefined();
-    expect(backups[0].timestamp).toBeDefined();
+    expect(backups[0]?.filename).toBeDefined();
+    expect(backups[0]?.timestamp).toBeDefined();
   });
 
   it('should rotate old backups when exceeding maxBackups', async () => {

@@ -11,12 +11,14 @@ vi.mock('../common/storage', () => ({
   getAllDatasets: vi.fn(),
   getDataset: vi.fn(),
   addDataset: vi.fn(),
+  updateDataset: vi.fn(),
   getTransactions: vi.fn(),
   getTransactionsCount: vi.fn(),
+  getTransactionByHash: vi.fn(),
 }));
 
 const { mockIsValidStellarAddress } = vi.hoisted(() => ({
-  mockIsValidStellarAddress: vi.fn<[string], boolean>(),
+  mockIsValidStellarAddress: vi.fn<(address: string) => boolean>(),
 }));
 
 vi.mock('@stellar/stellar-sdk', () => ({
@@ -28,8 +30,10 @@ import {
   getAllDatasets,
   getDataset,
   addDataset,
+  updateDataset,
   getTransactions,
   getTransactionsCount,
+  getTransactionByHash,
 } from '../common/storage';
 import type { Dataset, Transaction } from '../common/storage';
 
@@ -410,5 +414,213 @@ describe('wallet address validation on POST /api/datasets', () => {
       .send(validDatasetBody);
 
     expect(mockIsValidStellarAddress).toHaveBeenCalledWith(VALID_WALLET);
+  });
+});
+
+// ── POST/GET /:id/ratings ─────────────────────────────────────────────────────
+
+const DATASET_ID = 'ds-rate-me';
+const TX_HASH = 'abc123txhash';
+
+const baseDataset: Dataset = {
+  id: DATASET_ID,
+  name: 'Rateable Dataset',
+  description: 'A dataset with ratings',
+  type: 'sentiment',
+  pricePerQuery: 1,
+  sellerWallet: SELLER_A,
+  data: {},
+  queriesServed: 1,
+  totalEarned: 1,
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
+const deliveredTx: Transaction = {
+  id: 'tx-rate',
+  datasetId: DATASET_ID,
+  txHash: TX_HASH,
+  amount: 1,
+  deliveryStatus: 'delivered',
+  timestamp: '2026-01-05T00:00:00.000Z',
+};
+
+describe('POST /api/v1/datasets/:id/ratings', () => {
+  let app: Express;
+
+  beforeEach(() => {
+    app = makeApp();
+    vi.mocked(getDataset).mockResolvedValue({ ...baseDataset });
+    vi.mocked(getTransactionByHash).mockResolvedValue(deliveredTx);
+    vi.mocked(updateDataset).mockImplementation(
+      async (_id, updates) =>
+        ({
+          ...baseDataset,
+          ...updates,
+        }) as Dataset,
+    );
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('accepts a valid txHash + score and returns the updated ratings', async () => {
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ txHash: TX_HASH, score: 4 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.ratings.reviews).toHaveLength(1);
+    expect(res.body.ratings.reviews[0]).toMatchObject({ txHash: TX_HASH, score: 4 });
+    expect(res.body.ratings.count).toBe(1);
+    expect(res.body.ratings.score).toBe(4);
+  });
+
+  it('stores an optional comment alongside the review', async () => {
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ txHash: TX_HASH, score: 5, comment: 'Great dataset!' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.ratings.reviews[0].comment).toBe('Great dataset!');
+  });
+
+  it('returns 400 when txHash is missing (bare score rejected)', async () => {
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ score: 3 });
+
+    expect(res.status).toBe(400);
+    expect(updateDataset).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when score is out of range', async () => {
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ txHash: TX_HASH, score: 6 });
+
+    expect(res.status).toBe(400);
+    expect(updateDataset).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when the dataset does not exist', async () => {
+    vi.mocked(getDataset).mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .post(`/api/v1/datasets/nonexistent/ratings`)
+      .send({ txHash: TX_HASH, score: 3 });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 403 when txHash does not exist', async () => {
+    vi.mocked(getTransactionByHash).mockResolvedValue(undefined);
+
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ txHash: 'unknown-hash', score: 3 });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Invalid transaction hash');
+  });
+
+  it('returns 403 when txHash belongs to a different dataset', async () => {
+    vi.mocked(getTransactionByHash).mockResolvedValue({ ...deliveredTx, datasetId: 'other-ds' });
+
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ txHash: TX_HASH, score: 3 });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Invalid transaction hash');
+  });
+
+  it('returns 403 when delivery is not yet complete', async () => {
+    vi.mocked(getTransactionByHash).mockResolvedValue({
+      ...deliveredTx,
+      deliveryStatus: 'pending',
+    });
+
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ txHash: TX_HASH, score: 3 });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('delivered before rating');
+  });
+
+  it('returns 409 on duplicate txHash (prevents repeat ratings)', async () => {
+    const datasetWithReview: Dataset = {
+      ...baseDataset,
+      ratings: {
+        score: 4,
+        count: 1,
+        reviews: [{ txHash: TX_HASH, score: 4, timestamp: '2026-01-05T00:00:00.000Z' }],
+      },
+    };
+    vi.mocked(getDataset).mockResolvedValue(datasetWithReview);
+
+    const res = await request(app)
+      .post(`/api/v1/datasets/${DATASET_ID}/ratings`)
+      .send({ txHash: TX_HASH, score: 2 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain('Duplicate rating');
+    expect(updateDataset).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /api/v1/datasets/:id/ratings', () => {
+  let app: Express;
+
+  beforeEach(() => {
+    app = makeApp();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns score, count, and paginated reviews', async () => {
+    const datasetWithReviews: Dataset = {
+      ...baseDataset,
+      ratings: {
+        score: 4.5,
+        count: 2,
+        reviews: [
+          { txHash: 'tx-1', score: 4, timestamp: '2026-01-05T00:00:00.000Z' },
+          { txHash: 'tx-2', score: 5, timestamp: '2026-01-06T00:00:00.000Z' },
+        ],
+      },
+    };
+    vi.mocked(getDataset).mockResolvedValue(datasetWithReviews);
+
+    const res = await request(app).get(`/api/v1/datasets/${DATASET_ID}/ratings`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.score).toBe(4.5);
+    expect(res.body.count).toBe(2);
+    expect(res.body.reviews).toHaveLength(2);
+  });
+
+  it('returns empty reviews for a dataset with no ratings', async () => {
+    vi.mocked(getDataset).mockResolvedValue({ ...baseDataset });
+
+    const res = await request(app).get(`/api/v1/datasets/${DATASET_ID}/ratings`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.score).toBe(0);
+    expect(res.body.count).toBe(0);
+    expect(res.body.reviews).toEqual([]);
+  });
+
+  it('returns 404 when the dataset does not exist', async () => {
+    vi.mocked(getDataset).mockResolvedValue(undefined);
+
+    const res = await request(app).get(`/api/v1/datasets/nonexistent/ratings`);
+
+    expect(res.status).toBe(404);
   });
 });

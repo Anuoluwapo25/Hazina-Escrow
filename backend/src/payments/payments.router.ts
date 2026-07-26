@@ -6,10 +6,8 @@ import { sellerShare, platformFee as computePlatformFee } from '../common/consta
 import { generateDataSummary } from '../ai/claude.service';
 import { sanitizeUserText } from '../common/sanitize';
 import { requireAdminKey } from '../common/auth.middleware';
-import { scheduleRetrySweep } from './payout-retry.service';
 import { transactionEventEmitter } from '../websocket/transaction-events';
 import { domainMetrics } from '../common/datadog';
-import { deliverVerifiedPayment, markDeliveryFailure, processPayment } from './payments.service';
 import { PaymentError, StellarTimeoutError } from './stellar.service';
 import { logger } from '../lib/logger';
 import {
@@ -17,13 +15,10 @@ import {
   updateDataset,
   addTransaction,
   getUnpaidTransactions,
+  reserveTxHash,
+  getFailedDeliveryTransactions,
+  txHashUsed,
 } from '../common/storage';
-import { validateBody } from '../common/validate';
-import { sellerShare, platformFee as computePlatformFee } from '../common/constants';
-import { generateDataSummary } from '../ai/claude.service';
-import { sanitizeUserText } from '../common/sanitize';
-import { transactionEventEmitter } from '../websocket/transaction-events';
-import { requireAdminKey } from '../common/auth.middleware';
 import {
   getManualReviewPayouts,
   recordPayoutFailure,
@@ -38,7 +33,6 @@ import {
   startSellerNotificationRetryWorker,
   stopSellerNotificationRetryWorker,
 } from './payments.service';
-import { PaymentError, StellarTimeoutError } from './stellar.service';
 
 export const paymentsRouter = Router();
 
@@ -167,11 +161,14 @@ const verifyDemoSchema = z.object({
 
 // POST /api/query/:id — initiate query, returns 402 Payment Required
 paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
-  const dataset = await getDataset(req.params.id);
+  // Route requires :id, so Express guarantees this is present when matched.
+  const id = req.params.id as string;
+
+  const dataset = await getDataset(id);
   if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
 
   const timestamp = Date.now();
-  const memo = `haz-${req.params.id.slice(0, 8)}-${timestamp}`;
+  const memo = `haz-${id.slice(0, 8)}-${timestamp}`;
 
   const transactionId = `tx-${uuidv4()}`;
   const tokenCode = dataset.paymentToken || 'USDC';
@@ -179,7 +176,10 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
   await addTransaction({
     id: transactionId,
     datasetId: dataset.id,
-    txHash: '', // Not yet known
+    // tx_hash is NOT NULL UNIQUE; the real hash isn't known until verification,
+    // so use a placeholder unique to this transaction rather than ''  which
+    // would collide across concurrent pending transactions.
+    txHash: `pending-${transactionId}`,
     memo,
     amount: dataset.pricePerQuery,
     paymentToken: tokenCode,
@@ -275,7 +275,10 @@ paymentsRouter.post(
   validateBody(verifySchema),
   async (req: Request, res: Response) => {
     const { txHash, buyerQuestion } = req.body as z.infer<typeof verifySchema>;
-    const dataset = await getDataset(req.params.id);
+    // Route requires :id, so Express guarantees this is present when matched.
+    const id = req.params.id as string;
+
+    const dataset = await getDataset(id);
 
     if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
 
@@ -283,6 +286,7 @@ paymentsRouter.post(
       return res.status(400).json({ error: 'Escrow already processed' });
     }
 
+    const releaseReservation = reserveTxHash(txHash);
     try {
       const result = await processPayment({
         txHash,
@@ -291,7 +295,7 @@ paymentsRouter.post(
       });
 
       // Forward seller's share on-chain; failures enter the DLQ for retry
-      const sellerAmount = parseFloat((dataset.pricePerQuery * 0.95).toFixed(7));
+      const sellerAmount = sellerShare(dataset.pricePerQuery);
       try {
         const payment = await sendUsdcPayment({
           destinationAddress: dataset.sellerWallet,
@@ -319,10 +323,8 @@ paymentsRouter.post(
         return res.status(202).json(result);
       }
 
-      return res.json({
-        ...result,
-        warning: result.pendingDelivery ? result.warning : null,
-      });
+      // result.pendingDelivery is guaranteed false here (handled above).
+      return res.json({ ...result, warning: null });
     } catch (err) {
       if (err instanceof StellarTimeoutError) {
         return res.status(503).json({ error: err.message });
@@ -332,6 +334,8 @@ paymentsRouter.post(
       }
       console.error('[Verify] Unexpected error processing payment:', err);
       return res.status(500).json({ error: 'Payment verification failed — please try again' });
+    } finally {
+      releaseReservation();
     }
   },
 );
@@ -400,7 +404,10 @@ paymentsRouter.post(
   validateBody(verifyDemoSchema),
   async (req: Request, res: Response) => {
     const { buyerQuestion } = req.body as z.infer<typeof verifyDemoSchema>;
-    const dataset = await getDataset(req.params.id);
+    // Route requires :id, so Express guarantees this is present when matched.
+    const id = req.params.id as string;
+
+    const dataset = await getDataset(id);
 
     if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
 

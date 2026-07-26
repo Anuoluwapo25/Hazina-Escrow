@@ -191,7 +191,7 @@ export function parseRiskTolerance(query: string): 'low' | 'medium' | 'high' {
 export function parseBudget(query: string): number {
   const match = query.match(/\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(usdc|usd|budget)?/i);
   if (match) {
-    const parsed = Number(match[1].replace(/,/g, ''));
+    const parsed = Number((match[1] ?? '').replace(/,/g, ''));
     if (Number.isFinite(parsed) && parsed > 0) {
       return Math.round(parsed);
     }

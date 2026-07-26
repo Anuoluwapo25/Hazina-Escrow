@@ -42,6 +42,9 @@ export function decryptSecret(stored: string): string {
     return stored;
   }
   const [ivHex, authTagHex, ciphertextHex] = parts;
+  if (!ivHex || !authTagHex || !ciphertextHex) {
+    return stored;
+  }
   const key = getKey();
   const iv = Buffer.from(ivHex, 'hex');
   const authTag = Buffer.from(authTagHex, 'hex');

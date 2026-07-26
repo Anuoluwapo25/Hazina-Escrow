@@ -48,6 +48,11 @@ fn test_lock_multi_and_release_multi() {
     // Verify TTL extension for lock_multi
     // We cannot easily test TTL extension via external client, but calling it succeeds implies it didn't crash.
 
+    // release/release_multi require the buyer to confirm delivery first.
+    client.confirm_delivery(&0, &buyer);
+    client.confirm_delivery(&1, &buyer);
+    client.confirm_delivery(&2, &buyer);
+
     let mut escrow_ids = Vec::new(&env);
     escrow_ids.push_back(0);
     escrow_ids.push_back(1);
@@ -55,7 +60,10 @@ fn test_lock_multi_and_release_multi() {
 
     client.release_multi(&admin, &escrow_ids);
 
-    assert_eq!(token_client.balance(&contract_id), 15_000); // 3 * 5000 (5% platform fee)
+    // The platform cut is transferred out to the treasury (defaults to admin
+    // when unset), not retained in the contract's own balance.
+    assert_eq!(token_client.balance(&contract_id), 0);
+    assert_eq!(token_client.balance(&admin), 15_000); // 3 * 5000 (5% platform fee)
     assert_eq!(token_client.balance(&seller1), 95_000);
     assert_eq!(token_client.balance(&seller2), 95_000);
     assert_eq!(token_client.balance(&seller3), 95_000);
@@ -120,7 +128,7 @@ fn test_fee_floor() {
         amount: 1, // 1 stroop
         token: token.address.clone(),
         deadline: now + 3600,
-        buyer_confirmed: false,
+        buyer_confirmed: true,
         platform_fee_bps: 500,
         released: false,
         refunded: false,
@@ -142,5 +150,8 @@ fn test_fee_floor() {
     client.release(&admin, &0);
 
     assert_eq!(token_client.balance(&seller), 0);
-    assert_eq!(token_client.balance(&contract_id), 1); // 1 stroop stays as platform cut
+    // The platform cut is transferred out to the treasury (defaults to admin
+    // when unset), not retained in the contract's own balance.
+    assert_eq!(token_client.balance(&contract_id), 0);
+    assert_eq!(token_client.balance(&admin), 1); // 1 stroop floor as platform cut
 }

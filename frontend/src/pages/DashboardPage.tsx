@@ -23,12 +23,10 @@ import {
   Loader2,
 } from 'lucide-react';
 
-import { api, DatasetMeta, SellerAnalytics, Transaction } from '../lib/api';
-
-import { api, DatasetMeta, PaginatedDatasets, Transaction } from '../lib/api';
+import { api, DatasetMeta, PaginatedDatasets, SellerAnalytics, Transaction } from '../lib/api';
 
 import { useCountUp } from '../hooks/useCountUp';
-import { formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
+import { formatTimeAgo, formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
 import { Link } from 'react-router-dom';
 import {
   Skeleton,
@@ -155,7 +153,7 @@ function buildChartData(transactions: Transaction[], locale: string) {
     });
     if (days[key]) {
       days[key].queries += 1;
-      days[key].earned += tx.amount * 0.95;
+      days[key].earned += tx.sellerReceived ?? tx.amount;
     }
   });
   return Object.entries(days).map(([day, v]) => ({ day, ...v }));
@@ -174,8 +172,6 @@ export default function DashboardPage() {
   const [analytics, setAnalytics] = useState<SellerAnalytics | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'analytics'>('overview');
 
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-
   const [isMobile, setIsMobile] = useState(false);
   const hasLoadedOnceRef = useRef(false);
   const websocketOptions = useMemo(() => ({ enabled: hasLoadedOnce }), [hasLoadedOnce]);
@@ -184,7 +180,6 @@ export default function DashboardPage() {
     websocketOptions,
     websocketCallbacks,
   );
-
 
   useEffect(() => {
     let cancelled = false;
@@ -231,7 +226,6 @@ export default function DashboardPage() {
     };
   }, [t]);
 
-
   const selectedWallet = walletFilter || datasets[0]?.sellerWallet || '';
   useEffect(() => {
     if (!selectedWallet) return;
@@ -275,7 +269,6 @@ export default function DashboardPage() {
     };
   }, []);
 
-
   const totalEarned = datasets.reduce((s, d) => s + d.totalEarned, 0);
   const totalQueries = datasets.reduce((s, d) => s + d.queriesServed, 0);
   const chartData = buildChartData(transactions, locale);
@@ -288,7 +281,6 @@ export default function DashboardPage() {
       day: point.date.slice(5),
       queries: point.count,
     })) ?? chartData;
-
 
   // Compare last 3 days vs preceding 4 days for trend indicators
   const recentEarned = chartData.slice(-3).reduce((s, d) => s + d.earned, 0);
@@ -761,7 +753,7 @@ export default function DashboardPage() {
                           </div>
                           <div className="text-right flex-shrink-0">
                             <p className="text-sm font-display font-bold text-gold">
-                              +${(tx.amount * 0.95).toFixed(4)}
+                              +${(tx.sellerReceived ?? tx.amount).toFixed(4)}
                             </p>
                             <p className="text-xs text-muted-2 font-body">
                               {formatTimeAgo(tx.timestamp, locale)}
@@ -774,7 +766,6 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
-
 
             {analytics && (
               <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">

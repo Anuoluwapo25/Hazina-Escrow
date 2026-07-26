@@ -12,8 +12,13 @@ export default mergeConfig(
             'src/common/storage.test.ts',
             'src/payments/stellar.service.test.ts',
             'src/payments/payments.integration.test.ts',
+            'src/payments/__tests__/payments.router.test.ts',
           ]
-        : ['src/common/storage.test.ts', 'src/payments/stellar.service.test.ts'],
+        : [
+            'src/common/storage.test.ts',
+            'src/payments/stellar.service.test.ts',
+            'src/payments/__tests__/payments.router.test.ts',
+          ],
       coverage: {
         provider: 'v8',
         reporter: ['text', 'json-summary', 'html'],

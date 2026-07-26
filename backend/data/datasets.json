@@ -1,90 +1,74 @@
 {
   "datasets": [
     {
-      "id": "ds-storage-test",
-      "name": "Storage Fixture Dataset",
-      "description": "Fixture dataset for storage tests",
+      "id": "seller-ds-1",
+      "name": "Seller Dataset One",
+      "description": "First seller dataset",
       "type": "yield-data",
-      "pricePerQuery": 0.05,
-      "sellerWallet": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      "data": {
-        "rows": 1
-      },
-      "queriesServed": 0,
-      "totalEarned": 0,
-      "createdAt": "2026-06-01T17:46:04.179Z"
+      "pricePerQuery": 2,
+      "sellerWallet": "GSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+      "data": {},
+      "queriesServed": 2,
+      "totalEarned": 3.8,
+      "createdAt": "2026-05-01T00:00:00.000Z"
+    },
+    {
+      "id": "seller-ds-2",
+      "name": "Seller Dataset Two",
+      "description": "Second seller dataset",
+      "type": "sentiment",
+      "pricePerQuery": 3,
+      "sellerWallet": "GSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS",
+      "data": {},
+      "queriesServed": 1,
+      "totalEarned": 2.85,
+      "createdAt": "2026-05-02T00:00:00.000Z"
+    },
+    {
+      "id": "other-ds",
+      "name": "Other Seller Dataset",
+      "description": "Must not leak into analytics",
+      "type": "wallets",
+      "pricePerQuery": 9,
+      "sellerWallet": "GOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO",
+      "data": {},
+      "queriesServed": 1,
+      "totalEarned": 8.55,
+      "createdAt": "2026-05-03T00:00:00.000Z"
     }
   ],
   "transactions": [
     {
-      "id": "tx-mixed-0",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-0",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
+      "id": "tx-1",
+      "datasetId": "seller-ds-1",
+      "txHash": "hash-1",
+      "buyerWallet": "GBUYER1111111111111111111111111111111111111111111111111",
+      "amount": 2,
+      "timestamp": "2026-06-15T10:00:00.000Z"
     },
     {
-      "id": "tx-mixed-1",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-1",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
+      "id": "tx-2",
+      "datasetId": "seller-ds-1",
+      "txHash": "hash-2",
+      "buyerWallet": "GBUYER1111111111111111111111111111111111111111111111111",
+      "amount": 2,
+      "timestamp": "2026-06-15T12:00:00.000Z"
     },
     {
-      "id": "tx-mixed-2",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-2",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
+      "id": "tx-3",
+      "datasetId": "seller-ds-2",
+      "txHash": "hash-3",
+      "buyerWallet": "GBUYER2222222222222222222222222222222222222222222222222",
+      "amount": 3,
+      "timestamp": "2026-06-16T09:00:00.000Z"
     },
     {
-      "id": "tx-mixed-3",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-3",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
-    },
-    {
-      "id": "tx-mixed-4",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-4",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
-    },
-    {
-      "id": "tx-mixed-5",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-5",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
-    },
-    {
-      "id": "tx-mixed-6",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-6",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
-    },
-    {
-      "id": "tx-mixed-7",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-7",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
-    },
-    {
-      "id": "tx-mixed-8",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-8",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
-    },
-    {
-      "id": "tx-mixed-9",
-      "datasetId": "ds-storage-test",
-      "txHash": "mixed-hash-9",
-      "amount": 0.02,
-      "timestamp": "2026-06-01T17:46:04.248Z"
+      "id": "tx-other",
+      "datasetId": "other-ds",
+      "txHash": "hash-other",
+      "buyerWallet": "GOTHERBUYER",
+      "amount": 9,
+      "timestamp": "2026-06-15T09:00:00.000Z"
     }
   ],
   "webhooks": [],

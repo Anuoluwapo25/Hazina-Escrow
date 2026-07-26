@@ -261,6 +261,7 @@ export const en = {
       dataType: 'Data Type',
       pricePerQuery: 'Price / Query (USDC)',
       pricePerQueryError: 'Price must be greater than 0',
+      paymentToken: 'Payment Token',
       quickPricePresets: 'Quick price presets:',
       sellerWallet: 'Your Stellar Wallet Address',
       sellerWalletPlaceholder: 'G... (56-character Stellar public key)',

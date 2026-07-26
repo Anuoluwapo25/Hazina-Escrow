@@ -262,6 +262,7 @@ export const fr: EnglishMessages = {
       dataType: 'Type de données',
       pricePerQuery: 'Prix / requête (USDC)',
       pricePerQueryError: 'Le prix doit être supérieur à 0',
+      paymentToken: 'Jeton de paiement',
       quickPricePresets: 'Tarifs rapides :',
       sellerWallet: 'Votre adresse Stellar',
       sellerWalletPlaceholder: 'G... (clé publique Stellar de 56 caractères)',

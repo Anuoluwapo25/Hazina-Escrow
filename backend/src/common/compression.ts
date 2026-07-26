@@ -65,7 +65,7 @@ function negotiateEncoding(acceptEncoding: string): Encoding | null {
     .map(part => {
       const [token, qPart] = part.trim().split(';');
       const q = qPart ? parseFloat(qPart.replace(/q\s*=\s*/, '')) : 1;
-      return { token: token.trim().toLowerCase(), q: isNaN(q) ? 1 : q };
+      return { token: (token ?? '').trim().toLowerCase(), q: isNaN(q) ? 1 : q };
     })
     .filter(d => d.q > 0)
     .sort(

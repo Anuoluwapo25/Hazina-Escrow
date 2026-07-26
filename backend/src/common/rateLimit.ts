@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { parsePositiveInt } from './env';
 
 interface RateLimitInfo {
   count: number;
@@ -21,21 +22,12 @@ const DEFAULT_GLOBAL_MAX_REQUESTS = 200;
 const DEFAULT_PAYMENTS_MAX_REQUESTS = 10;
 const DEFAULT_AGENT_MAX_REQUESTS = 5;
 
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-  if (!value) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 export function getRateLimitConfig(
   tier: 'global' | 'payments' | 'agent',
   overrides: RateLimitOptions = {},
 ): ResolvedRateLimitConfig {
   const windowMs =
-    overrides.windowMs ?? parsePositiveInteger(process.env.RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
+    overrides.windowMs ?? parsePositiveInt(process.env.RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
 
   const defaultMaxRequests =
     tier === 'global'
@@ -52,7 +44,7 @@ export function getRateLimitConfig(
         : 'RATE_LIMIT_AGENT_MAX';
 
   const maxRequests =
-    overrides.maxRequests ?? parsePositiveInteger(process.env[envKey], defaultMaxRequests);
+    overrides.maxRequests ?? parsePositiveInt(process.env[envKey], defaultMaxRequests);
 
   return { windowMs, maxRequests };
 }

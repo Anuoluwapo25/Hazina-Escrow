@@ -77,6 +77,7 @@ describe('verifyStellarPayment', () => {
       txHash: 'tx-valid',
       expectedAmount: 1,
       destinationAddress,
+      tokenCode: 'USDC',
     });
 
     expect(result.valid).toBe(true);
@@ -106,6 +107,7 @@ describe('verifyStellarPayment', () => {
       txHash: 'tx-expired',
       expectedAmount: 1,
       destinationAddress,
+      tokenCode: 'USDC',
     });
 
     expect(result.valid).toBe(false);
@@ -133,6 +135,7 @@ describe('verifyStellarPayment', () => {
       txHash: 'tx-amount-mismatch',
       expectedAmount: 1,
       destinationAddress,
+      tokenCode: 'USDC',
     });
 
     expect(result.valid).toBe(false);
@@ -160,6 +163,7 @@ describe('verifyStellarPayment', () => {
       txHash: 'tx-native-asset',
       expectedAmount: 1,
       destinationAddress,
+      tokenCode: 'USDC',
     });
 
     expect(result.valid).toBe(false);
@@ -175,6 +179,7 @@ describe('verifyStellarPayment', () => {
       txHash: 'tx-not-found',
       expectedAmount: 1,
       destinationAddress,
+      tokenCode: 'USDC',
     });
 
     expect(result.valid).toBe(false);
@@ -189,6 +194,7 @@ describe('verifyStellarPayment', () => {
         txHash: 'tx-network-error',
         expectedAmount: 1,
         destinationAddress,
+        tokenCode: 'USDC',
       }),
     ).rejects.toThrow('Stellar network error');
   });
@@ -209,6 +215,7 @@ describe('verifyStellarPayment', () => {
         txHash: 'tx-slow',
         expectedAmount: 1,
         destinationAddress,
+        tokenCode: 'USDC',
       }),
     ).rejects.toBeInstanceOf(StellarTimeoutError);
   }, 10_000);
@@ -224,6 +231,7 @@ describe('verifyStellarPayment', () => {
       txHash: 'tx-slow-message',
       expectedAmount: 1,
       destinationAddress,
+      tokenCode: 'USDC',
     }).catch(e => e);
 
     expect(err).toBeInstanceOf(StellarTimeoutError);
@@ -240,7 +248,12 @@ describe('verifyStellarPayment', () => {
     );
 
     await expect(
-      verifyStellarPayment({ txHash: 'tx-env-timeout', expectedAmount: 1, destinationAddress }),
+      verifyStellarPayment({
+        txHash: 'tx-env-timeout',
+        expectedAmount: 1,
+        destinationAddress,
+        tokenCode: 'USDC',
+      }),
     ).rejects.toBeInstanceOf(StellarTimeoutError);
 
     // Should have timed out close to 100 ms, not 10 000 ms

@@ -2,7 +2,6 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 import {
   HORIZON_URL,
   SOROBAN_RPC_URL,
-  USDC_ISSUER,
   getNetworkPassphrase,
   getTokenByCode,
 } from '../lib/stellar.config';
@@ -81,7 +80,10 @@ export async function sendTokenPayment(params: SendPaymentParams): Promise<SendP
   if (tokenCode === 'XLM') {
     asset = StellarSdk.Asset.native();
   } else {
-    asset = new StellarSdk.Asset(tokenCode, token.issuer!);
+    if (!token.issuer) {
+      throw new Error(`Token ${tokenCode} is missing an issuer configuration`);
+    }
+    asset = new StellarSdk.Asset(tokenCode, token.issuer);
   }
 
   const txBuilder = new StellarSdk.TransactionBuilder(account, {
@@ -196,7 +198,7 @@ export function validateAgentWallet(): void {
   if (!rawSecret) {
     throw new Error(
       '[AgentWallet] AGENT_WALLET_SECRET is not set. ' +
-      'The agent wallet cannot sign transactions.',
+        'The agent wallet cannot sign transactions.',
     );
   }
 
@@ -208,7 +210,7 @@ export function validateAgentWallet(): void {
     // Do NOT include the caught error in this throw — it may echo key material.
     throw new Error(
       '[AgentWallet] AGENT_WALLET_SECRET is set but is not a valid Stellar secret key. ' +
-      'Check the value in your environment configuration.',
+        'Check the value in your environment configuration.',
     );
   }
 

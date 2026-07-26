@@ -6,7 +6,7 @@
       "description": "Real-time tracking of large wallet movements on Stellar.",
       "type": "whale-wallets",
       "pricePerQuery": 0.05,
-      "sellerWallet": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDE",
+      "sellerWallet": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEF",
       "queriesServed": 320,
       "totalEarned": 16.0,
       "createdAt": "2024-01-15T10:00:00.000Z"
@@ -17,7 +17,7 @@
       "description": "Aggregated yield data across major DeFi protocols.",
       "type": "yield-data",
       "pricePerQuery": 0.1,
-      "sellerWallet": "GBCD1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDE",
+      "sellerWallet": "GBCD1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEF",
       "queriesServed": 150,
       "totalEarned": 15.0,
       "createdAt": "2024-02-01T08:00:00.000Z"

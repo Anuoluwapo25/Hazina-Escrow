@@ -1,8 +1,7 @@
 import { promises as fs, existsSync } from 'fs';
 import path from 'path';
 import { logger } from '../lib/logger';
-
-const DATA_PATH = path.join(__dirname, '../../../data/datasets.json');
+import { readStore, writeStore, type Store } from './storage';
 
 export interface BackupConfig {
   enabled: boolean;
@@ -19,9 +18,6 @@ export interface BackupMetadata {
   transactionsCount: number;
 }
 
-/**
- * Service for managing automated database backups
- */
 export class BackupService {
   private config: BackupConfig;
 
@@ -29,9 +25,6 @@ export class BackupService {
     this.config = config;
   }
 
-  /**
-   * Ensure backup directory exists
-   */
   private async ensureBackupDirectory(): Promise<void> {
     if (!existsSync(this.config.backupDir)) {
       await fs.mkdir(this.config.backupDir, { recursive: true });
@@ -39,53 +32,40 @@ export class BackupService {
     }
   }
 
-  /**
-   * Create a backup of the current database state
-   */
   async createBackup(): Promise<BackupMetadata> {
     try {
       await this.ensureBackupDirectory();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `backup-${timestamp}.json`;
+      const unique = Math.random().toString(36).slice(2, 8);
+      const filename = `backup-${timestamp}-${unique}.json`;
       const backupPath = path.join(this.config.backupDir, filename);
 
-      // Read raw bytes once — avoids the parse→object→stringify round-trip that
-      // readStore() + JSON.stringify(backupData) would cause (peak ~3× file size).
-      const rawData = existsSync(DATA_PATH)
-        ? await fs.readFile(DATA_PATH, 'utf-8')
-        : JSON.stringify({ datasets: [], transactions: [], webhooks: [] });
-
-      // Parse once only to extract the two counts needed for metadata.
-      const parsed = JSON.parse(rawData) as { datasets?: unknown[]; transactions?: unknown[] };
-      const datasetsCount = parsed.datasets?.length ?? 0;
-      const transactionsCount = parsed.transactions?.length ?? 0;
+      const store = await readStore();
       const nowIso = new Date().toISOString();
+      const backupData = {
+        metadata: {
+          timestamp: nowIso,
+          version: '1.0.0',
+          datasetsCount: store.datasets.length,
+          transactionsCount: store.transactions.length,
+        },
+        data: store,
+      };
 
-      // Write backup in three sequential chunks: header + raw store bytes + closing brace.
-      // This never materialises a second full JSON string in memory.
-      const fh = await fs.open(backupPath, 'w');
-      try {
-        await fh.write(
-          `{"metadata":${JSON.stringify({ timestamp: nowIso, version: '1.0.0', datasetsCount, transactionsCount })},"data":`,
-        );
-        await fh.write(rawData);
-        await fh.write('}');
-      } finally {
-        await fh.close();
-      }
+      await fs.writeFile(backupPath, JSON.stringify(backupData, null, 2), 'utf-8');
 
       const stats = await fs.stat(backupPath);
       const metadata: BackupMetadata = {
         timestamp: nowIso,
         filename,
         size: stats.size,
-        datasetsCount,
-        transactionsCount,
+        datasetsCount: store.datasets.length,
+        transactionsCount: store.transactions.length,
       };
 
       logger.info(
         `[Backup] Created backup: ${filename} (${this.formatBytes(stats.size)}, ` +
-          `${datasetsCount} datasets, ${transactionsCount} transactions)`,
+          `${store.datasets.length} datasets, ${store.transactions.length} transactions)`,
       );
 
       await this.rotateBackups();
@@ -97,9 +77,6 @@ export class BackupService {
     }
   }
 
-  /**
-   * Rotate backups - keep only the most recent N backups
-   */
   private async rotateBackups(): Promise<void> {
     try {
       const filesList = await fs.readdir(this.config.backupDir);
@@ -109,17 +86,12 @@ export class BackupService {
           .map(async f => {
             const filePath = path.join(this.config.backupDir, f);
             const stats = await fs.stat(filePath);
-            return {
-              name: f,
-              path: filePath,
-              mtime: stats.mtime,
-            };
+            return { name: f, path: filePath, mtime: stats.mtime };
           }),
       );
 
       files.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
 
-      // Delete old backups beyond maxBackups
       if (files.length > this.config.maxBackups) {
         const toDelete = files.slice(this.config.maxBackups);
         for (const file of toDelete) {
@@ -133,9 +105,6 @@ export class BackupService {
     }
   }
 
-  /**
-   * List all available backups
-   */
   async listBackups(): Promise<BackupMetadata[]> {
     try {
       await this.ensureBackupDirectory();
@@ -147,7 +116,6 @@ export class BackupService {
           const filePath = path.join(this.config.backupDir, f);
           const stats = await fs.stat(filePath);
           const content = JSON.parse(await fs.readFile(filePath, 'utf-8'));
-
           return {
             timestamp: content.metadata?.timestamp || stats.mtime.toISOString(),
             filename: f,
@@ -168,9 +136,6 @@ export class BackupService {
     }
   }
 
-  /**
-   * Restore from a specific backup
-   */
   async restoreBackup(filename: string): Promise<void> {
     try {
       const backupPath = path.join(this.config.backupDir, filename);
@@ -180,28 +145,31 @@ export class BackupService {
       }
 
       const backupContent = JSON.parse(await fs.readFile(backupPath, 'utf-8'));
+      const restoredStore = backupContent.data as Store;
 
-      // Create a safety backup before restoring
+      // Safety backup before restoring
       const safetyBackup = `pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
       const safetyPath = path.join(this.config.backupDir, safetyBackup);
-
-      // Read current data and save as safety backup
-      if (existsSync(DATA_PATH)) {
-        const currentData = JSON.parse(await fs.readFile(DATA_PATH, 'utf-8'));
-        const safetyData = {
-          metadata: {
-            timestamp: new Date().toISOString(),
-            version: '1.0.0',
-            datasetsCount: currentData.datasets?.length || 0,
-            transactionsCount: currentData.transactions?.length || 0,
+      const currentStore = await readStore();
+      await fs.writeFile(
+        safetyPath,
+        JSON.stringify(
+          {
+            metadata: {
+              timestamp: new Date().toISOString(),
+              version: '1.0.0',
+              datasetsCount: currentStore.datasets.length,
+              transactionsCount: currentStore.transactions.length,
+            },
+            data: currentStore,
           },
-          data: currentData,
-        };
-        await fs.writeFile(safetyPath, JSON.stringify(safetyData, null, 2), 'utf-8');
-      }
+          null,
+          2,
+        ),
+        'utf-8',
+      );
 
-      // Restore the backup
-      await fs.writeFile(DATA_PATH, JSON.stringify(backupContent.data, null, 2), 'utf-8');
+      await writeStore(restoredStore);
 
       logger.info(`[Backup] Restored from backup: ${filename}`);
       logger.info(`[Backup] Safety backup created: ${safetyBackup}`);
@@ -212,9 +180,6 @@ export class BackupService {
     }
   }
 
-  /**
-   * Get backup statistics
-   */
   async getBackupStats(): Promise<{
     totalBackups: number;
     totalSize: number;
@@ -222,18 +187,14 @@ export class BackupService {
     newestBackup: string | null;
   }> {
     const backups = await this.listBackups();
-
     return {
       totalBackups: backups.length,
       totalSize: backups.reduce((sum, b) => sum + b.size, 0),
-      oldestBackup: backups.length > 0 ? backups[backups.length - 1].timestamp : null,
-      newestBackup: backups.length > 0 ? backups[0].timestamp : null,
+      oldestBackup: backups.length > 0 ? backups[backups.length - 1]!.timestamp : null,
+      newestBackup: backups.length > 0 ? backups[0]!.timestamp : null,
     };
   }
 
-  /**
-   * Format bytes to human-readable string
-   */
   private formatBytes(bytes: number): string {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;

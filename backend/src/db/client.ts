@@ -1,9 +1,11 @@
+import path from 'path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import Database from 'better-sqlite3';
 import { drizzle as drizzleSqlite } from 'drizzle-orm/better-sqlite3';
+import { migrate as migrateSqlite } from 'drizzle-orm/better-sqlite3/migrator';
 import { Pool } from 'pg';
 import * as pgSchema from './schema';
-import { datasetsSqlite, transactionsSqlite, webhooksSqlite } from './schema';
+import { datasetsSqlite, transactionsSqlite, webhooksSqlite, payoutFailuresSqlite } from './schema';
 
 const databaseUrl = process.env.DATABASE_URL || 'file:./sqlite.db';
 
@@ -20,13 +22,16 @@ const db = (() => {
     const sqliteDbPath = databaseUrl.replace(/^file:/, './');
     const sqlite = new Database(sqliteDbPath);
     sqlite.pragma('journal_mode = WAL');
-    return drizzleSqlite(sqlite, {
+    const sqliteDb = drizzleSqlite(sqlite, {
       schema: {
         datasets: datasetsSqlite,
         transactions: transactionsSqlite,
         webhooks: webhooksSqlite,
+        payoutFailures: payoutFailuresSqlite,
       },
     });
+    migrateSqlite(sqliteDb, { migrationsFolder: path.resolve(__dirname, '../../drizzle') });
+    return sqliteDb;
   }
 })();
 

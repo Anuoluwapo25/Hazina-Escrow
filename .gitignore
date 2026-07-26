@@ -8,8 +8,14 @@ frontend/dist/
 backend/dist/
 backend/backups/
 backups/
+test-backups/
+backend/sqlite.db
+backend/sqlite.db-shm
+backend/sqlite.db-wal
 backend/coverage/
 frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
 
 # Avoid committing property-test snapshot explosions (enable with `--features fuzz-tests` if needed).
 contracts/hazina-escrow/test_snapshots/fuzz_tests/
@@ -18,6 +24,7 @@ contracts/hazina-escrow/test_snapshots/fuzz_tests/
 
 /target
 target_local/
+.cargo-home/
 fix.md
 issue.md
 pr.md

@@ -146,6 +146,7 @@ export async function runResearchAgent(
           txHash: humanTxHash,
           expectedAmount: AGENT_FEE_USDC,
           destinationAddress: escrowWallet,
+          tokenCode: 'USDC',
         });
 
         if (!verification.valid) {

@@ -6,7 +6,7 @@
     "description": "A test dataset created via E2E.",
     "type": "whale-wallets",
     "pricePerQuery": 0.05,
-    "sellerWallet": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDE",
+    "sellerWallet": "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEF",
     "queriesServed": 0,
     "totalEarned": 0,
     "createdAt": "2024-06-01T00:00:00.000Z"

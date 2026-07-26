@@ -45,7 +45,7 @@ export function parseClaudeSummaryResponse(
     const summary = cleaned.slice(0, answerMatch.index).trim();
     return {
       summary: summary || cleaned,
-      answer: answerMatch[1].trim() || undefined,
+      answer: answerMatch[1]?.trim() || undefined,
     };
   }
 

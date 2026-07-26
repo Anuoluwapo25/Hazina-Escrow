@@ -1,30 +1,28 @@
-import { promises as fs, existsSync } from 'fs';
-import path from 'path';
+import db from '../db/client';
+import { eq, sql, and } from 'drizzle-orm';
+import {
+  datasetsSqlite,
+  transactionsSqlite,
+  webhooksSqlite,
+  payoutFailuresSqlite,
+} from '../db/schema';
 
-const DATA_PATH = process.env.DATA_PATH || path.resolve(process.cwd(), 'data/datasets.json');
-const DATA_DIR = path.dirname(DATA_PATH);
-const LOCK_PATH = path.join(DATA_DIR, '.store.lock');
-const LOCK_STALE_MS = 30_000;
 const pendingTxHashes = new Set<string>();
-const MAX_TRANSACTIONS_WINDOW = 10_000;
 
 export function reserveTxHash(txHash: string): () => void {
   pendingTxHashes.add(txHash);
   return () => pendingTxHashes.delete(txHash);
 }
 
-let cache: Store | null = null;
-let writeQueue: Promise<void> = Promise.resolve();
-
 export interface DatasetRating {
   score: number;
   count: number;
+  reviews: Array<{ txHash: string; score: number; comment?: string; timestamp: string }>;
 }
 export interface DatasetPricePoint {
   price: number;
   changedAt: string;
 }
-
 export interface Dataset {
   id: string;
   name: string;
@@ -32,31 +30,23 @@ export interface Dataset {
   type: string;
   pricePerQuery: number;
   sellerWallet: string;
+  paymentToken?: string;
   notificationEmail?: string;
   data: Record<string, unknown>;
   queriesServed: number;
   totalEarned: number;
   createdAt: string;
-
   ratings?: DatasetRating;
   priceHistory?: DatasetPricePoint[];
-
-  ratings?: {
-    score: number;
-    count: number;
-    reviews: Array<{ txHash: string; score: number; comment?: string; timestamp: string }>;
-  };
-
 }
-
 export interface Transaction {
   id: string;
   datasetId: string;
   txHash: string;
   buyerWallet?: string;
   memo?: string;
-
   amount: number;
+  paymentToken?: string;
   status?:
     | 'pending'
     | 'verifying'
@@ -80,7 +70,6 @@ export interface Transaction {
   deliveredAt?: string;
   timestamp: string;
 }
-
 export type WebhookEvent =
   | 'payment.received'
   | 'payment.forwarded'
@@ -118,292 +107,458 @@ export interface Store {
   payoutFailures: PayoutFailure[];
 }
 
-function createEmptyStore(): Store {
-  return { datasets: [], transactions: [], webhooks: [], payoutFailures: [] };
-}
-function normalizeStore(store: Partial<Store>): Store {
+// ── Row ↔ domain converters ──────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToDataset(row: any): Dataset {
   return {
-    datasets: Array.isArray(store.datasets) ? store.datasets : [],
-    transactions: Array.isArray(store.transactions) ? store.transactions : [],
-    webhooks: Array.isArray(store.webhooks) ? store.webhooks : [],
-    payoutFailures: Array.isArray(store.payoutFailures) ? store.payoutFailures : [],
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    type: row.type,
+    pricePerQuery: Number(row.pricePerQuery),
+    sellerWallet: row.sellerWallet,
+    paymentToken: row.paymentToken ?? undefined,
+    notificationEmail: row.notificationEmail ?? undefined,
+    data: row.data ? JSON.parse(row.data) : {},
+    queriesServed: Number(row.queriesServed ?? 0),
+    totalEarned: Number(row.totalEarned ?? 0),
+    createdAt: row.createdAt,
+    ratings: row.ratings ? JSON.parse(row.ratings) : undefined,
+    priceHistory: row.priceHistory ? JSON.parse(row.priceHistory) : undefined,
   };
 }
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+
+function datasetToRow(dataset: Dataset): Record<string, unknown> {
+  return {
+    id: dataset.id,
+    name: dataset.name,
+    description: dataset.description,
+    type: dataset.type,
+    pricePerQuery: String(dataset.pricePerQuery),
+    paymentToken: dataset.paymentToken ?? 'USDC',
+    sellerWallet: dataset.sellerWallet,
+    notificationEmail: dataset.notificationEmail ?? null,
+    data: JSON.stringify(dataset.data),
+    queriesServed: dataset.queriesServed,
+    totalEarned: String(dataset.totalEarned),
+    createdAt: dataset.createdAt,
+    ratings: dataset.ratings !== undefined ? JSON.stringify(dataset.ratings) : null,
+    priceHistory: dataset.priceHistory !== undefined ? JSON.stringify(dataset.priceHistory) : null,
+  };
 }
 
-async function readRaw(): Promise<Store> {
-  if (!existsSync(DATA_PATH)) {
-    const empty = createEmptyStore();
-    await writeStoreFile(empty);
-    return empty;
-  }
-  const raw = await fs.readFile(DATA_PATH, 'utf-8');
-  if (!raw.trim()) return createEmptyStore();
-  return normalizeStore(JSON.parse(raw) as Partial<Store>);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToTransaction(row: any): Transaction {
+  return {
+    id: row.id,
+    datasetId: row.datasetId,
+    txHash: row.txHash,
+    buyerWallet: row.buyerWallet ?? undefined,
+    memo: row.memo ?? undefined,
+    amount: Number(row.amount),
+    paymentToken: row.paymentToken ?? undefined,
+    status: row.status ?? undefined,
+    deliveryStatus: row.deliveryStatus ?? undefined,
+    sellerPaid:
+      row.sellerPaid === null || row.sellerPaid === undefined ? undefined : Boolean(row.sellerPaid),
+    sellerAmount: row.sellerAmount !== null ? Number(row.sellerAmount) : undefined,
+    sellerTxHash: row.sellerTxHash ?? undefined,
+    sellerNotifiedAt: row.sellerNotifiedAt ?? undefined,
+    sellerNotificationError: row.sellerNotificationError ?? undefined,
+    sellerNotificationAttempts: row.sellerNotificationAttempts ?? undefined,
+    buyerQuery: row.buyerQuery ?? undefined,
+    aiSummary: row.aiSummary ?? undefined,
+    deliveryAttempts: row.deliveryAttempts ?? undefined,
+    deliveryError: row.deliveryError ?? undefined,
+    verifiedAt: row.verifiedAt ?? undefined,
+    deliveredAt: row.deliveredAt ?? undefined,
+    timestamp: row.timestamp,
+  };
 }
 
-async function writeStoreFile(store: Store): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const tempPath = `${DATA_PATH}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-  try {
-    await fs.writeFile(tempPath, JSON.stringify(store, null, 2), 'utf-8');
-    await fs.rename(tempPath, DATA_PATH);
-    cache = null;
-  } catch (err) {
-    await fs.unlink(tempPath).catch(() => {});
-    throw err;
-  }
+function transactionToRow(tx: Transaction): Record<string, unknown> {
+  return {
+    id: tx.id,
+    datasetId: tx.datasetId,
+    txHash: tx.txHash,
+    buyerWallet: tx.buyerWallet ?? null,
+    memo: tx.memo ?? null,
+    amount: String(tx.amount),
+    paymentToken: tx.paymentToken ?? 'USDC',
+    status: tx.status ?? null,
+    deliveryStatus: tx.deliveryStatus ?? null,
+    sellerPaid: tx.sellerPaid === undefined ? null : tx.sellerPaid ? 1 : 0,
+    sellerAmount: tx.sellerAmount !== undefined ? String(tx.sellerAmount) : null,
+    sellerTxHash: tx.sellerTxHash ?? null,
+    sellerNotifiedAt: tx.sellerNotifiedAt ?? null,
+    sellerNotificationError: tx.sellerNotificationError ?? null,
+    sellerNotificationAttempts: tx.sellerNotificationAttempts ?? null,
+    buyerQuery: tx.buyerQuery ?? null,
+    aiSummary: tx.aiSummary ?? null,
+    deliveryAttempts: tx.deliveryAttempts ?? null,
+    deliveryError: tx.deliveryError ?? null,
+    verifiedAt: tx.verifiedAt ?? null,
+    deliveredAt: tx.deliveredAt ?? null,
+    timestamp: tx.timestamp,
+  };
 }
 
-type LockHandle = Awaited<ReturnType<typeof fs.open>>;
-async function acquireLock(timeoutMs = 10_000): Promise<LockHandle> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const startedAt = Date.now();
-  for (;;) {
-    try {
-      return await fs.open(LOCK_PATH, 'wx');
-    } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code !== 'EEXIST') throw error;
-      const stats = await fs.stat(LOCK_PATH).catch(() => null);
-      if (stats && Date.now() - stats.mtimeMs > LOCK_STALE_MS) {
-        await fs.unlink(LOCK_PATH).catch(() => {});
-        continue;
-      }
-      if (Date.now() - startedAt > timeoutMs)
-        throw new Error(`Timed out waiting for storage lock: ${LOCK_PATH}`);
-      await sleep(25);
-    }
-  }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToWebhook(row: any): WebhookSubscription {
+  return {
+    id: row.id,
+    sellerWallet: row.sellerWallet,
+    url: row.url,
+    secret: row.secret,
+    events:
+      typeof row.events === 'string' ? JSON.parse(row.events) : (row.events as WebhookEvent[]),
+    active: Boolean(row.active),
+    createdAt: row.createdAt,
+  };
 }
-async function releaseLock(handle: LockHandle): Promise<void> {
-  try {
-    await handle.close();
-  } finally {
-    await fs.unlink(LOCK_PATH).catch(() => {});
-  }
+
+function webhookToRow(webhook: WebhookSubscription): Record<string, unknown> {
+  return {
+    id: webhook.id,
+    sellerWallet: webhook.sellerWallet,
+    url: webhook.url,
+    secret: webhook.secret,
+    events: JSON.stringify(webhook.events),
+    active: webhook.active ? 1 : 0,
+    createdAt: webhook.createdAt,
+  };
 }
-function enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
-  const run = writeQueue.then(task, task);
-  writeQueue = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToPayoutFailure(row: any): PayoutFailure {
+  return {
+    id: row.id,
+    datasetId: row.datasetId,
+    sellerWallet: row.sellerWallet,
+    buyerTxHash: row.buyerTxHash,
+    intendedAmount: Number(row.intendedAmount),
+    sellerTxHash: row.sellerTxHash ?? undefined,
+    status: row.status as PayoutFailureStatus,
+    retryCount: Number(row.retryCount ?? 0),
+    nextRetryAt: row.nextRetryAt,
+    lastError: row.lastError,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
-async function withLockedWrite<T>(task: () => Promise<T>): Promise<T> {
-  return enqueueWrite(async () => {
-    const lock = await acquireLock();
-    try {
-      return await task();
-    } finally {
-      await releaseLock(lock);
-    }
-  });
+
+function payoutFailureToRow(pf: PayoutFailure): Record<string, unknown> {
+  return {
+    id: pf.id,
+    datasetId: pf.datasetId,
+    sellerWallet: pf.sellerWallet,
+    buyerTxHash: pf.buyerTxHash,
+    intendedAmount: String(pf.intendedAmount),
+    sellerTxHash: pf.sellerTxHash ?? null,
+    status: pf.status,
+    retryCount: pf.retryCount,
+    nextRetryAt: pf.nextRetryAt,
+    lastError: pf.lastError,
+    createdAt: pf.createdAt,
+    updatedAt: pf.updatedAt,
+  };
 }
-async function updateStore<T>(mutator: (store: Store) => Promise<T> | T): Promise<T> {
-  return withLockedWrite(async () => {
-    const store = await readRaw();
-    const result = await mutator(store);
-    await writeStoreFile(store);
-    return result;
-  });
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export function invalidateCache(): void {
+  // No-op: SQLite has no application-level cache to invalidate.
 }
 
 export async function readStore(): Promise<Store> {
-  await writeQueue;
-  if (cache) return cache;
-  cache = await readRaw();
-  return cache;
+  const [datasets, transactions, webhooks, payoutFailures] = await Promise.all([
+    db.select().from(datasetsSqlite),
+    db.select().from(transactionsSqlite),
+    db.select().from(webhooksSqlite),
+    db.select().from(payoutFailuresSqlite),
+  ]);
+  return {
+    datasets: datasets.map(rowToDataset),
+    transactions: transactions.map(rowToTransaction),
+    webhooks: webhooks.map(rowToWebhook),
+    payoutFailures: payoutFailures.map(rowToPayoutFailure),
+  };
 }
-export function invalidateCache(): void {
-  cache = null;
-}
+
 export async function writeStore(store: Store): Promise<void> {
-  return withLockedWrite(() => writeStoreFile(store));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await db.transaction(async (tx: any) => {
+    await tx.delete(datasetsSqlite);
+    await tx.delete(transactionsSqlite);
+    await tx.delete(webhooksSqlite);
+    await tx.delete(payoutFailuresSqlite);
+    for (const dataset of store.datasets) {
+      await tx.insert(datasetsSqlite).values(datasetToRow(dataset));
+    }
+    for (const transaction of store.transactions) {
+      await tx.insert(transactionsSqlite).values(transactionToRow(transaction));
+    }
+    for (const webhook of store.webhooks) {
+      await tx.insert(webhooksSqlite).values(webhookToRow(webhook));
+    }
+    for (const pf of store.payoutFailures) {
+      await tx.insert(payoutFailuresSqlite).values(payoutFailureToRow(pf));
+    }
+  });
 }
+
 export async function getDataset(id: string): Promise<Dataset | undefined> {
-  return (await readStore()).datasets.find(dataset => dataset.id === id);
+  const result = await db.select().from(datasetsSqlite).where(eq(datasetsSqlite.id, id)).limit(1);
+  return result[0] ? rowToDataset(result[0]) : undefined;
 }
+
 export async function getAllDatasets(): Promise<Dataset[]> {
-  return (await readStore()).datasets;
+  const result = await db.select().from(datasetsSqlite);
+  return result.map(rowToDataset);
 }
+
 export async function updateDataset(
   id: string,
   updates: Partial<Dataset>,
 ): Promise<Dataset | null> {
-  return updateStore(store => {
-    const index = store.datasets.findIndex(dataset => dataset.id === id);
-    if (index === -1) return null;
-    store.datasets[index] = { ...store.datasets[index], ...updates };
-    return store.datasets[index];
-  });
+  const existing = await db.select().from(datasetsSqlite).where(eq(datasetsSqlite.id, id)).limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToDataset(existing[0]), ...updates };
+  await db.update(datasetsSqlite).set(datasetToRow(merged)).where(eq(datasetsSqlite.id, id));
+  return merged;
 }
+
 export async function addDataset(dataset: Dataset): Promise<void> {
-
-  return updateStore(store => {
-
-
-  return enqueue(async store => {
-
-  return updateStore(async store => {
-
-
-    store.datasets.push(dataset);
-  });
+  await db.insert(datasetsSqlite).values(datasetToRow(dataset));
 }
+
 export async function addTransaction(tx: Transaction): Promise<void> {
   if (tx.txHash) pendingTxHashes.add(tx.txHash);
-  return updateStore(store => {
-    store.transactions.push(tx);
-    if (store.transactions.length > MAX_TRANSACTIONS_WINDOW)
-      store.transactions = store.transactions.slice(
-        store.transactions.length - MAX_TRANSACTIONS_WINDOW,
-      );
-  }).finally(() => {
+  try {
+    await db.insert(transactionsSqlite).values(transactionToRow(tx));
+  } finally {
     if (tx.txHash) pendingTxHashes.delete(tx.txHash);
-  });
+  }
 }
 
 export async function getTransactionByHash(txHash: string): Promise<Transaction | undefined> {
-  return (await readStore()).transactions.find(transaction => transaction.txHash === txHash);
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.txHash, txHash))
+    .limit(1);
+  return result[0] ? rowToTransaction(result[0]) : undefined;
 }
+
 export async function getAgentJobByTxHash(txHash: string): Promise<Transaction | undefined> {
-  return (await readStore()).transactions.find(
-    tx => tx.txHash === txHash && tx.datasetId === 'agent-job',
-  );
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(
+      and(eq(transactionsSqlite.txHash, txHash), eq(transactionsSqlite.datasetId, 'agent-job')),
+    )
+    .limit(1);
+  return result[0] ? rowToTransaction(result[0]) : undefined;
 }
+
 export async function getTransactionByMemo(memo: string): Promise<Transaction | undefined> {
-  return (await readStore()).transactions.find(transaction => transaction.memo === memo);
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.memo, memo))
+    .limit(1);
+  return result[0] ? rowToTransaction(result[0]) : undefined;
 }
+
 export async function updateTransactionByHash(
   txHash: string,
   updates: Partial<Transaction>,
 ): Promise<Transaction | null> {
-  return updateStore(store => {
-    const index = store.transactions.findIndex(transaction => transaction.txHash === txHash);
-    if (index === -1) return null;
-    store.transactions[index] = { ...store.transactions[index], ...updates };
-    return store.transactions[index];
-  });
+  const existing = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.txHash, txHash))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToTransaction(existing[0]), ...updates };
+  await db
+    .update(transactionsSqlite)
+    .set(transactionToRow(merged))
+    .where(eq(transactionsSqlite.txHash, txHash));
+  return merged;
 }
+
 export async function updateTransactionByMemo(
   memo: string,
   updates: Partial<Transaction>,
 ): Promise<Transaction | null> {
-  return updateStore(store => {
-    const index = store.transactions.findIndex(transaction => transaction.memo === memo);
-    if (index === -1) return null;
-    store.transactions[index] = { ...store.transactions[index], ...updates };
-    return store.transactions[index];
-  });
+  const existing = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.memo, memo))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToTransaction(existing[0]), ...updates };
+  await db
+    .update(transactionsSqlite)
+    .set(transactionToRow(merged))
+    .where(eq(transactionsSqlite.memo, memo));
+  return merged;
 }
+
 export async function getTransactions(
   datasetId?: string,
   limit?: number,
   offset?: number,
 ): Promise<Transaction[]> {
-  const store = await readStore();
-  let transactions = datasetId
-    ? store.transactions.filter(transaction => transaction.datasetId === datasetId)
-    : store.transactions;
-  if (offset !== undefined && offset > 0) transactions = transactions.slice(offset);
-  if (limit !== undefined && limit > 0) transactions = transactions.slice(0, limit);
-  return transactions;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query: any = db.select().from(transactionsSqlite);
+  if (datasetId) query = query.where(eq(transactionsSqlite.datasetId, datasetId));
+  if (offset && offset > 0) query = query.offset(offset);
+  if (limit && limit > 0) query = query.limit(limit);
+  const result = await query;
+  return result.map(rowToTransaction);
 }
+
 export async function getTransactionsCount(datasetId?: string): Promise<number> {
-  const store = await readStore();
-  return datasetId
-    ? store.transactions.filter(transaction => transaction.datasetId === datasetId).length
-    : store.transactions.length;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let query: any = db.select({ count: sql<number>`count(*)` }).from(transactionsSqlite);
+  if (datasetId) query = query.where(eq(transactionsSqlite.datasetId, datasetId));
+  const result = await query;
+  return Number(result[0]?.count ?? 0);
 }
+
 export async function txHashUsed(txHash: string): Promise<boolean> {
   if (!txHash) return false;
   if (pendingTxHashes.has(txHash)) return true;
-  return (await readStore()).transactions.some(transaction => transaction.txHash === txHash);
+  const result = await db
+    .select({ id: transactionsSqlite.id })
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.txHash, txHash))
+    .limit(1);
+  return result.length > 0;
 }
+
 export async function getFailedDeliveryTransactions(): Promise<Transaction[]> {
-  return (await readStore()).transactions.filter(
-    transaction => transaction.deliveryStatus === 'failed',
-  );
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.deliveryStatus, 'failed'));
+  return result.map(rowToTransaction);
 }
+
 export async function getAllWebhooks(): Promise<WebhookSubscription[]> {
-  return (await readStore()).webhooks;
+  const result = await db.select().from(webhooksSqlite);
+  return result.map(rowToWebhook);
 }
+
 export async function getWebhooksForSeller(sellerWallet: string): Promise<WebhookSubscription[]> {
-  return (await readStore()).webhooks.filter(
-    webhook => webhook.sellerWallet === sellerWallet && webhook.active,
-  );
+  const result = await db
+    .select()
+    .from(webhooksSqlite)
+    .where(and(eq(webhooksSqlite.sellerWallet, sellerWallet), eq(webhooksSqlite.active, 1)));
+  return result.map(rowToWebhook);
 }
+
 export async function getWebhookById(id: string): Promise<WebhookSubscription | undefined> {
-  return (await readStore()).webhooks.find(webhook => webhook.id === id);
+  const result = await db.select().from(webhooksSqlite).where(eq(webhooksSqlite.id, id)).limit(1);
+  return result[0] ? rowToWebhook(result[0]) : undefined;
 }
+
 export async function addWebhook(webhook: WebhookSubscription): Promise<void> {
-  return updateStore(store => {
-    store.webhooks.push(webhook);
-  });
+  await db.insert(webhooksSqlite).values(webhookToRow(webhook));
 }
+
 export async function removeWebhook(id: string): Promise<boolean> {
-  return updateStore(store => {
-    const index = store.webhooks.findIndex(webhook => webhook.id === id);
-    if (index === -1) return false;
-    store.webhooks.splice(index, 1);
-    return true;
-  });
+  const existing = await db
+    .select({ id: webhooksSqlite.id })
+    .from(webhooksSqlite)
+    .where(eq(webhooksSqlite.id, id))
+    .limit(1);
+  if (existing.length === 0) return false;
+  await db.delete(webhooksSqlite).where(eq(webhooksSqlite.id, id));
+  return true;
 }
+
 export async function updateWebhook(
   id: string,
   updates: Partial<WebhookSubscription>,
 ): Promise<WebhookSubscription | null> {
-  return updateStore(store => {
-    const index = store.webhooks.findIndex(webhook => webhook.id === id);
-    if (index === -1) return null;
-    store.webhooks[index] = { ...store.webhooks[index], ...updates };
-    return store.webhooks[index];
-  });
+  const existing = await db.select().from(webhooksSqlite).where(eq(webhooksSqlite.id, id)).limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToWebhook(existing[0]), ...updates };
+  await db.update(webhooksSqlite).set(webhookToRow(merged)).where(eq(webhooksSqlite.id, id));
+  return merged;
 }
+
 export async function addPayoutFailure(payoutFailure: PayoutFailure): Promise<void> {
-  return updateStore(store => {
-    store.payoutFailures.push(payoutFailure);
-  });
+  await db.insert(payoutFailuresSqlite).values(payoutFailureToRow(payoutFailure));
 }
+
 export async function getPayoutFailureByBuyerTxHash(
   buyerTxHash: string,
 ): Promise<PayoutFailure | undefined> {
-  return (await readStore()).payoutFailures.find(failure => failure.buyerTxHash === buyerTxHash);
+  const result = await db
+    .select()
+    .from(payoutFailuresSqlite)
+    .where(eq(payoutFailuresSqlite.buyerTxHash, buyerTxHash))
+    .limit(1);
+  return result[0] ? rowToPayoutFailure(result[0]) : undefined;
 }
+
 export async function updatePayoutFailure(
   id: string,
   updates: Partial<PayoutFailure>,
 ): Promise<PayoutFailure | null> {
-  return updateStore(store => {
-    const index = store.payoutFailures.findIndex(failure => failure.id === id);
-    if (index === -1) return null;
-    store.payoutFailures[index] = { ...store.payoutFailures[index], ...updates };
-    return store.payoutFailures[index];
-  });
+  const existing = await db
+    .select()
+    .from(payoutFailuresSqlite)
+    .where(eq(payoutFailuresSqlite.id, id))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToPayoutFailure(existing[0]), ...updates };
+  await db
+    .update(payoutFailuresSqlite)
+    .set(payoutFailureToRow(merged))
+    .where(eq(payoutFailuresSqlite.id, id));
+  return merged;
 }
+
 export async function getPayoutFailuresByStatus(
   status: PayoutFailureStatus,
 ): Promise<PayoutFailure[]> {
-  return (await readStore()).payoutFailures.filter(failure => failure.status === status);
+  const result = await db
+    .select()
+    .from(payoutFailuresSqlite)
+    .where(eq(payoutFailuresSqlite.status, status));
+  return result.map(rowToPayoutFailure);
 }
+
 export async function getPendingPayoutFailures(nowIso: string): Promise<PayoutFailure[]> {
   const now = new Date(nowIso).getTime();
-  return (await readStore()).payoutFailures.filter(
-    failure => failure.status === 'pending_retry' && new Date(failure.nextRetryAt).getTime() <= now,
-  );
+  const pending = await getPayoutFailuresByStatus('pending_retry');
+  return pending.filter(pf => new Date(pf.nextRetryAt).getTime() <= now);
 }
+
 export async function getUnpaidTransactions(): Promise<Transaction[]> {
-  return (await readStore()).transactions.filter(transaction => transaction.sellerPaid === false);
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.sellerPaid, 0));
+  return result.map(rowToTransaction);
 }
+
 export async function getTransactionsWithFailedSellerNotification(): Promise<Transaction[]> {
-  return (await readStore()).transactions.filter(
-    transaction =>
-      transaction.status === 'completed' &&
-      transaction.sellerNotificationError !== undefined &&
-      transaction.sellerNotifiedAt === undefined,
-  );
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(
+      and(
+        eq(transactionsSqlite.status, 'completed'),
+        sql`${transactionsSqlite.sellerNotificationError} IS NOT NULL`,
+        sql`${transactionsSqlite.sellerNotifiedAt} IS NULL`,
+      ),
+    );
+  return result.map(rowToTransaction);
 }

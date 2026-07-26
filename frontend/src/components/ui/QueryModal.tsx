@@ -48,7 +48,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
   const [useDemoMode, setUseDemoMode] = useState(false);
   const [verifyStage, setVerifyStage] = useState(0);
   const [walletStatus, setWalletStatus] = useState('');
-  
+
   const [ratingScore, setRatingScore] = useState(0);
   const [ratingComment, setRatingComment] = useState('');
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
@@ -123,6 +123,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
         res = await api.verifyPayment(dataset.id, txHash.trim(), buyerQuestion);
       }
       clearVerifyTimer();
+      console.log('QUERY_RESULT', res);
       setResult(res);
       setStep('result');
       toastSuccess(t('queryModal.result.paymentVerified'), dataset.name);
@@ -606,6 +607,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                 </div>
               </div>
 
+              <pre className="text-xs text-red-400 mb-3">{JSON.stringify(result, null, 2)}</pre>
               {/* AI Summary */}
               <div className="mb-5 p-4 rounded-xl bg-gradient-to-br from-gold/5 to-transparent border border-gold/15">
                 <div className="flex items-center gap-2 mb-3">
@@ -667,22 +669,25 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                   ) : (
                     <div className="space-y-3">
                       <div className="flex gap-1">
-                        {[1, 2, 3, 4, 5].map((star) => (
+                        {[1, 2, 3, 4, 5].map(star => (
                           <button
                             key={star}
                             onClick={() => setRatingScore(star)}
                             className={clsx(
-                              "p-1 transition-colors hover:text-gold",
-                              ratingScore >= star ? "text-gold" : "text-muted/40"
+                              'p-1 transition-colors hover:text-gold',
+                              ratingScore >= star ? 'text-gold' : 'text-muted/40',
                             )}
                           >
-                            <Star className="w-6 h-6" fill={ratingScore >= star ? "currentColor" : "none"} />
+                            <Star
+                              className="w-6 h-6"
+                              fill={ratingScore >= star ? 'currentColor' : 'none'}
+                            />
                           </button>
                         ))}
                       </div>
                       <textarea
                         value={ratingComment}
-                        onChange={(e) => setRatingComment(e.target.value)}
+                        onChange={e => setRatingComment(e.target.value)}
                         placeholder="Leave an optional comment (max 500 chars)"
                         maxLength={500}
                         className="w-full bg-void/60 border border-border/60 rounded-xl p-3 text-sm font-body text-foreground placeholder:text-muted focus:outline-none focus:border-gold/40 transition-colors resize-none h-16"
@@ -691,16 +696,16 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                         onClick={handleRatingSubmit}
                         disabled={!ratingScore || isSubmittingRating}
                         className={clsx(
-                          "w-full py-2.5 rounded-lg text-sm font-body font-semibold transition-all",
+                          'w-full py-2.5 rounded-lg text-sm font-body font-semibold transition-all',
                           ratingScore && !isSubmittingRating
-                            ? "bg-gold/20 text-gold hover:bg-gold/30"
-                            : "bg-surface-2 text-muted cursor-not-allowed"
+                            ? 'bg-gold/20 text-gold hover:bg-gold/30'
+                            : 'bg-surface-2 text-muted cursor-not-allowed',
                         )}
                       >
                         {isSubmittingRating ? (
                           <Loader2 className="w-4 h-4 animate-spin mx-auto" />
                         ) : (
-                          "Submit Rating"
+                          'Submit Rating'
                         )}
                       </button>
                     </div>

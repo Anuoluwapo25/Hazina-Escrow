@@ -68,7 +68,7 @@ export class BackupScheduler {
   private parseCronSchedule(schedule: string): number {
     // Simple interval format (e.g., "1h", "30m", "1d")
     const simpleMatch = schedule.match(/^(\d+)(m|h|d)$/);
-    if (simpleMatch) {
+    if (simpleMatch && simpleMatch[1]) {
       const value = parseInt(simpleMatch[1], 10);
       const unit = simpleMatch[2];
 
@@ -86,32 +86,33 @@ export class BackupScheduler {
     const parts = schedule.split(' ');
     if (parts.length === 5) {
       const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+      if (minute && hour && dayOfMonth && month && dayOfWeek) {
+        // Every N minutes
+        if (minute.startsWith('*/')) {
+          const minutes = parseInt(minute.slice(2), 10);
+          return minutes * 60 * 1000;
+        }
 
-      // Every N minutes
-      if (minute.startsWith('*/')) {
-        const minutes = parseInt(minute.slice(2), 10);
-        return minutes * 60 * 1000;
-      }
+        // Hourly
+        if (minute === '0' && hour === '*') {
+          return 60 * 60 * 1000;
+        }
 
-      // Hourly
-      if (minute === '0' && hour === '*') {
-        return 60 * 60 * 1000;
-      }
+        // Daily
+        if (minute === '0' && hour === '0' && dayOfMonth === '*' && month === '*') {
+          return 24 * 60 * 60 * 1000;
+        }
 
-      // Daily
-      if (minute === '0' && hour === '0' && dayOfMonth === '*' && month === '*') {
-        return 24 * 60 * 60 * 1000;
-      }
-
-      // Weekly
-      if (
-        minute === '0' &&
-        hour === '0' &&
-        dayOfMonth === '*' &&
-        month === '*' &&
-        dayOfWeek !== '*'
-      ) {
-        return 7 * 24 * 60 * 60 * 1000;
+        // Weekly
+        if (
+          minute === '0' &&
+          hour === '0' &&
+          dayOfMonth === '*' &&
+          month === '*' &&
+          dayOfWeek !== '*'
+        ) {
+          return 7 * 24 * 60 * 60 * 1000;
+        }
       }
     }
 

@@ -262,6 +262,7 @@ export const es: EnglishMessages = {
       dataType: 'Tipo de dato',
       pricePerQuery: 'Precio / consulta (USDC)',
       pricePerQueryError: 'El precio debe ser mayor que 0',
+      paymentToken: 'Token de pago',
       quickPricePresets: 'Precios rápidos:',
       sellerWallet: 'Tu dirección Stellar',
       sellerWalletPlaceholder: 'G... (clave pública Stellar de 56 caracteres)',

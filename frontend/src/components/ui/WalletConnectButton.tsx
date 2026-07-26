@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Zap, ExternalLink, Loader2, Wallet } from 'lucide-react';
-import {
-  detectWallets,
-  launchStellarWalletProvider,
-} from '../../lib/stellarWallets';
+import { detectWallets, launchStellarWalletProvider } from '../../lib/stellarWallets';
 import type {
   StellarWalletProvider,
   StellarPaymentRequest,
@@ -42,7 +39,9 @@ export default function WalletConnectButton({
         onTxHash(hash);
         onStatusChange?.('Transaction hash received. Verify to unlock the dataset.');
       } else {
-        onStatusChange?.('Complete the payment in your wallet, then paste the transaction hash below.');
+        onStatusChange?.(
+          'Complete the payment in your wallet, then paste the transaction hash below.',
+        );
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Wallet request failed.';
@@ -88,7 +87,10 @@ export default function WalletConnectButton({
           )}
           Freighter
           {detected.freighter && (
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" aria-label="Freighter detected" />
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+              aria-label="Freighter detected"
+            />
           )}
         </button>
 
@@ -109,7 +111,10 @@ export default function WalletConnectButton({
           )}
           Albedo
           {detected.albedo && (
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" aria-label="Albedo detected" />
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+              aria-label="Albedo detected"
+            />
           )}
         </button>
       </div>

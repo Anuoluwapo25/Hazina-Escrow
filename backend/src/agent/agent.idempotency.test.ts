@@ -5,13 +5,12 @@ vi.mock('uuid', () => ({
 }));
 
 import { runResearchAgent } from './agent.service';
-import { txHashUsed, reserveTxHash, getAgentJobByTxHash } from '../common/storage';
 import { sendUsdcPayment } from './agent.wallet';
 import { verifyStellarPayment } from '../payments/stellar.service';
 
 vi.mock('../common/storage', () => {
-  const pending = new Set();
-  const transactions = [];
+  const pending = new Set<string>();
+  const transactions: Array<{ txHash: string; datasetId: string }> = [];
   const SELLER_TYPES = [
     { type: 'yield-data' },
     { type: 'whale-wallets' },
