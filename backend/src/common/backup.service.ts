@@ -190,8 +190,8 @@ export class BackupService {
     return {
       totalBackups: backups.length,
       totalSize: backups.reduce((sum, b) => sum + b.size, 0),
-      oldestBackup: backups[backups.length - 1]?.timestamp ?? null,
-      newestBackup: backups[0]?.timestamp ?? null,
+      oldestBackup: backups.length > 0 ? (backups.at(-1)?.timestamp ?? null) : null,
+      newestBackup: backups.length > 0 ? (backups[0]?.timestamp ?? null) : null,
     };
   }
 

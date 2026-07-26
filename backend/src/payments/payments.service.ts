@@ -5,6 +5,7 @@ import { notifySeller } from '../webhooks/webhook.service';
 import { transactionEventEmitter } from '../websocket/transaction-events';
 import { domainMetrics } from '../common/datadog';
 import { verifyStellarPayment, PaymentError } from './stellar.service';
+import { getEscrow, refundEscrow } from '../lib/escrow.client';
 import { logger } from '../lib/logger';
 import {
   getDataset,
@@ -30,14 +31,24 @@ export interface DeliveryResult {
   };
   transaction: {
     hash: string;
-    status: 'completed' | 'delivery_failed' | 'verified' | 'pending';
-    deliveryStatus: 'delivered' | 'failed' | 'pending';
+    status: 'completed' | 'delivery_failed' | 'verified' | 'pending' | 'refunded';
+    deliveryStatus: 'delivered' | 'failed' | 'pending' | 'refunded';
     amount: number;
     sellerReceived: number;
     platformFee: number;
     deliveryError?: string;
   };
 }
+
+/**
+ * Delivery retries for an escrow-backed purchase are bounded — unlike the
+ * legacy custodial seller-payout retry (payout-retry.service.ts), which keeps
+ * a failed payout in 'manual_review_needed' forever, an escrow buyer's funds
+ * are locked on-chain and must not stay stuck indefinitely. After this many
+ * failed delivery attempts we refund the buyer instead of retrying forever.
+ * Matches the 3-attempt shape of payout-retry.service.ts's RETRY_BACKOFF_MS.
+ */
+const MAX_ESCROW_DELIVERY_ATTEMPTS = 3;
 
 export async function deliverVerifiedPayment(params: {
   transactionId: string;
@@ -166,6 +177,66 @@ export async function markDeliveryFailure(params: {
   const message = error instanceof Error ? error.message : String(error);
   const existing = await getTransactionByHash(txHash);
   const attempts = (existing?.deliveryAttempts ?? 0) + 1;
+
+  // Escrow-backed purchase whose delivery has permanently failed: refund the
+  // buyer instead of retrying forever, since (unlike the custodial demo path)
+  // their funds are genuinely locked on-chain, not just a pending DB record.
+  if (existing?.escrowId !== undefined && attempts >= MAX_ESCROW_DELIVERY_ATTEMPTS) {
+    try {
+      const refundTxHash = await refundEscrow(existing.escrowId);
+      await updateTransactionByHash(txHash, {
+        status: 'refunded',
+        deliveryStatus: 'refunded',
+        deliveryError: message,
+        deliveryAttempts: attempts,
+        buyerQuery: buyerQuestion,
+      });
+
+      logger.warn(
+        `[Escrow] Delivery permanently failed for escrow #${existing.escrowId} after ${attempts} attempts — refunded buyer (${refundTxHash})`,
+      );
+      Sentry.captureMessage(
+        `Escrow delivery failure exhausted retries — refunded #${existing.escrowId}`,
+        {
+          level: 'warning',
+          tags: { component: 'escrow-delivery-refund' },
+          extra: { escrowId: existing.escrowId, txHash, attempts, refundTxHash },
+        },
+      );
+
+      transactionEventEmitter.updateTransactionStatus(transactionId, dataset.id, 'refunded', {
+        amount: dataset.pricePerQuery.toString(),
+        buyerQuery: buyerQuestion,
+        deliveryStatus: 'failed',
+        error: message,
+      });
+
+      return {
+        success: true,
+        transaction: {
+          hash: txHash,
+          status: 'refunded',
+          deliveryStatus: 'refunded',
+          amount: dataset.pricePerQuery,
+          sellerReceived: 0,
+          platformFee: 0,
+          deliveryError: message,
+        },
+      };
+    } catch (refundErr) {
+      // The refund itself failed — fall through to the normal delivery_failed
+      // marking below. deliveryStatus stays 'failed' so the retry sweep picks
+      // this transaction up again and re-attempts the refund next pass.
+      const refundErrMsg = refundErr instanceof Error ? refundErr.message : String(refundErr);
+      logger.error(
+        `[Escrow] Refund attempt failed for escrow #${existing.escrowId} after exhausted delivery retries: ${refundErrMsg}`,
+      );
+      Sentry.captureException(refundErr, {
+        tags: { component: 'escrow-delivery-refund' },
+        extra: { escrowId: existing.escrowId, txHash, attempts },
+      });
+    }
+  }
 
   await updateTransactionByHash(txHash, {
     status: 'delivery_failed',
@@ -372,6 +443,134 @@ export async function processPayment(params: {
 }
 
 const MAX_SELLER_NOTIFICATION_ATTEMPTS = 10;
+
+/**
+ * Verify a non-custodial escrow lock on-chain and deliver the dataset.
+ *
+ * Unlike processPayment (which verifies a plain Horizon payment to a wallet),
+ * this reads the authoritative EscrowRecord from the contract and checks that
+ * the buyer genuinely locked the right amount for THIS dataset. The caller is
+ * responsible for triggering the on-chain release afterwards.
+ */
+export async function processEscrowPayment(params: {
+  escrowId: number;
+  datasetId: string;
+  buyerQuestion?: string;
+}): Promise<DeliveryResult> {
+  const { escrowId, datasetId, buyerQuestion } = params;
+  const dataset = await getDataset(datasetId);
+  if (!dataset) {
+    throw new PaymentError('Dataset not found');
+  }
+
+  // Idempotency: an escrow id maps 1:1 to a purchase. Reuse a synthetic hash so
+  // the existing hash-keyed transaction machinery (delivery retries, ratings)
+  // works unchanged.
+  const txHash = `escrow-${escrowId}`;
+  const existing = await getTransactionByHash(txHash);
+  if (existing && existing.status === 'completed') {
+    return {
+      success: true,
+      transaction: {
+        hash: existing.txHash,
+        status: 'completed',
+        deliveryStatus: 'delivered',
+        amount: existing.amount,
+        sellerReceived: existing.sellerAmount ?? sellerShare(dataset.pricePerQuery),
+        platformFee: computePlatformFee(existing.amount),
+      },
+      ai: { summary: existing.aiSummary ?? '' },
+    };
+  }
+
+  const transactionId = existing?.id || `tx-${uuidv4()}`;
+
+  transactionEventEmitter.updateTransactionStatus(transactionId, dataset.id, 'verifying', {
+    amount: dataset.pricePerQuery.toString(),
+    buyerQuery: buyerQuestion,
+  });
+
+  // Read authoritative on-chain state.
+  const escrow = await getEscrow(escrowId);
+
+  // The escrow must be for this dataset, unspent, and for the right amount.
+  if (escrow.datasetId !== dataset.id) {
+    throw new PaymentError(
+      `Escrow #${escrowId} was locked for a different dataset — cannot unlock this one`,
+    );
+  }
+  if (escrow.released || escrow.refunded) {
+    throw new PaymentError(`Escrow #${escrowId} is already settled`);
+  }
+  if (escrow.seller !== dataset.sellerWallet) {
+    throw new PaymentError(`Escrow #${escrowId} seller does not match this dataset`);
+  }
+  const tolerance = 0.001;
+  if (Math.abs(escrow.amount - dataset.pricePerQuery) > tolerance) {
+    throw new PaymentError(
+      `Escrow amount mismatch: locked ${escrow.amount}, expected ${dataset.pricePerQuery}`,
+    );
+  }
+
+  if (existing) {
+    await updateTransactionByHash(txHash, {
+      status: 'verified',
+      escrowId,
+      verifiedAt: new Date().toISOString(),
+    });
+  } else {
+    await addTransaction({
+      id: transactionId,
+      datasetId: dataset.id,
+      txHash,
+      buyerWallet: escrow.buyer,
+      amount: dataset.pricePerQuery,
+      paymentToken: dataset.paymentToken || 'USDC',
+      status: 'verified',
+      deliveryStatus: 'pending',
+      sellerPaid: false,
+      escrowId,
+      buyerQuery: buyerQuestion,
+      timestamp: new Date().toISOString(),
+      verifiedAt: new Date().toISOString(),
+      deliveryAttempts: 0,
+    });
+  }
+
+  transactionEventEmitter.receivePayment(
+    transactionId,
+    dataset.id,
+    dataset.pricePerQuery.toString(),
+  );
+
+  try {
+    const response = await deliverVerifiedPayment({
+      transactionId,
+      txHash,
+      datasetId: dataset.id,
+      buyerQuestion,
+    });
+    domainMetrics.paymentVerified({
+      datasetType: dataset.type,
+      mode: 'real',
+      status: 'delivered',
+    });
+    return response;
+  } catch (deliveryErr) {
+    logger.error(
+      `[Escrow] Delivery failed for escrow #${escrowId} — queued for retry: ${
+        deliveryErr instanceof Error ? deliveryErr.message : String(deliveryErr)
+      }`,
+    );
+    return await markDeliveryFailure({
+      transactionId,
+      txHash,
+      datasetId: dataset.id,
+      buyerQuestion,
+      error: deliveryErr,
+    });
+  }
+}
 
 export async function retryFailedSellerNotifications(): Promise<void> {
   const pending = await getTransactionsWithFailedSellerNotification();

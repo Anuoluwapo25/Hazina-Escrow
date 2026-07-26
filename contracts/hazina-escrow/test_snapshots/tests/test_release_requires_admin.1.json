@@ -379,7 +379,14 @@
                     },
                     {
                       "key": {
-
+                        "symbol": "deadline"
+                      },
+                      "val": {
+                        "u64": 4600
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "dispute_deadline"
                       },
                       "val": {
@@ -392,11 +399,6 @@
                       },
                       "val": {
                         "bool": false
-                        "symbol": "deadline"
-                      },
-                      "val": {
-                        "u64": 4600
-
                       }
                     },
                     {
