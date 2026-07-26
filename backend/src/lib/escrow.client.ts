@@ -262,10 +262,7 @@ export async function releaseEscrow(escrowId: number): Promise<string> {
   const contractId = getEscrowContractId();
   logger.info(`[Escrow] Releasing escrow #${escrowId} on ${contractId}`);
   try {
-    return await callContract(contractId, 'release', [
-      addressToScVal(admin),
-      u64ToScVal(escrowId),
-    ]);
+    return await callContract(contractId, 'release', [addressToScVal(admin), u64ToScVal(escrowId)]);
   } catch (err) {
     translateContractError(err, `Failed to release escrow #${escrowId} — please try again`);
   }

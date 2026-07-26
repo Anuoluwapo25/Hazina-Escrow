@@ -10,7 +10,8 @@ const { mockGetAccount, mockSimulate, mockSend, mockGetTransaction } = vi.hoiste
 // Stub the RPC server so no network call is made; keep the rest of the SDK
 // real so encoding/decoding (ScVal, Keypair, TransactionBuilder) is genuine.
 vi.mock('@stellar/stellar-sdk', async () => {
-  const actual = await vi.importActual<typeof import('@stellar/stellar-sdk')>('@stellar/stellar-sdk');
+  const actual =
+    await vi.importActual<typeof import('@stellar/stellar-sdk')>('@stellar/stellar-sdk');
   class MockRpcServer {
     getAccount = mockGetAccount;
     simulateTransaction = mockSimulate;
@@ -84,7 +85,10 @@ describe('agent.wallet callContract', () => {
         sign: () => {},
       }),
     } as unknown as ReturnType<typeof StellarSdk.rpc.assembleTransaction>);
-    mockSend.mockResolvedValue({ status: 'ERROR', errorResult: { accountId: 'GSECRETLOOKING...' } });
+    mockSend.mockResolvedValue({
+      status: 'ERROR',
+      errorResult: { accountId: 'GSECRETLOOKING...' },
+    });
 
     const err: ContractCallError = await callContract(CONTRACT_ID, 'release', []).catch(e => e);
     expect(err).toBeInstanceOf(ContractCallError);
@@ -100,11 +104,11 @@ describe('agent.wallet callContract', () => {
       build: () => ({ sign: () => {} }),
     } as unknown as ReturnType<typeof StellarSdk.rpc.assembleTransaction>);
     mockSend.mockResolvedValue({ status: 'PENDING', hash: 'tx-hash-1' });
-    mockGetTransaction.mockResolvedValue({ status: StellarSdk.rpc.Api.GetTransactionStatus.NOT_FOUND });
+    mockGetTransaction.mockResolvedValue({
+      status: StellarSdk.rpc.Api.GetTransactionStatus.NOT_FOUND,
+    });
 
-    await expect(callContract(CONTRACT_ID, 'release', [])).rejects.toThrow(
-      /timed out after 50ms/,
-    );
+    await expect(callContract(CONTRACT_ID, 'release', [])).rejects.toThrow(/timed out after 50ms/);
   }, 10_000);
 
   it('opens the circuit breaker after repeated RPC-level failures and fails fast without calling simulateTransaction again', async () => {
