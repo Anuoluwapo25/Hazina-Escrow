@@ -1,3 +1,5 @@
+import { StrKey } from '@stellar/stellar-sdk';
+
 const NETWORK = process.env.STELLAR_NETWORK ?? 'testnet';
 
 export const STELLAR_NETWORK = NETWORK as 'testnet' | 'mainnet';
@@ -42,6 +44,25 @@ export function getEscrowContractId(): string {
     );
   }
   return id;
+}
+
+/**
+ * Call once at application startup, alongside validateAgentWallet(). Escrow
+ * mode is opt-in (ESCROW_CONTRACT_ID unset → legacy custodial demo path), but
+ * once an operator sets it, a malformed contract address must fail fast here
+ * rather than surface as a cryptic RPC error on the first buyer's request.
+ */
+export function validateEscrowConfig(): void {
+  const id = (process.env.ESCROW_CONTRACT_ID ?? '').trim();
+  if (!id) {
+    return;
+  }
+  if (!StrKey.isValidContract(id)) {
+    throw new Error(
+      `[EscrowConfig] ESCROW_CONTRACT_ID "${id}" is not a valid Soroban contract address ` +
+        '(expected a C… strkey). Check the value in your environment configuration.',
+    );
+  }
 }
 
 // ── Multi-token support ──────────────────────────────────────────────────────

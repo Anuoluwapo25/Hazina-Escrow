@@ -65,7 +65,7 @@ export interface Transaction {
     | 'failed'
     | 'refunded'
     | 'delivery_failed';
-  deliveryStatus?: 'pending' | 'delivered' | 'failed';
+  deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
   sellerTxHash?: string;
