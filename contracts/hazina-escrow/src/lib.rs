@@ -1781,6 +1781,64 @@ mod fuzz_tests {
         token::{Client as TokenClient, StellarAssetClient},
     };
 
+    fn setup() -> (
+        Env,
+        HazinaEscrowClient<'static>,
+        Address,
+        Address,
+        Address,
+        Address,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        let seller = Address::generate(&env);
+        let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+        let usdc = token_id.address();
+        StellarAssetClient::new(&env, &usdc).mint(&buyer, &10_000_000_000);
+
+        let contract_id = env.register(HazinaEscrow, ());
+        let client = HazinaEscrowClient::new(&env, &contract_id);
+        client.initialize(&admin, &500);
+
+        (env, client, admin, buyer, seller, usdc)
+    }
+
+    fn dataset_id(env: &Env, value: &str) -> String {
+        String::from_str(env, value)
+    }
+
+    proptest! {
+        #[test]
+        fn refund_returns_full_amount(amount in 10_000i128..=10_000_000_000i128) {
+            let (env, client, admin, buyer, seller, usdc) = setup();
+            let treasury = Address::generate(&env);
+            let token_client = TokenClient::new(&env, &usdc);
+            client.set_treasury(&admin, &treasury);
+
+            let escrow_id = client.lock(
+                &buyer,
+                &seller,
+                &usdc,
+                &amount,
+                &dataset_id(&env, "ds-refund-full-amount"),
+                &3600,
+            );
+
+            let buyer_before = token_client.balance(&buyer);
+            let contract_before = token_client.balance(&client.address);
+            let treasury_before = token_client.balance(&treasury);
+
+            client.refund(&admin, &escrow_id);
+
+            prop_assert_eq!(token_client.balance(&buyer) - buyer_before, amount);
+            prop_assert_eq!(token_client.balance(&client.address) - contract_before, -amount);
+            prop_assert_eq!(token_client.balance(&treasury) - treasury_before, 0);
+        }
+    }
+
 
     #[test]
     #[should_panic(expected = "Error(Contract, #12)")]
