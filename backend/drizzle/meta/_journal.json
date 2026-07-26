@@ -15,6 +15,13 @@
       "when": 1784161486923,
       "tag": "0001_add_live_data_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784200000000,
+      "tag": "0001_add_escrow_id",
+      "breakpoints": true
     }
   ]
 }

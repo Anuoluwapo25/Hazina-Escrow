@@ -1,8 +1,17 @@
 import { initializeDatadog } from './common/datadog';
 import { initializeSentry, Sentry } from './common/sentry';
+import { validateEscrowConfig } from './lib/stellar.config';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// Fail fast, before anything else starts, if ESCROW_CONTRACT_ID is set but
+// malformed — a typo here would otherwise silently break every escrow read
+// and release/refund call the first time a buyer hits the API. Runs here
+// (rather than inside the uncaughtException handler's scope further down)
+// so a bad value crashes startup instead of being swallowed and logged.
+validateEscrowConfig();
+
 initializeDatadog();
 initializeSentry();
 

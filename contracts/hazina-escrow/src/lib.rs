@@ -1047,7 +1047,7 @@ mod tests {
         Address, Env, String, Vec,
     };
 
-    const INITIAL_BUYER_BALANCE: i128 = 10_000_000_000;
+    pub(crate) const INITIAL_BUYER_BALANCE: i128 = 10_000_000_000;
 
     pub fn setup() -> (
         Env,
@@ -1895,7 +1895,10 @@ mod fuzz_tests {
     extern crate std;
 
     use super::*;
+    use crate::tests::{dataset_id, setup, INITIAL_BUYER_BALANCE};
+    use proptest::collection;
     use proptest::prelude::*;
+    use std::format;
     use soroban_sdk::{
         testutils::{Address as _, Events, Ledger},
         token::{Client as TokenClient, StellarAssetClient},
