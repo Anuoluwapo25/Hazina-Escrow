@@ -2,10 +2,20 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Helmet } from 'react-helmet-async';
-import { ArrowLeft, Calendar, Database, DollarSign, Hash, ShoppingCart, Star } from 'lucide-react';
+import {
+  ArrowLeft,
+  Calendar,
+  Database,
+  DollarSign,
+  Hash,
+  Radio,
+  ShoppingCart,
+  Star,
+} from 'lucide-react';
+import { AreaChart, Area, ResponsiveContainer, Tooltip, YAxis } from 'recharts';
 import clsx from 'clsx';
-import { api, DatasetDetail } from '../lib/api';
-import { formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
+import { api, DatasetDetail, DatasetPreview } from '../lib/api';
+import { formatTimeAgo, formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
 import QueryModal from '../components/ui/QueryModal';
 import { Skeleton } from '../components/ui/SkeletonLoader';
 import { useI18n } from '../i18n';
@@ -34,7 +44,7 @@ function Stars({ value, onSelect }: { value: number; onSelect?: (value: number) 
 
 export default function DatasetDetailPage() {
   const { datasetId = '' } = useParams();
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
   const [showQueryModal, setShowQueryModal] = useState(false);
   const {
     data: dataset,
@@ -44,6 +54,18 @@ export default function DatasetDetailPage() {
     queryKey: ['dataset', datasetId],
     queryFn: () => api.getDataset(datasetId),
     enabled: Boolean(datasetId),
+  });
+
+  const {
+    data: preview,
+    isLoading: previewLoading,
+    isError: previewError,
+  } = useQuery<DatasetPreview>({
+    queryKey: ['dataset-preview', datasetId],
+    queryFn: () => api.getDatasetPreview(datasetId),
+    enabled: Boolean(datasetId),
+    // live feeds refresh server-side; keep the sample reasonably fresh
+    refetchInterval: dataset?.live ? 60_000 : false,
   });
 
   const previewJson = useMemo(() => JSON.stringify(dataset?.preview ?? {}, null, 2), [dataset]);
@@ -99,9 +121,22 @@ export default function DatasetDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_24rem] gap-8">
           <article className="space-y-8">
             <section className="glass-card p-6 md:p-8">
-              <span className={clsx('type-badge mb-5 inline-flex', typeMeta?.color, typeMeta?.bg)}>
-                {typeMeta?.label ?? dataset.type}
-              </span>
+              <div className="mb-5 flex flex-wrap items-center gap-2">
+                <span className={clsx('type-badge inline-flex', typeMeta?.color, typeMeta?.bg)}>
+                  {typeMeta?.label ?? dataset.type}
+                </span>
+                {dataset.live && (
+                  <span className="type-badge inline-flex border border-emerald-400/30 bg-emerald-400/10 text-emerald-400">
+                    <Radio className="w-3 h-3 animate-pulse" />
+                    {t('marketplace.live.badge')}
+                    {dataset.lastRefreshedAt && (
+                      <span className="ml-1 opacity-80">
+                        · {formatTimeAgo(dataset.lastRefreshedAt, locale)}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
               <h1 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-4">
                 {dataset.name}
               </h1>
@@ -143,6 +178,71 @@ export default function DatasetDetailPage() {
                 ))}
               </div>
             </section>
+
+            {dataset.live && (
+              <section className="glass-card p-6 md:p-8">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="font-display text-2xl font-semibold text-foreground flex items-center gap-2">
+                    <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
+                    {t('marketplace.live.preview')}
+                  </h2>
+                  {preview?.provider && (
+                    <span className="text-xs uppercase tracking-wide font-body text-muted-2">
+                      {t('marketplace.live.source', { provider: preview.provider })}
+                    </span>
+                  )}
+                </div>
+
+                {previewLoading ? (
+                  <Skeleton variant="rounded" height={180} />
+                ) : previewError || !preview ? (
+                  <p className="text-sm text-foreground-muted">
+                    {t('marketplace.live.previewError')}
+                  </p>
+                ) : (
+                  <>
+                    {preview.headline && (
+                      <p className="text-lg text-foreground mb-4">{preview.headline}</p>
+                    )}
+                    {preview.points.length > 1 ? (
+                      <div className="h-44 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={preview.points}>
+                            <defs>
+                              <linearGradient id="liveSpark" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#34d399" stopOpacity={0.5} />
+                                <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <YAxis hide domain={['dataMin', 'dataMax']} />
+                            <Tooltip
+                              contentStyle={{
+                                background: 'rgba(10,10,12,0.9)',
+                                border: '1px solid rgba(52,211,153,0.3)',
+                                borderRadius: 12,
+                                fontSize: 12,
+                              }}
+                              labelStyle={{ color: '#9ca3af' }}
+                            />
+                            <Area
+                              type="monotone"
+                              dataKey="value"
+                              stroke="#34d399"
+                              strokeWidth={2}
+                              fill="url(#liveSpark)"
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-foreground-muted">
+                        {t('marketplace.live.noPreview')}
+                      </p>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
 
             <section className="glass-card p-6 md:p-8">
               <h2 className="font-display text-2xl font-semibold text-foreground mb-4">

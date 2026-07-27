@@ -94,6 +94,23 @@ export interface AgentSellerPayment {
   onChain: boolean;
 }
 
+/** Live on-chain escrow state, as returned by GET /payments/escrow/:id (#548). */
+export interface EscrowState {
+  escrowId: number;
+  datasetId: string;
+  buyer: string;
+  seller: string;
+  amountStroops: string;
+  amount: number;
+  token: string;
+  deadline: number;
+  buyerConfirmed: boolean;
+  platformFeeBps: number;
+  released: boolean;
+  refunded: boolean;
+  disputed: boolean;
+}
+
 export interface AgentReport {
   topOpportunity: {
     protocol: string;
@@ -165,6 +182,12 @@ export const DatasetMetaSchema = z.object({
   createdAt: z.string(),
   thumbnail: z.string().optional(),
 
+  category: z.string().optional(),
+  provider: z.string().nullish(),
+  live: z.boolean().optional(),
+  lastRefreshedAt: z.string().nullish(),
+  tags: z.array(z.string()).optional(),
+
   ratings: z.object({ score: z.number(), count: z.number() }).optional(),
   priceHistory: z.array(z.object({ price: z.number(), changedAt: z.string() })).optional(),
 });
@@ -195,6 +218,16 @@ export const DatasetDetailSchema = DatasetMetaSchema.extend({
 });
 export type DatasetDetail = z.infer<typeof DatasetDetailSchema>;
 export type DatasetMeta = z.infer<typeof DatasetMetaSchema>;
+
+export const DatasetPreviewSchema = z.object({
+  sample: z.unknown(),
+  points: z.array(z.object({ label: z.string(), value: z.number() })).catch([]),
+  headline: z.string().nullish(),
+  live: z.boolean(),
+  provider: z.string().nullish(),
+  lastRefreshedAt: z.string().nullish(),
+});
+export type DatasetPreview = z.infer<typeof DatasetPreviewSchema>;
 
 export const TransactionSchema = z.object({
   id: z.string(),
@@ -333,6 +366,8 @@ export const api = {
     search?: string;
     type?: string | string[];
     types?: string[];
+    category?: string | string[];
+    live?: boolean;
     minPrice?: number;
     maxPrice?: number;
     minQueries?: number;
@@ -350,6 +385,15 @@ export const api = {
       typeValues.forEach(type => {
         if (type) searchParams.append('type', type);
       });
+      const categoryValues = Array.isArray(params.category)
+        ? params.category
+        : params.category
+          ? [params.category]
+          : [];
+      categoryValues.forEach(category => {
+        if (category) searchParams.append('category', category);
+      });
+      if (params.live) searchParams.append('live', 'true');
       if (params.minPrice !== undefined)
         searchParams.append('minPrice', params.minPrice.toString());
       if (params.maxPrice !== undefined)
@@ -372,6 +416,11 @@ export const api = {
     request<{ success: boolean; dataset: unknown }>(`${getApiBaseUrl()}/datasets/${id}`).then(r =>
       parseApiResponse(DatasetDetailSchema, r.dataset),
     ),
+
+  getDatasetPreview: (id: string) =>
+    request<{ success: boolean; preview: unknown }>(
+      `${getApiBaseUrl()}/datasets/${id}/preview`,
+    ).then(r => parseApiResponse(DatasetPreviewSchema, r.preview)),
 
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(
@@ -409,6 +458,55 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ buyerQuestion }),
     }).then(r => parseApiResponse(QueryResultSchema, r)),
+
+  // ── Non-custodial escrow (#547/#548) ─────────────────────────────────────
+
+  /** Ask the backend to assemble an unsigned lock() transaction for the buyer. */
+  buildEscrowLock: (buyer: string, datasetId: string, amount?: number) =>
+    request<{ success: boolean; xdr: string; contractId: string; amount: number }>(
+      `${getApiBaseUrl()}/payments/escrow/lock/build`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, datasetId, amount }),
+      },
+    ),
+
+  /** Relay a buyer-signed lock() transaction and receive the on-chain escrow id. */
+  submitEscrowLock: (signedXdr: string) =>
+    request<{ success: boolean; txHash: string; escrowId: number }>(
+      `${getApiBaseUrl()}/payments/escrow/lock/submit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ signedXdr }),
+      },
+    ),
+
+  /** Read live on-chain escrow state (#548). */
+  getEscrow: (escrowId: number) =>
+    request<{ success: boolean; escrow: EscrowState }>(
+      `${getApiBaseUrl()}/payments/escrow/${escrowId}`,
+    ).then(r => r.escrow),
+
+  /** Verify a locked escrow, deliver the dataset, and trigger on-chain release. */
+  verifyEscrowPayment: (id: string, escrowId: number, buyerQuestion?: string) =>
+    request<unknown>(`${getApiBaseUrl()}/verify/${id}/escrow`, {
+      method: 'POST',
+      body: JSON.stringify({ escrowId, buyerQuestion }),
+    }).then(r => parseApiResponse(QueryResultSchema, r)),
+
+  /** Build an unsigned confirm_delivery() transaction for the buyer to sign. */
+  buildConfirmDelivery: (buyer: string, escrowId: number) =>
+    request<{ success: boolean; xdr: string }>(`${getApiBaseUrl()}/payments/escrow/confirm/build`, {
+      method: 'POST',
+      body: JSON.stringify({ buyer, escrowId }),
+    }),
+
+  /** Build an unsigned raise_dispute() transaction for the buyer to sign. */
+  buildRaiseDispute: (buyer: string, escrowId: number, evidenceHash?: string) =>
+    request<{ success: boolean; xdr: string }>(`${getApiBaseUrl()}/payments/escrow/dispute/build`, {
+      method: 'POST',
+      body: JSON.stringify({ buyer, escrowId, evidenceHash }),
+    }),
 
   submitRating: (id: string, txHash: string, score: number, comment?: string) =>
     request<{ success: boolean; ratings: unknown }>(`${getApiBaseUrl()}/datasets/${id}/ratings`, {

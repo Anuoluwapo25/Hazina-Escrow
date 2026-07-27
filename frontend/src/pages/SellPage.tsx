@@ -17,7 +17,7 @@ import { api } from '../lib/api';
 import { formatUSDC, getTypeMeta, DATA_TYPE_META } from '../lib/utils';
 import clsx from 'clsx';
 import { getCatalog, useI18n } from '../i18n';
-import { useToastContext } from '../components/ui/ToastProvider';
+import { useToastContext } from '../components/ui/useToastContext';
 import { Toast, ToastProps } from '../components/ui/Toast';
 
 const PRICE_PRESETS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5];

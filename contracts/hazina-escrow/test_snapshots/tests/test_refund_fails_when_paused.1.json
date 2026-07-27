@@ -76,6 +76,9 @@
                 },
                 {
                   "string": "ds-paused-refund"
+                },
+                {
+                  "u64": 3600
                 }
               ]
             }
@@ -357,10 +360,42 @@
                     },
                     {
                       "key": {
+                        "symbol": "buyer_confirmed"
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "dataset_id"
                       },
                       "val": {
                         "string": "ds-paused-refund"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "deadline"
+                      },
+                      "val": {
+                        "u64": 4600
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "dispute_deadline"
+                      },
+                      "val": {
+                        "u64": 1000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "disputed"
+                      },
+                      "val": {
+                        "bool": false
                       }
                     },
                     {

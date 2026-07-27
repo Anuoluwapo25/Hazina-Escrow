@@ -233,6 +233,27 @@ export const sw: EnglishMessages = {
     resultsCount: 'dataset {count} zimepatikana',
     noResultsTitle: 'Hakuna dataset zilizopatikana',
     noResultsBody: 'Jaribu kurekebisha vichujio vyako',
+    live: {
+      badge: 'MOJA KWA MOJA',
+      updated: 'Imesasishwa {time}',
+      source: 'Chanzo: {provider}',
+      liveOnly: 'Mipasho ya moja kwa moja pekee',
+      preview: 'Onyesho la moja kwa moja',
+      previewLoading: 'Inapakia sampuli ya moja kwa moja...',
+      previewError: 'Onyesho la moja kwa moja halipatikani',
+      noPreview: 'Hakuna sampuli ya moja kwa moja kwa dataset hii.',
+    },
+    categories: {
+      all: 'Zote',
+      label: 'Kategoria',
+      'defi-yields': 'Mavuno ya DeFi',
+      'market-sentiment': 'Hisia za soko',
+      'on-chain-flows': 'Mitiririko ya on-chain',
+      'risk-intelligence': 'Ujasusi wa hatari',
+      'trading-signals': 'Ishara za biashara',
+      'nft-analytics': 'Uchambuzi wa NFT',
+      other: 'Nyingine',
+    },
   },
   sell: {
     messages: {

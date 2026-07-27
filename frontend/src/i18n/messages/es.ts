@@ -233,6 +233,27 @@ export const es: EnglishMessages = {
     resultsCount: '{count} datasets encontrados',
     noResultsTitle: 'No se encontraron datasets',
     noResultsBody: 'Prueba ajustando tus filtros',
+    live: {
+      badge: 'EN VIVO',
+      updated: 'Actualizado {time}',
+      source: 'Fuente: {provider}',
+      liveOnly: 'Solo feeds en vivo',
+      preview: 'Vista previa en vivo',
+      previewLoading: 'Cargando muestra en vivo...',
+      previewError: 'Vista previa en vivo no disponible',
+      noPreview: 'No hay muestra en vivo disponible para este dataset.',
+    },
+    categories: {
+      all: 'Todas',
+      label: 'Categoría',
+      'defi-yields': 'Rendimientos DeFi',
+      'market-sentiment': 'Sentimiento de mercado',
+      'on-chain-flows': 'Flujos on-chain',
+      'risk-intelligence': 'Inteligencia de riesgo',
+      'trading-signals': 'Señales de trading',
+      'nft-analytics': 'Analítica NFT',
+      other: 'Otros',
+    },
   },
   sell: {
     messages: {

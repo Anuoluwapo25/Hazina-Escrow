@@ -12,16 +12,9 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import clsx from 'clsx';
+import { isConnected as freighterIsConnected, getPublicKey } from '@stellar/freighter-api';
+import { connectFreighter } from '../../lib/stellarWallets';
 import { LocaleSwitcher, useI18n } from '../../i18n';
-
-declare global {
-  interface Window {
-    freighterApi?: {
-      isConnected?: () => Promise<boolean>;
-      getPublicKey?: () => Promise<string>;
-    };
-  }
-}
 
 const NAV_LINKS = [
   {
@@ -60,19 +53,12 @@ export default function Navbar() {
 
   const handleConnect = async () => {
     try {
-      const connected = await window.freighterApi?.isConnected?.();
-      if (connected) {
-        const nextPublicKey = await window.freighterApi?.getPublicKey?.();
-        if (nextPublicKey) {
-          setPublicKey(nextPublicKey);
-          localStorage.setItem('hazina_wallet', nextPublicKey);
-        }
-        return;
-      }
-
-      window.open('https://www.freighter.app/', '_blank', 'noopener,noreferrer');
+      const nextPublicKey = await connectFreighter();
+      setPublicKey(nextPublicKey);
+      localStorage.setItem('hazina_wallet', nextPublicKey);
     } catch (error) {
       console.error('Connection failed:', error);
+      window.open('https://www.freighter.app/', '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -100,13 +86,13 @@ export default function Navbar() {
       }
 
       try {
-        const connected = await window.freighterApi?.isConnected?.();
+        const connected = await freighterIsConnected();
         if (!connected) {
           handleDisconnect();
           return;
         }
 
-        const currentKey = await window.freighterApi?.getPublicKey?.();
+        const currentKey = await getPublicKey();
         if (currentKey !== publicKey) {
           handleDisconnect();
         }

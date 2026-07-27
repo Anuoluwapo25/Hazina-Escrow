@@ -28,6 +28,8 @@ export interface Dataset {
   name: string;
   description: string;
   type: string;
+  /** Human-facing grouping used for marketplace category tabs. */
+  category?: string;
   pricePerQuery: number;
   sellerWallet: string;
   paymentToken?: string;
@@ -38,6 +40,14 @@ export interface Dataset {
   createdAt: string;
   ratings?: DatasetRating;
   priceHistory?: DatasetPricePoint[];
+  /** Provider id backing a live feed (e.g. "defillama"); undefined for static/user datasets. */
+  provider?: string;
+  /** True when this dataset is refreshed from an external live source. */
+  live?: boolean;
+  /** ISO timestamp of the last successful provider refresh. */
+  lastRefreshedAt?: string;
+  /** Free-form discovery tags. */
+  tags?: string[];
 }
 export interface Transaction {
   id: string;
@@ -55,7 +65,7 @@ export interface Transaction {
     | 'failed'
     | 'refunded'
     | 'delivery_failed';
-  deliveryStatus?: 'pending' | 'delivered' | 'failed';
+  deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
   sellerTxHash?: string;
@@ -68,6 +78,8 @@ export interface Transaction {
   deliveryError?: string;
   verifiedAt?: string;
   deliveredAt?: string;
+  /** On-chain escrow id (from the contract's lock()); undefined for demo/legacy txns. */
+  escrowId?: number;
   timestamp: string;
 }
 export type WebhookEvent =
@@ -117,6 +129,7 @@ function rowToDataset(row: any): Dataset {
     name: row.name,
     description: row.description,
     type: row.type,
+    category: row.category ?? undefined,
     pricePerQuery: Number(row.pricePerQuery),
     sellerWallet: row.sellerWallet,
     paymentToken: row.paymentToken ?? undefined,
@@ -127,6 +140,10 @@ function rowToDataset(row: any): Dataset {
     createdAt: row.createdAt,
     ratings: row.ratings ? JSON.parse(row.ratings) : undefined,
     priceHistory: row.priceHistory ? JSON.parse(row.priceHistory) : undefined,
+    provider: row.provider ?? undefined,
+    live: row.live === null || row.live === undefined ? undefined : Boolean(row.live),
+    lastRefreshedAt: row.lastRefreshedAt ?? undefined,
+    tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
   };
 }
 
@@ -136,6 +153,7 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     name: dataset.name,
     description: dataset.description,
     type: dataset.type,
+    category: dataset.category ?? 'other',
     pricePerQuery: String(dataset.pricePerQuery),
     paymentToken: dataset.paymentToken ?? 'USDC',
     sellerWallet: dataset.sellerWallet,
@@ -146,6 +164,10 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     createdAt: dataset.createdAt,
     ratings: dataset.ratings !== undefined ? JSON.stringify(dataset.ratings) : null,
     priceHistory: dataset.priceHistory !== undefined ? JSON.stringify(dataset.priceHistory) : null,
+    provider: dataset.provider ?? null,
+    live: dataset.live ? 1 : 0,
+    lastRefreshedAt: dataset.lastRefreshedAt ?? null,
+    tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
   };
 }
 
@@ -174,6 +196,8 @@ function rowToTransaction(row: any): Transaction {
     deliveryError: row.deliveryError ?? undefined,
     verifiedAt: row.verifiedAt ?? undefined,
     deliveredAt: row.deliveredAt ?? undefined,
+    escrowId:
+      row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
     timestamp: row.timestamp,
   };
 }
@@ -201,6 +225,7 @@ function transactionToRow(tx: Transaction): Record<string, unknown> {
     deliveryError: tx.deliveryError ?? null,
     verifiedAt: tx.verifiedAt ?? null,
     deliveredAt: tx.deliveredAt ?? null,
+    escrowId: tx.escrowId ?? null,
     timestamp: tx.timestamp,
   };
 }
