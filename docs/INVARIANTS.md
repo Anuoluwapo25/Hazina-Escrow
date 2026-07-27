@@ -19,15 +19,15 @@ reproducing a failure).
 
 ## Vocabulary
 
-| Term | Meaning |
-| --- | --- |
-| stroop | Smallest indivisible token unit. All contract math is in stroops. |
-| bps | Basis points. `MAX_BASIS_POINTS = 10_000` = 100 %. |
-| `amount` | Stroops locked for one escrow. `lock` requires `amount >= MIN_LOCK_AMOUNT` (10 000). |
-| `fee_bps` | Platform rate snapshotted into the record at lock time. `0 <= fee_bps <= MAX_FEE_BPS` (2 000 = 20 %). |
-| platform cut | `max(1, amount * fee_bps / 10_000)` when `fee_bps > 0`, else `0`. See I9. |
-| seller cut | `amount - platform_cut`. |
-| settled | `released == true` or `refunded == true`. |
+| Term         | Meaning                                                                                               |
+| ------------ | ----------------------------------------------------------------------------------------------------- |
+| stroop       | Smallest indivisible token unit. All contract math is in stroops.                                     |
+| bps          | Basis points. `MAX_BASIS_POINTS = 10_000` = 100 %.                                                    |
+| `amount`     | Stroops locked for one escrow. `lock` requires `amount >= MIN_LOCK_AMOUNT` (10 000).                  |
+| `fee_bps`    | Platform rate snapshotted into the record at lock time. `0 <= fee_bps <= MAX_FEE_BPS` (2 000 = 20 %). |
+| platform cut | `max(1, amount * fee_bps / 10_000)` when `fee_bps > 0`, else `0`. See I9.                             |
+| seller cut   | `amount - platform_cut`.                                                                              |
+| settled      | `released == true` or `refunded == true`.                                                             |
 
 Accounts value can reach: **buyer**, **seller**, **treasury** (falls back to
 **admin** when unset), and the **contract** itself.
@@ -217,6 +217,7 @@ sequence, counting `lock` as 1 and `lock_multi` as `shares.len()`. The counter
 is keyed on the ledger sequence and resets when the sequence advances.
 
 > `circuit_breakers::rate_breaker_caps_escrows_per_ledger`,
+> `circuit_breakers::rate_breaker_counts_lock_multi_as_batch_size`,
 > `circuit_breakers::rate_breaker_counter_resets_when_the_ledger_advances`,
 > `contracts/hazina-escrow/src/lib.rs::tests::test_rate_limit_counter_resets_on_new_ledger`
 
@@ -278,13 +279,14 @@ release path (I1), and it overrides the missing buyer confirmation.
 `refund` and `emergency_withdraw` all require the stored admin.
 `resolve_dispute` requires the arbitrator.
 
-> `state_machine::admin_surface_rejects_non_admin_callers`
+> `state_machine::admin_surface_rejects_non_admin_callers`,
+> `circuit_breakers::breaker_config_is_admin_only_and_validated`
 
 ### I23 — pause blocks writes, not reads
 
 While paused: `lock`, `lock_multi`, `release`, `release_multi` and `refund`
 fail; `get_escrow`, `get_escrow_count` and the config getters still work.
-`emergency_withdraw` requires the *paused* state.
+`emergency_withdraw` requires the _paused_ state.
 
 > `state_machine::pause_blocks_writes_and_leaves_reads_working`
 
@@ -295,14 +297,14 @@ fail; `get_escrow`, `get_escrow_count` and the config getters still work.
 Real, current behaviour. They are pinned by tests so they cannot change
 silently, but they are **not** claimed to be desirable.
 
-| # | Behaviour | Where |
-| --- | --- | --- |
-| A1 | `claim_expired` leaves the platform cut in the contract instead of paying the treasury (I3). | `lib.rs::claim_expired` |
-| A2 | `claim_expired` does not check the pause flag, so a seller can claim an expired escrow while the contract is paused. | `lib.rs::claim_expired` |
-| A3 | `resolve_dispute` reaches `release_one` directly and so bypasses the pause check that public `release` performs. | `lib.rs::resolve_dispute` |
-| A4 | `lock_multi` does not call `assert_valid_parties`, so a buyer may be their own seller in a batch — `lock` forbids it. | `lib.rs::lock_multi` |
-| A5 | `lock_multi` has no expiry parameter; every escrow it creates gets a fixed 1-hour deadline. | `lib.rs::lock_multi` |
-| A6 | `refund_one` clears `disputed` on refund, but `release_disputed_one` clears it *and* forces `buyer_confirmed = true`. | `lib.rs` |
+| #   | Behaviour                                                                                                                                                                              | Where                     |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| A1  | `claim_expired` leaves the platform cut in the contract instead of paying the treasury (I3).                                                                                           | `lib.rs::claim_expired`   |
+| A2  | `claim_expired` does not check the pause flag, so a seller can claim an expired escrow while the contract is paused. Pinned by `state_machine::claim_expired_is_not_blocked_by_pause`. | `lib.rs::claim_expired`   |
+| A3  | `resolve_dispute` reaches `release_one` directly and so bypasses the pause check that public `release` performs.                                                                       | `lib.rs::resolve_dispute` |
+| A4  | `lock_multi` does not call `assert_valid_parties`, so a buyer may be their own seller in a batch — `lock` forbids it.                                                                  | `lib.rs::lock_multi`      |
+| A5  | `lock_multi` has no expiry parameter; every escrow it creates gets a fixed 1-hour deadline.                                                                                            | `lib.rs::lock_multi`      |
+| A6  | `refund_one` clears `disputed` on refund, but `release_disputed_one` clears it _and_ forces `buyer_confirmed = true`.                                                                  | `lib.rs`                  |
 
 ---
 
@@ -320,9 +322,9 @@ differential test.
 
 ```ts
 export const PLATFORM_FEE_RATE = parseFloat(process.env.PLATFORM_FEE_RATE ?? '0.05');
-export const PLATFORM_FEE_BPS  = Math.round(PLATFORM_FEE_RATE * 10_000);
+export const PLATFORM_FEE_BPS = Math.round(PLATFORM_FEE_RATE * 10_000);
 export function platformFee(pricePerQuery: number): number {
-  return parseFloat((pricePerQuery * PLATFORM_FEE_RATE).toFixed(4));  // 4 dp
+  return parseFloat((pricePerQuery * PLATFORM_FEE_RATE).toFixed(4)); // 4 dp
 }
 export function sellerShare(pricePerQuery: number): number {
   return parseFloat((pricePerQuery * SELLER_PAYOUT_RATE).toFixed(7)); // 7 dp
@@ -342,9 +344,29 @@ Points of divergence:
 
 `PLATFORM_FEE_BPS` is the shared handle: the backend derives it from the same
 `PLATFORM_FEE_RATE` it uses off-chain and passes it to the contract, so the
-*rate* cannot diverge even though the *rounding* does.
+_rate_ cannot diverge even though the _rounding_ does.
+
+### I24 — the divergence is bounded at 501 stroops
+
+The backend quantises the fee to four decimals of a whole token unit — 1 000
+stroops — so its answer can sit up to 500 stroops from the exact fee. The
+contract truncates, costing under one. The budget is therefore 501 stroops, and
+it is dominated entirely by the backend's rounding rather than the contract's.
+
+Neither side is reimplemented in the other's language: `toFixed(4)` rounds ties
+away from zero while Rust's formatter rounds to even, so a hand-port would be
+testing the port. Instead `backend/scripts/gen-fee-vectors.ts` runs the real
+backend functions over a fixed price grid into
+`contracts/hazina-escrow/tests/fixtures/fee_vectors.json`, and the two sides are
+checked against that file from opposite directions.
+
+> `fee_differential::contract_fee_tracks_backend_fee_within_tolerance`,
+> `fee_differential::contract_truncation_error_is_under_one_stroop`,
+> `fee_differential::real_contract_matches_the_model_on_every_vector`,
+> `fee_differential::backend_bps_is_the_rate_the_backend_uses`,
+> `backend/src/common/constants.differential.test.ts`
 
 Guidance: treat backend figures as display values, and the contract's integer
 result as authoritative for settlement. Never reconcile a payout against a
-backend-computed number without allowing the tolerance the differential test
-reports.
+backend-computed number without allowing the 501-stroop budget. See
+[`FUZZING.md`](FUZZING.md) for regenerating the fixture.
