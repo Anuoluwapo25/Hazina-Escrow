@@ -1,0 +1,137 @@
+name: Contract Fuzz
+
+# Property-based invariant suite for contracts/hazina-escrow.
+# Specification: docs/INVARIANTS.md. Runbook: docs/FUZZING.md.
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'backend/src/common/constants.ts'
+      - 'backend/scripts/gen-fee-vectors.ts'
+      - '.github/workflows/contract-fuzz.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'backend/src/common/constants.ts'
+      - 'backend/scripts/gen-fee-vectors.ts'
+  # Nightly deep run: the same properties, two orders of magnitude more cases.
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: 'PROPTEST_CASES budget'
+        required: false
+        default: '4096'
+
+concurrency:
+  group: contract-fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Deterministic gate ────────────────────────────────────────────────────────
+  gate:
+    name: Contract Gate Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/hazina-escrow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/hazina-escrow
+
+      # No feature flag: the fuzz target declares `required-features`, so this
+      # does not even build it. Sub-second, never flaky.
+      - name: Example tests
+        run: cargo test --locked
+
+      - name: Release build
+        run: cargo build --release --locked
+
+  # ── Property suite ────────────────────────────────────────────────────────────
+  fuzz:
+    name: Invariant Suite
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/hazina-escrow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/hazina-escrow
+
+      # Fixed budget so a run is reproducible and its cost is predictable.
+      # 512 takes ~100s; the nightly schedule and manual dispatch go deeper.
+      - name: Pick case budget
+        id: budget
+        run: |
+          if [ -n "${{ inputs.cases }}" ]; then
+            echo "cases=${{ inputs.cases }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "cases=4096" >> "$GITHUB_OUTPUT"
+          else
+            echo "cases=512" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run invariant suite
+        env:
+          PROPTEST_CASES: ${{ steps.budget.outputs.cases }}
+          # Never silently invent a new seed file in CI; a genuinely new
+          # failure must show up in the diff below, not just in the log.
+          PROPTEST_MAX_SHRINK_ITERS: '4096'
+        run: cargo test --locked --features fuzz-tests
+
+      # A failing property writes its seed to proptest-regressions/. Surface it
+      # so it can be committed — a seed that only ever existed on a CI runner is
+      # a bug nobody can reproduce.
+      - name: Report new regression seeds
+        if: always()
+        run: |
+          if ! git diff --quiet --exit-code -- proptest-regressions; then
+            echo "::warning::New proptest regression seeds were generated. Commit them."
+            git --no-pager diff -- proptest-regressions
+          else
+            echo "No new regression seeds."
+          fi
+
+      - name: Upload regression seeds
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proptest-regressions-${{ github.run_id }}
+          path: contracts/hazina-escrow/proptest-regressions/
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ── Cross-language fee differential (#540) ────────────────────────────────────
+  fee-differential:
+    name: Fee Differential (backend side)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm install --legacy-peer-deps
+
+      # Fails if tests/fixtures/fee_vectors.json has drifted from what the
+      # backend actually computes. The Rust `fuzz` job above checks the other
+      # direction: that the contract still matches the fixture.
+      - name: Fee vector drift + divergence bounds
+        run: npx vitest run src/common/constants.differential.test.ts

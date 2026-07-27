@@ -10,25 +10,37 @@ use soroban_sdk::{
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
+// These are `pub` on purpose: the property-based invariant suite in
+// `tests/fuzz/` derives its input strategies and expected-value models from
+// them, so the tests and the contract can never disagree about a boundary.
+// See docs/INVARIANTS.md.
+
 /// TTL extension applied to persistent escrow records (~60 days in ledgers).
 const ESCROW_BUMP_LEDGERS: u32 = 518_400;
 
 /// Minimum remaining TTL before a bump is triggered (~24 h in ledgers).
 const ESCROW_MIN_TTL: u32 = 17_280;
-const MAX_BASIS_POINTS: u32 = 10_000;
-const DISPUTE_WINDOW_LEDGERS: u32 = 1_000;
+
+/// Denominator for every basis-point fee calculation.
+pub const MAX_BASIS_POINTS: u32 = 10_000;
+
+/// How many ledgers after `lock` the buyer may still raise a dispute.
+pub const DISPUTE_WINDOW_LEDGERS: u32 = 1_000;
 
 /// Hard cap on the platform fee: 2 000 bps = 20 %.
-const MAX_FEE_BPS: u32 = 2_000;
+pub const MAX_FEE_BPS: u32 = 2_000;
 
 /// Minimum lock amount in stroops (0.001 USDC).
-const MIN_LOCK_AMOUNT: i128 = 10_000;
+pub const MIN_LOCK_AMOUNT: i128 = 10_000;
 
 /// Maximum escrow expiry: 30 days in seconds.
-const MAX_EXPIRY_SECONDS: u64 = 30 * 24 * 60 * 60;
+pub const MAX_EXPIRY_SECONDS: u64 = 30 * 24 * 60 * 60;
 
-const DEFAULT_MAX_ESCROW_AMOUNT: i128 = 1_000_000_000_000;
-const DEFAULT_MAX_ESCROWS_PER_LEDGER: u32 = 100;
+/// Per-escrow amount ceiling applied when the admin has not set one.
+pub const DEFAULT_MAX_ESCROW_AMOUNT: i128 = 1_000_000_000_000;
+
+/// Per-ledger escrow-creation ceiling applied when the admin has not set one.
+pub const DEFAULT_MAX_ESCROWS_PER_LEDGER: u32 = 100;
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
 
@@ -1886,27 +1898,6 @@ fn test_lock_multi_and_release_multi() {
         client.refund(&admin, &escrow_id);
     }
 
-}
-
-// ─── Fuzz / property-based tests ────────────────────────────────────────────
-
-#[cfg(all(test, feature = "fuzz-tests"))]
-mod fuzz_tests {
-    extern crate std;
-
-    use super::*;
-    use crate::tests::{dataset_id, setup, INITIAL_BUYER_BALANCE};
-    use proptest::collection;
-    use proptest::prelude::*;
-    use std::format;
-    use soroban_sdk::{
-        testutils::{Address as _, Events, Ledger},
-        token::{Client as TokenClient, StellarAssetClient},
-    };
-
-    // Use the parent module's functions
-    use super::tests::{setup, dataset_id};
-
     #[test]
     #[should_panic(expected = "Error(Contract, #12)")]
     fn test_lock_multi_fails_when_paused() {
@@ -1957,126 +1948,50 @@ mod fuzz_tests {
         assert_eq!(env.events().all().len(), 1);
     }
 
-    proptest! {  
-        #[test]  
-        fn circuit_breakers_hold_amount_cap(
-            amount in (MIN_LOCK_AMOUNT..10_000_000_000i128)  // Cap at buyer's balance
-        ) {  
-            let (env, client, admin, buyer, seller, usdc) = setup();  
-              
-            // Set a custom max amount for testing  
-            let test_max = 500_000_000_000i128;  
-            client.set_max_escrow_amount(&admin, &test_max);  
-            
-            // For amounts that should fail due to circuit breaker
-            if amount > test_max {  
-                let result = client.try_lock(  
-                    &buyer,  
-                    &seller,  
-                    &usdc,  
-                    &amount,  
-                    &dataset_id(&env, "ds-amount-cb"),  
-                    &3600,  
-                );  
-                assert!(result.is_err());  
-            } else {  
-                // For amounts that should succeed  
-                let escrow_id = client.lock(  
-                    &buyer,  
-                    &seller,  
-                    &usdc,  
-                    &amount,  
-                    &dataset_id(&env, "ds-amount-cb"),  
-                    &3600,  
-                );  
-                let record = client.get_escrow(&escrow_id);  
-                assert_eq!(record.amount, amount);  
-            }  
-        }  
-    }
-      
-    proptest! {  
-        #[test]  
-        fn circuit_breakers_hold_rate_limit(
-            n in 1u32..150u32  // Start from 1 to avoid empty shares
-        ) {  
-            let (env, client, admin, buyer, seller, usdc) = setup();  
-              
-            // Set a custom per-ledger limit for testing  
-            let test_max = 50u32;  
-            client.set_max_escrows_per_ledger(&admin, &test_max);  
-              
-            let mut shares = Vec::new(&env);  
-            let mut dataset_ids = Vec::new(&env);  
-              
-            for i in 0..n {  
-                shares.push_back(SellerShare {  
-                    seller: Address::generate(&env),  
-                    amount: MIN_LOCK_AMOUNT,  // Use minimum valid amount
-                });  
-                let id_str = std::format!("ds-rate-cb-{}", i);
-                dataset_ids.push_back(dataset_id(&env, &id_str));  
-            }  
-              
-            if n > test_max {  
-                // Should panic with RateLimitExceeded  
-                let result = client.try_lock_multi(&buyer, &usdc, &shares, &dataset_ids);  
-                assert!(result.is_err());  
-            } else {  
-                // Should succeed  
-                let first_id = client.lock_multi(&buyer, &usdc, &shares, &dataset_ids);  
-                assert_eq!(first_id, 0);  
-                assert_eq!(client.get_escrow_count(), n as u64);  
-            }  
-        }  
-    }  
-      
-    #[test]  
-    fn circuit_breakers_hold_counter_reset() {  
-        let (env, client, admin, buyer, _seller, usdc) = setup();  
-          
-        // Set a low per-ledger limit  
-        let test_max = 3u32;  
-        client.set_max_escrows_per_ledger(&admin, &test_max);  
-          
-        // Fill up the current ledger  
-        for i in 0..test_max {  
-            let id_str = std::format!("ds-ledger-reset-{}", i);
-            client.lock(  
-                &buyer,  
-                &_seller,  
-                &usdc,  
-                &MIN_LOCK_AMOUNT,  // Use minimum valid amount
-                &dataset_id(&env, &id_str),  
-                &3600,  
-            );  
-        }  
-          
-        // Next lock should fail in current ledger  
-        let result = client.try_lock(  
-            &buyer,  
-            &_seller,  
-            &usdc,  
-            &MIN_LOCK_AMOUNT,  // Use minimum valid amount
-            &dataset_id(&env, "ds-should-fail"),  
-            &3600,  
-        );  
-        assert!(result.is_err());  
-          
-        // Advance the ledger  
-        env.ledger().set_sequence_number(env.ledger().sequence() + 1);  
-          
-        // Now locks should succeed again  
-        let escrow_id = client.lock(  
-            &buyer,  
-            &_seller,  
-            &usdc,  
-            &MIN_LOCK_AMOUNT,  // Use minimum valid amount
-            &dataset_id(&env, "ds-should-succeed"),  
-            &3600,  
-        );  
-        let record = client.get_escrow(&escrow_id);  
-        assert_eq!(record.escrow_id, test_max as u64);  
+    // ── Circuit breakers ──────────────────────────────────────────────────────
+
+    /// The per-ledger counter is keyed on the ledger sequence, so it must reset
+    /// the moment the sequence advances. Fuzzed coverage lives in
+    /// `tests/fuzz/circuit_breakers.rs`; this pins the reset boundary exactly.
+    #[test]
+    fn test_rate_limit_counter_resets_on_new_ledger() {
+        let (env, client, admin, buyer, seller, usdc) = setup();
+        let ids = ["ds-reset-0", "ds-reset-1", "ds-reset-2"];
+        client.set_max_escrows_per_ledger(&admin, &(ids.len() as u32));
+
+        for id in ids {
+            client.lock(
+                &buyer,
+                &seller,
+                &usdc,
+                &MIN_LOCK_AMOUNT,
+                &dataset_id(&env, id),
+                &3600,
+            );
+        }
+
+        let rejected = client.try_lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-reset-over"),
+            &3600,
+        );
+        assert!(rejected.is_err());
+        assert_eq!(client.get_escrow_count(), ids.len() as u64);
+
+        env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+
+        let escrow_id = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-reset-next"),
+            &3600,
+        );
+        assert_eq!(escrow_id, ids.len() as u64);
     }
 
     // ── Emergency withdraw ────────────────────────────────────────────────────
@@ -2085,8 +2000,7 @@ mod fuzz_tests {
     fn test_emergency_withdraw_requires_pause() {
         let (env, client, admin, _buyer, seller, usdc) = setup();
         let token_client = TokenClient::new(&env, &usdc);
-        let usdc_admin = StellarAssetClient::new(&env, &usdc);
-        usdc_admin.mint(&client.address, &1_000_000);
+        StellarAssetClient::new(&env, &usdc).mint(&client.address, &1_000_000);
 
         let result = client.try_emergency_withdraw(&admin, &usdc, &seller, &100_000);
         assert!(result.is_err());
@@ -2100,8 +2014,7 @@ mod fuzz_tests {
     #[should_panic(expected = "Error(Contract, #3)")]
     fn test_emergency_withdraw_rejects_non_admin() {
         let (env, client, admin, _buyer, seller, usdc) = setup();
-        let usdc_admin = StellarAssetClient::new(&env, &usdc);
-        usdc_admin.mint(&client.address, &1_000_000);
+        StellarAssetClient::new(&env, &usdc).mint(&client.address, &1_000_000);
         let impostor = Address::generate(&env);
         client.pause(&admin);
         client.emergency_withdraw(&impostor, &usdc, &seller, &10);
@@ -2125,13 +2038,25 @@ mod fuzz_tests {
         let (env, client, _admin, buyer, seller, usdc) = setup();
         assert_eq!(client.get_escrow_count(), 0);
 
-        let id1 =
-            client.lock(&buyer, &seller, &usdc, &MIN_LOCK_AMOUNT, &dataset_id(&env, "ds-c1"), &3600);
+        let id1 = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-c1"),
+            &3600,
+        );
         assert_eq!(id1, 0);
         assert_eq!(client.get_escrow_count(), 1);
 
-        let id2 =
-            client.lock(&buyer, &seller, &usdc, &MIN_LOCK_AMOUNT, &dataset_id(&env, "ds-c2"), &3600);
+        let id2 = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-c2"),
+            &3600,
+        );
         assert_eq!(id2, 1);
         assert_eq!(client.get_escrow_count(), 2);
     }
