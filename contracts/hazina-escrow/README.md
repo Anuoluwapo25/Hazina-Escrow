@@ -66,6 +66,18 @@ Every main-branch build publishes a **soroban-contract-artifacts** bundle contai
 Download the latest artifact from the
 [Actions tab](../../actions/workflows/ci.yml) → select the most recent
 **Contract Artifacts (WASM + Spec)** run → expand the **Artifacts** section.
+## Property-based invariant suite
+
+```sh
+cargo test                                     # examples only, sub-second gate
+cargo test --features fuzz-tests --test fuzz   # the invariant suite
+```
+
+The suite lives in `tests/fuzz/` and fuzzes the money-moving paths against the
+invariants specified in [`docs/INVARIANTS.md`](../../docs/INVARIANTS.md). The
+target declares `required-features = ["fuzz-tests"]`, so a plain `cargo test`
+does not build it. Case budgets, regression seeds and the cross-language fee
+fixture are covered in [`docs/FUZZING.md`](../../docs/FUZZING.md).
 
 ## Integration Tests (Stellar Testnet)
 
