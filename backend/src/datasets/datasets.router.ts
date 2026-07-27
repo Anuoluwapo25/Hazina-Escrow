@@ -18,6 +18,8 @@ import {
 import { requireSellerJwt, requireSellerMutationAuth } from '../common/auth.middleware';
 import { domainMetrics } from '../common/datadog';
 import { notifySeller } from '../webhooks/webhook.service';
+import { PLATFORM_FEE_BPS } from '../common/constants';
+import { isEscrowContractConfigured } from '../lib/stellar.config';
 
 const MAX_DATA_KB = 500;
 const MAX_DATA_BYTES = MAX_DATA_KB * 1024;
@@ -91,6 +93,12 @@ const createDatasetSchema = z.object({
     z.string().trim().email().max(320).optional(),
   ),
   data: dataField,
+  /**
+   * Platform fee in basis points for this dataset (optional, default undefined).
+   * When set, the contract's set_dataset_fee must be called separately by admin.
+   * The on-chain fee is authoritative; this field is a display mirror.
+   */
+  feeBps: z.coerce.number().int().min(0).max(2000).optional(),
 });
 
 /**
@@ -161,10 +169,20 @@ function getSampleSize(data: Record<string, unknown>): number {
   return firstArray?.length ?? Object.keys(data).length;
 }
 
+/**
+ * Compute the effective platform fee in bps for this dataset.
+ * Dataset-level override takes precedence; falls back to the global default.
+ * The on-chain contract fee is authoritative; this is a display value.
+ */
+function effectiveFeeBps(dataset: Dataset): number {
+  return dataset.feeBps ?? PLATFORM_FEE_BPS;
+}
+
 function withoutRawData(dataset: Dataset) {
   const { data: _data, ...meta } = dataset;
   return {
     ...meta,
+    platformFeeBps: effectiveFeeBps(dataset),
     ratings: meta.ratings ?? { score: 0, count: 0 },
     priceHistory: meta.priceHistory ?? [
       { price: dataset.pricePerQuery, changedAt: dataset.createdAt },
@@ -743,6 +761,7 @@ datasetsRouter.post(
       sellerWallet,
       notificationEmail,
       data,
+      feeBps,
     } = req.body as z.infer<typeof createDatasetSchema>;
 
     const now = new Date().toISOString();
@@ -761,6 +780,7 @@ datasetsRouter.post(
       createdAt: now,
       ratings: { score: 0, count: 0, reviews: [] },
       priceHistory: [{ price: pricePerQuery, changedAt: now }],
+      feeBps,
     };
 
     await addDataset(dataset);

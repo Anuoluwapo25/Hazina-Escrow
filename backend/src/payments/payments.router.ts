@@ -210,7 +210,12 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
   // Non-custodial path: the buyer locks funds into the contract from their own
   // wallet. We advertise the contract address + the build-lock endpoint instead
   // of a plain payment address, so funds are never routed through a Hazina key.
+  //
+  // #551 — platformFeeBps reflects the dataset-level override when set,
+  // falling back to the global PLATFORM_FEE_RATE. The on-chain contract fee is
+  // authoritative; this display value is reconciled at startup.
   if (escrowEnabled) {
+    const effectiveFeeBps = dataset.feeBps ?? PLATFORM_FEE_BPS;
     return res.status(402).json({
       error: 'Payment Required',
       x402: true,
@@ -226,7 +231,7 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
         amount: dataset.pricePerQuery,
         currency: tokenCode,
         network: 'Stellar Testnet',
-        platformFeeBps: PLATFORM_FEE_BPS,
+        platformFeeBps: effectiveFeeBps,
         memo,
         expiresIn: 300,
         // Buyer flow: build → sign with own wallet → submit → verify

@@ -206,26 +206,11 @@ impl HazinaEscrow {
             .publish((symbol_short!("fee_upd"),), (admin, fee_bps));
     }
 
-    /// Alias for `set_default_fee` kept for backward compatibility.
-    pub fn set_fee(env: Env, admin: Address, fee_bps: u32) {
-        Self::set_default_fee(env, admin, fee_bps);
-    }
-
-    /// Alias for `set_default_fee` kept for backward compatibility.
-    pub fn update_fee(env: Env, admin: Address, fee_bps: u32) {
-        Self::set_default_fee(env, admin, fee_bps);
-    }
-
     pub fn get_default_fee(env: Env) -> u32 {
         env.storage()
             .instance()
             .get(&DataKey::DefaultPlatformFee)
             .unwrap_or(500)
-    }
-
-    /// Alias for `get_default_fee` kept for backward compatibility.
-    pub fn get_fee(env: Env) -> u32 {
-        Self::get_default_fee(env)
     }
 
     pub fn set_dataset_fee(env: Env, admin: Address, dataset_id: String, fee_bps: u32) {
@@ -1187,7 +1172,7 @@ mod tests {
     #[test]
     fn test_initialize_sets_default_config() {
         let (env, client, _admin, buyer, seller, usdc) = setup();
-        assert_eq!(client.get_fee(), 500);
+        assert_eq!(client.get_default_fee(), 500);
 
         let policy = client.get_address_policy(&buyer);
         assert!(!policy.whitelist_enforced);
@@ -1227,7 +1212,6 @@ mod tests {
         let (_env, client, admin, _buyer, _seller, _usdc) = setup();
         client.set_default_fee(&admin, &750);
         assert_eq!(client.get_default_fee(), 750);
-        assert_eq!(client.get_fee(), 750);
     }
 
     #[test]
@@ -1262,46 +1246,32 @@ mod tests {
     }
 
     #[test]
-    fn test_set_fee() {
+    fn test_set_default_fee_basic() {
         let (_env, client, admin, _buyer, _seller, _usdc) = setup();
-        client.set_fee(&admin, &300);
-        assert_eq!(client.get_fee(), 300);
+        client.set_default_fee(&admin, &300);
+        assert_eq!(client.get_default_fee(), 300);
     }
 
     #[test]
-    fn test_set_fee_max_boundary() {
+    fn test_set_default_fee_max_boundary() {
         let (_env, client, admin, _buyer, _seller, _usdc) = setup();
-        client.set_fee(&admin, &MAX_FEE_BPS);
-        assert_eq!(client.get_fee(), MAX_FEE_BPS);
+        client.set_default_fee(&admin, &MAX_FEE_BPS);
+        assert_eq!(client.get_default_fee(), MAX_FEE_BPS);
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #4)")]
-    fn test_set_fee_rejects_above_cap() {
+    fn test_set_default_fee_rejects_above_cap() {
         let (_env, client, admin, _buyer, _seller, _usdc) = setup();
-        client.set_fee(&admin, &(MAX_FEE_BPS + 1));
+        client.set_default_fee(&admin, &(MAX_FEE_BPS + 1));
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #3)")]
-    fn test_set_fee_requires_admin() {
+    fn test_set_default_fee_requires_admin() {
         let (env, client, _admin, _buyer, _seller, _usdc) = setup();
         let impostor = Address::generate(&env);
-        client.set_fee(&impostor, &300);
-    }
-
-    #[test]
-    fn test_update_fee_accepts_max_boundary() {
-        let (_env, client, admin, _buyer, _seller, _usdc) = setup();
-        client.update_fee(&admin, &MAX_FEE_BPS);
-        assert_eq!(client.get_fee(), MAX_FEE_BPS);
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #4)")]
-    fn test_update_fee_rejects_above_cap() {
-        let (_env, client, admin, _buyer, _seller, _usdc) = setup();
-        client.update_fee(&admin, &(MAX_FEE_BPS + 1));
+        client.set_default_fee(&impostor, &300);
     }
 
     // ── Address policy ────────────────────────────────────────────────────────
@@ -1608,7 +1578,7 @@ mod tests {
             &dataset_id(&env, "ds-fee-snapshot"),
             &3600,
         );
-        client.set_fee(&admin, &MAX_FEE_BPS);
+        client.set_default_fee(&admin, &MAX_FEE_BPS);
         let record = client.get_escrow(&escrow_id);
         assert_eq!(record.platform_fee_bps, 500);
     }

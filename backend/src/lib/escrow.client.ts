@@ -109,6 +109,17 @@ function translateContractError(err: unknown, fallbackMessage: string): never {
 }
 
 /**
+ * On-chain fee config for a dataset, decoded from the contract's
+ * DatasetFeeConfig struct. Returned by get_dataset_fee_config().
+ */
+export interface DatasetFeeConfig {
+  defaultFeeBps: number;
+  hasCustomFee: boolean;
+  datasetFeeBps: number;
+  effectiveFeeBps: number;
+}
+
+/**
  * On-chain escrow record, decoded from the contract's EscrowRecord struct.
  * Amount is returned both as raw stroops (string, exact) and as a decimal
  * number for display convenience.
@@ -415,6 +426,82 @@ async function buildBuyerSignedCall(
   }
   const assembled = StellarSdk.rpc.assembleTransaction(tx, sim).build();
   return { xdr: assembled.toXDR(), contractId };
+}
+
+/**
+ * Read the default platform fee (in bps) from the contract via read-only
+ * simulation. No signature required.
+ */
+export async function getDefaultFee(): Promise<number> {
+  const contractId = getEscrowContractId();
+  const admin = getAgentPublicKey();
+  const sourceAddr = admin ?? contractId;
+
+  const rpc = getRpc();
+  const contract = new StellarSdk.Contract(contractId);
+  const account = await sorobanBreaker
+    .execute(() => rpc.getAccount(sourceAddr))
+    .catch(() => new StellarSdk.Account(sourceAddr, '0'));
+
+  const tx = new StellarSdk.TransactionBuilder(account, {
+    fee: StellarSdk.BASE_FEE,
+    networkPassphrase: getNetworkPassphrase(),
+  })
+    .addOperation(contract.call('get_default_fee'))
+    .setTimeout(30)
+    .build();
+
+  const sim = await sorobanBreaker.execute(() => rpc.simulateTransaction(tx));
+  if (!StellarSdk.rpc.Api.isSimulationSuccess(sim) || !sim.result?.retval) {
+    const rawDetail = JSON.stringify(sim);
+    logger.error(`[Escrow] get_default_fee() simulation failed: ${rawDetail}`);
+    throwSanitized(rawDetail, 'get_default_fee() simulation failed');
+  }
+
+  return Number(StellarSdk.scValToNative(sim.result.retval));
+}
+
+/**
+ * Read the fee config for a specific dataset from the contract via read-only
+ * simulation. No signature required.
+ */
+export async function getDatasetFeeConfig(datasetId: string): Promise<DatasetFeeConfig> {
+  const contractId = getEscrowContractId();
+  const admin = getAgentPublicKey();
+  const sourceAddr = admin ?? contractId;
+
+  const rpc = getRpc();
+  const contract = new StellarSdk.Contract(contractId);
+  const account = await sorobanBreaker
+    .execute(() => rpc.getAccount(sourceAddr))
+    .catch(() => new StellarSdk.Account(sourceAddr, '0'));
+
+  const tx = new StellarSdk.TransactionBuilder(account, {
+    fee: StellarSdk.BASE_FEE,
+    networkPassphrase: getNetworkPassphrase(),
+  })
+    .addOperation(contract.call('get_dataset_fee_config', stringToScVal(datasetId)))
+    .setTimeout(30)
+    .build();
+
+  const sim = await sorobanBreaker.execute(() => rpc.simulateTransaction(tx));
+  if (!StellarSdk.rpc.Api.isSimulationSuccess(sim) || !sim.result?.retval) {
+    const rawDetail = JSON.stringify(sim);
+    logger.error(`[Escrow] get_dataset_fee_config() simulation failed: ${rawDetail}`);
+    throwSanitized(rawDetail, 'get_dataset_fee_config() simulation failed');
+  }
+
+  return decodeDatasetFeeConfig(sim.result.retval);
+}
+
+function decodeDatasetFeeConfig(retval: StellarSdk.xdr.ScVal): DatasetFeeConfig {
+  const raw = StellarSdk.scValToNative(retval) as Record<string, unknown>;
+  return {
+    defaultFeeBps: Number(raw.default_fee_bps),
+    hasCustomFee: Boolean(raw.has_custom_fee),
+    datasetFeeBps: Number(raw.dataset_fee_bps),
+    effectiveFeeBps: Number(raw.effective_fee_bps),
+  };
 }
 
 /**
