@@ -6,9 +6,39 @@ import {
   getTokenByCode,
 } from '../lib/stellar.config';
 import { logger } from '../lib/logger';
+import { getCircuitBreaker } from '../common/circuit-breaker';
+import { parsePositiveInt } from '../common/env';
 
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
-const CONTRACT_CALL_TIMEOUT_MS = 30_000;
+
+// Read per-call (not at module load) so tests can shrink the timeout without
+// re-importing the module — matching the STELLAR_TIMEOUT_MS pattern in
+// stellar.service.ts.
+const getContractCallTimeoutMs = () =>
+  parsePositiveInt(process.env.CONTRACT_CALL_TIMEOUT_MS, 30_000);
+
+const sorobanBreaker = getCircuitBreaker('soroban-rpc', {
+  failureThreshold: 5,
+  resetTimeoutMs: 60_000,
+});
+
+/**
+ * Thrown when a Soroban contract invocation fails. `message` is always a safe,
+ * human-readable summary — never the raw SDK error/simulation payload, which
+ * can contain sequence numbers and account ids that must not reach an HTTP
+ * client. The raw detail is still logged server-side (via `logger.error`) at
+ * the throw site, and is available on `rawDetail` for internal error-code
+ * mapping (see escrow.client.ts).
+ */
+export class ContractCallError extends Error {
+  constructor(
+    message: string,
+    public readonly rawDetail: string,
+  ) {
+    super(message);
+    this.name = 'ContractCallError';
+  }
+}
 
 // SECURITY: The raw value of AGENT_WALLET_SECRET must NEVER appear in any log,
 // error message, or exception payload shipped to Datadog or Sentry.
@@ -138,7 +168,13 @@ export async function callContract(
   const rpc = new StellarSdk.rpc.Server(SOROBAN_RPC_URL);
   const contract = new StellarSdk.Contract(contractId);
 
-  const account = await rpc.getAccount(keypair.publicKey());
+  // Each RPC round-trip is wrapped individually so a business-level rejection
+  // (e.g. simulateTransaction resolving with a failed simulation, or
+  // sendTransaction resolving with status ERROR) does NOT count as a circuit
+  // failure — only a thrown/network-level fault does. That mirrors how
+  // stellar.service.ts's breaker only sees genuine Horizon faults, not
+  // "payment not found" style results.
+  const account = await sorobanBreaker.execute(() => rpc.getAccount(keypair.publicKey()));
   const tx = new StellarSdk.TransactionBuilder(account, {
     fee: StellarSdk.BASE_FEE,
     networkPassphrase: getNetworkPassphrase(),
@@ -147,32 +183,40 @@ export async function callContract(
     .setTimeout(30)
     .build();
 
-  const simResult = await rpc.simulateTransaction(tx);
+  const simResult = await sorobanBreaker.execute(() => rpc.simulateTransaction(tx));
   if (!StellarSdk.rpc.Api.isSimulationSuccess(simResult)) {
-    throw new Error(`Contract simulation failed for ${method}: ${JSON.stringify(simResult)}`);
+    // The raw simulation payload can contain the caller's account id and
+    // sequence number — log it server-side only, never in the thrown message.
+    const rawDetail = JSON.stringify(simResult);
+    logger.error(`[Escrow] Contract simulation failed for ${method}: ${rawDetail}`);
+    throw new ContractCallError(`Contract simulation failed for ${method}`, rawDetail);
   }
 
   const assembled = StellarSdk.rpc.assembleTransaction(tx, simResult).build();
   assembled.sign(keypair);
 
-  const sendResult = await rpc.sendTransaction(assembled);
+  const sendResult = await sorobanBreaker.execute(() => rpc.sendTransaction(assembled));
   if (sendResult.status === 'ERROR') {
-    throw new Error(
-      `Contract submit error for ${method}: ${JSON.stringify(sendResult.errorResult)}`,
-    );
+    const rawDetail = JSON.stringify(sendResult.errorResult);
+    logger.error(`[Escrow] Contract submit error for ${method}: ${rawDetail}`);
+    throw new ContractCallError(`Contract submit error for ${method}`, rawDetail);
   }
 
   const txHash = sendResult.hash;
-  const deadline = Date.now() + CONTRACT_CALL_TIMEOUT_MS;
+  const deadline = Date.now() + getContractCallTimeoutMs();
   while (Date.now() < deadline) {
-    const txResult = await rpc.getTransaction(txHash);
+    const txResult = await sorobanBreaker.execute(() => rpc.getTransaction(txHash));
     if (txResult.status === StellarSdk.rpc.Api.GetTransactionStatus.SUCCESS) return txHash;
     if (txResult.status === StellarSdk.rpc.Api.GetTransactionStatus.FAILED) {
-      throw new Error(`Contract call ${method} failed on-chain`);
+      logger.error(`[Escrow] Contract call ${method} failed on-chain (${txHash})`);
+      throw new ContractCallError(`Contract call ${method} failed on-chain`, txHash);
     }
     await new Promise(r => setTimeout(r, 1_000));
   }
-  throw new Error(`Contract call ${method} timed out after ${CONTRACT_CALL_TIMEOUT_MS}ms`);
+  throw new ContractCallError(
+    `Contract call ${method} timed out after ${getContractCallTimeoutMs()}ms`,
+    txHash,
+  );
 }
 
 // SECURITY: returns only the derived PUBLIC key — the raw secret is never exposed.

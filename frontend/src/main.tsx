@@ -6,7 +6,7 @@ import App from './App';
 import './index.css';
 import { I18nProvider } from './i18n';
 import ErrorBoundary from './components/ErrorBoundary';
-import { ThemeProvider } from './context/ThemeContext';
+import { ThemeProvider } from './context/ThemeProvider';
 import { initEnv } from './lib/env';
 
 // Validate required environment variables before mounting the app.

@@ -13,10 +13,18 @@ const { mockCallContract, mockGetAgentPublicKey, mockSimulate, mockGetAccount } 
   }),
 );
 
-vi.mock('../agent/agent.wallet', () => ({
-  callContract: mockCallContract,
-  getAgentPublicKey: mockGetAgentPublicKey,
-}));
+// Keep the real ContractCallError class (escrow.client.ts does `instanceof`
+// checks on it to map contract panic codes) while stubbing the network-facing
+// callContract/getAgentPublicKey functions.
+vi.mock('../agent/agent.wallet', async () => {
+  const actual =
+    await vi.importActual<typeof import('../agent/agent.wallet')>('../agent/agent.wallet');
+  return {
+    ...actual,
+    callContract: mockCallContract,
+    getAgentPublicKey: mockGetAgentPublicKey,
+  };
+});
 
 // Use the real Stellar SDK for encoding helpers, but stub the RPC server so no
 // network call is made during simulation-backed reads/builds.
@@ -37,6 +45,9 @@ vi.mock('@stellar/stellar-sdk', async () => {
 });
 
 import * as StellarSdk from '@stellar/stellar-sdk';
+import { ContractCallError } from '../agent/agent.wallet';
+import { getCircuitBreaker, CircuitBreakerOpenError } from '../common/circuit-breaker';
+import { PaymentError } from '../payments/stellar.service';
 import {
   toStroops,
   fromStroops,
@@ -98,6 +109,9 @@ describe('escrow.client', () => {
     process.env.USDC_SAC_ADDRESS = CONTRACT_ID;
     mockGetAgentPublicKey.mockReturnValue(ADMIN_PUBLIC);
     mockGetAccount.mockResolvedValue(new StellarSdk.Account(ADMIN_PUBLIC, '0'));
+    // release/refund/getEscrow share the 'soroban-rpc' breaker with
+    // agent.wallet.ts's callContract — reset between tests for isolation.
+    getCircuitBreaker('soroban-rpc').reset();
   });
 
   describe('unit conversion', () => {
@@ -126,6 +140,32 @@ describe('escrow.client', () => {
     it('throws a clear error when ESCROW_CONTRACT_ID is unset', async () => {
       delete process.env.ESCROW_CONTRACT_ID;
       await expect(releaseEscrow(7)).rejects.toThrow('ESCROW_CONTRACT_ID');
+    });
+
+    it('maps a recognised contract panic code to a safe PaymentError, never the raw payload', async () => {
+      mockCallContract.mockRejectedValue(
+        new ContractCallError(
+          'Contract simulation failed for release',
+          '{"error":"HostError: Error(Contract, #6)","accountId":"GLEAKEDSEQUENCE"}',
+        ),
+      );
+      const err: Error = await releaseEscrow(7).catch(e => e);
+      expect(err).toBeInstanceOf(PaymentError);
+      expect(err.message).toBe('Escrow already released');
+      expect(err.message).not.toContain('GLEAKEDSEQUENCE');
+    });
+
+    it('falls back to a generic sanitized error for an unrecognised contract failure', async () => {
+      mockCallContract.mockRejectedValue(
+        new ContractCallError(
+          'Contract simulation failed for release',
+          '{"accountId":"GLEAKEDSEQUENCE","sequence":"12345"}',
+        ),
+      );
+      const err: Error = await releaseEscrow(7).catch(e => e);
+      expect(err).not.toBeInstanceOf(PaymentError);
+      expect(err.message).toBe('Failed to release escrow #7 — please try again');
+      expect(err.message).not.toContain('GLEAKEDSEQUENCE');
     });
   });
 
@@ -178,6 +218,29 @@ describe('escrow.client', () => {
     it('throws when the simulation fails', async () => {
       mockSimulate.mockResolvedValue({ error: 'boom' });
       await expect(getEscrow(7)).rejects.toThrow('get_escrow');
+    });
+
+    it('maps a recognised contract panic code from a failed read to PaymentError', async () => {
+      mockSimulate.mockResolvedValue({ error: 'Error(Contract, #8)' });
+      const err: Error = await getEscrow(7).catch(e => e);
+      expect(err).toBeInstanceOf(PaymentError);
+      expect(err.message).toBe('Escrow not found');
+    });
+
+    it('opens the circuit breaker after repeated RPC failures and fails fast without simulating again', async () => {
+      // getEscrow's getAccount call swallows a rejection with a fallback
+      // account, but the breaker still records the failure before that
+      // fallback kicks in — so a flaky RPC endpoint still trips the breaker.
+      mockGetAccount.mockRejectedValue(new Error('network down'));
+      mockSimulate.mockRejectedValue(new Error('network down'));
+
+      for (let i = 0; i < 5; i++) {
+        await expect(getEscrow(7)).rejects.toThrow();
+      }
+
+      mockSimulate.mockClear();
+      await expect(getEscrow(7)).rejects.toThrow(CircuitBreakerOpenError);
+      expect(mockSimulate).not.toHaveBeenCalled();
     });
   });
 

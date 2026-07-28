@@ -14,7 +14,7 @@ import {
   Star,
 } from 'lucide-react';
 import { api, DatasetMeta, QueryResult } from '../../lib/api';
-import { useToastContext } from './ToastProvider';
+import { useToastContext } from './useToastContext';
 import { formatUSDC, getTypeMeta, truncateAddress } from '../../lib/utils';
 import WalletConnectButton from './WalletConnectButton';
 import clsx from 'clsx';
