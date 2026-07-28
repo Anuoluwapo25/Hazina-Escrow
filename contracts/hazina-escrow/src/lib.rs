@@ -1899,6 +1899,7 @@ mod fuzz_tests {
     use soroban_sdk::{
         testutils::{Address as _, Events, Ledger},
         token::{Client as TokenClient, StellarAssetClient},
+        Vec as SorobanVec,  // Import Soroban's Vec as a different name
     };
 
     // Use the parent module's functions
@@ -1909,12 +1910,14 @@ mod fuzz_tests {
     fn test_lock_multi_fails_when_paused() {
         let (env, client, admin, buyer, _seller, usdc) = setup();
         client.pause(&admin);
-        let mut shares = Vec::new(&env);
+        
+        // Use soroban_sdk::Vec for contract calls
+        let mut shares = SorobanVec::new(&env);
         shares.push_back(SellerShare {
             seller: Address::generate(&env),
             amount: 1_000_000,
         });
-        let mut ds_ids = Vec::new(&env);
+        let mut ds_ids = SorobanVec::new(&env);
         ds_ids.push_back(dataset_id(&env, "ds-multi-paused"));
         client.lock_multi(&buyer, &usdc, &shares, &ds_ids);
     }
@@ -1957,15 +1960,13 @@ mod fuzz_tests {
     proptest! {  
         #[test]  
         fn circuit_breakers_hold_amount_cap(
-            amount in (MIN_LOCK_AMOUNT..10_000_000_000i128)  // Cap at buyer's balance
+            amount in (MIN_LOCK_AMOUNT..10_000_000_000i128)
         ) {  
             let (env, client, admin, buyer, seller, usdc) = setup();  
               
-            // Set a custom max amount for testing  
             let test_max = 500_000_000_000i128;  
             client.set_max_escrow_amount(&admin, &test_max);  
             
-            // For amounts that should fail due to circuit breaker
             if amount > test_max {  
                 let result = client.try_lock(  
                     &buyer,  
@@ -1977,7 +1978,6 @@ mod fuzz_tests {
                 );  
                 assert!(result.is_err());  
             } else {  
-                // For amounts that should succeed  
                 let escrow_id = client.lock(  
                     &buyer,  
                     &seller,  
@@ -1995,32 +1995,30 @@ mod fuzz_tests {
     proptest! {  
         #[test]  
         fn circuit_breakers_hold_rate_limit(
-            n in 1u32..150u32  // Start from 1 to avoid empty shares
+            n in 1u32..150u32
         ) {  
             let (env, client, admin, buyer, seller, usdc) = setup();  
               
-            // Set a custom per-ledger limit for testing  
             let test_max = 50u32;  
             client.set_max_escrows_per_ledger(&admin, &test_max);  
               
-            let mut shares = Vec::new(&env);  
-            let mut dataset_ids = Vec::new(&env);  
+            // Use soroban_sdk::Vec for contract calls
+            let mut shares = SorobanVec::new(&env);  
+            let mut dataset_ids = SorobanVec::new(&env);  
               
             for i in 0..n {  
                 shares.push_back(SellerShare {  
                     seller: Address::generate(&env),  
-                    amount: MIN_LOCK_AMOUNT,  // Use minimum valid amount
+                    amount: MIN_LOCK_AMOUNT,
                 });  
                 let id_str = std::format!("ds-rate-cb-{}", i);
                 dataset_ids.push_back(dataset_id(&env, &id_str));  
             }  
               
             if n > test_max {  
-                // Should panic with RateLimitExceeded  
                 let result = client.try_lock_multi(&buyer, &usdc, &shares, &dataset_ids);  
                 assert!(result.is_err());  
             } else {  
-                // Should succeed  
                 let first_id = client.lock_multi(&buyer, &usdc, &shares, &dataset_ids);  
                 assert_eq!(first_id, 0);  
                 assert_eq!(client.get_escrow_count(), n as u64);  
@@ -2032,43 +2030,38 @@ mod fuzz_tests {
     fn circuit_breakers_hold_counter_reset() {  
         let (env, client, admin, buyer, _seller, usdc) = setup();  
           
-        // Set a low per-ledger limit  
         let test_max = 3u32;  
         client.set_max_escrows_per_ledger(&admin, &test_max);  
           
-        // Fill up the current ledger  
         for i in 0..test_max {  
             let id_str = std::format!("ds-ledger-reset-{}", i);
             client.lock(  
                 &buyer,  
                 &_seller,  
                 &usdc,  
-                &MIN_LOCK_AMOUNT,  // Use minimum valid amount
+                &MIN_LOCK_AMOUNT,
                 &dataset_id(&env, &id_str),  
                 &3600,  
             );  
         }  
           
-        // Next lock should fail in current ledger  
         let result = client.try_lock(  
             &buyer,  
             &_seller,  
             &usdc,  
-            &MIN_LOCK_AMOUNT,  // Use minimum valid amount
+            &MIN_LOCK_AMOUNT,
             &dataset_id(&env, "ds-should-fail"),  
             &3600,  
         );  
         assert!(result.is_err());  
           
-        // Advance the ledger  
         env.ledger().set_sequence_number(env.ledger().sequence() + 1);  
           
-        // Now locks should succeed again  
         let escrow_id = client.lock(  
             &buyer,  
             &_seller,  
             &usdc,  
-            &MIN_LOCK_AMOUNT,  // Use minimum valid amount
+            &MIN_LOCK_AMOUNT,
             &dataset_id(&env, "ds-should-succeed"),  
             &3600,  
         );  
@@ -2132,4 +2125,104 @@ mod fuzz_tests {
         assert_eq!(id2, 1);
         assert_eq!(client.get_escrow_count(), 2);
     }
+
+// ─── Fuzz test for settlement exclusivity ──────────────────────────────
+
+proptest! {
+    #[test]
+    fn settlement_is_exclusive(calls in prop::collection::vec(
+        prop_oneof![
+            Just(0u8), // Release
+            Just(1u8), // Refund
+            Just(2u8), // ClaimExpired
+        ],
+        2..10,
+    )) {
+        let (env, client, admin, buyer, seller, usdc) = setup();
+        let token_client = TokenClient::new(&env, &usdc);
+        let amount: i128 = 2_000_000;
+        let deadline = 3600u64;
+
+        let escrow_id = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &amount,
+            &dataset_id(&env, "ds-fuzz-exclusive"),
+            &deadline,
+        );
+
+        // For release to ever succeed, buyer must have confirmed.
+        client.confirm_delivery(&escrow_id, &buyer);
+
+        // For claim_expired to ever succeed, ledger must be past deadline.
+        env.ledger().set_timestamp(env.ledger().timestamp() + deadline + 1);
+
+        let contract_before = token_client.balance(&client.address);
+        let mut succeeded = 0usize;
+        let mut first_success: Option<u8> = None;
+
+        for call in calls {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match call {
+                    0 => client.release(&admin, &escrow_id),
+                    1 => client.refund(&admin, &escrow_id),
+                    2 => client.claim_expired(&escrow_id, &seller),
+                    _ => unreachable!(),
+                }
+            }));
+
+            match result {
+                Ok(_) => {
+                    succeeded += 1;
+                    if first_success.is_none() {
+                        first_success = Some(call);
+                    }
+                }
+                Err(_) => {
+                    // After the first success, every failure must be AlreadyReleased or AlreadyRefunded.
+                    if first_success.is_some() {
+                        let record = client.get_escrow(&escrow_id);
+                        prop_assert!(record.released || record.refunded);
+                    }
+                }
+            }
+        }
+
+        let contract_after = token_client.balance(&client.address);
+        let balance_delta = contract_before - contract_after;
+
+        prop_assert_eq!(succeeded, 1, "exactly one settlement call must succeed");
+        
+        // When claim_expired succeeds, the platform fee stays in the contract
+        // When release succeeds, the platform fee is transferred to treasury
+        // When refund succeeds, all funds go back to buyer
+        let expected_delta = if first_success == Some(2) {
+            // claim_expired: only seller gets paid, fee stays in contract
+            // Seller gets: amount - fee, fee stays in contract
+            let fee = if amount * 500 / 10_000 == 0 && amount > 0 && 500 > 0 {
+                1
+            } else {
+                amount * 500 / 10_000
+            };
+            amount - fee  // Only seller's share leaves the contract
+        } else if first_success == Some(0) {
+            // release: all funds leave the contract (seller + fee to treasury)
+            amount
+        } else {
+            // refund: all funds go back to buyer
+            amount
+        };
+        
+        prop_assert!(
+            balance_delta == expected_delta,
+            "contract balance should change by exactly {} (was {})",
+            expected_delta,
+            balance_delta
+        );
+
+        let record = client.get_escrow(&escrow_id);
+        prop_assert!(record.released != record.refunded, "exactly one of released/refunded must be set");
+    }
+}
 }
