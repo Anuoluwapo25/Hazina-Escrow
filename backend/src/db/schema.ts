@@ -31,6 +31,7 @@ export const datasets = pgTable(
     live: boolean('live').notNull().default(false),
     lastRefreshedAt: text('last_refreshed_at'),
     tags: text('tags'),
+    feeBps: integer('fee_bps'),
   },
   table => ({
     typeIdx: index('datasets_type_idx').on(table.type),
@@ -118,6 +119,7 @@ export const datasetsSqlite = sqliteTable(
     live: sqliteInteger('live').notNull().default(0),
     lastRefreshedAt: sqliteText('last_refreshed_at'),
     tags: sqliteText('tags'),
+    feeBps: sqliteInteger('fee_bps'),
   },
   table => ({
     typeIdx: sqliteIndex('datasets_type_idx').on(table.type),

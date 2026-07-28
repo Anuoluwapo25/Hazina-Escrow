@@ -85,10 +85,10 @@ Buyer           Contract              Seller
 | `set_address_whitelisted(admin, address, whitelisted)` | Hazina backend (admin) | Marks an address as whitelist-approved                                                |
 | `set_address_blacklisted(admin, address, blacklisted)` | Hazina backend (admin) | Blocks or unblocks a malicious address                                                |
 | `lock(buyer, seller, token, amount, dataset_id)`       | Buyer                  | Transfers USDC from buyer into the contract. Returns an `escrow_id`.                  |
-| `release(admin, escrow_id)`                            | Hazina backend (admin) | Sends 95% to seller, 5% to admin. Fires a `released` event.                           |
+| `release(admin, escrow_id)`                            | Hazina backend (admin) | Sends seller share to seller, platform fee to treasury. Fires a `released` event.     |
 | `refund(admin, escrow_id)`                             | Hazina backend (admin) | Returns full amount to buyer if something goes wrong.                                 |
 | `get_escrow(escrow_id)`                                | Anyone                 | Reads an escrow record (buyer, seller, amount, status).                               |
-| `get_fee()`                                            | Anyone                 | Returns the default platform fee in basis points.                                     |
+| `get_default_fee()`                                    | Anyone                 | Returns the default platform fee in basis points.                                     |
 | `get_dataset_fee_config(dataset_id)`                   | Anyone                 | Returns the effective fee config for a dataset override.                              |
 | `get_address_policy(address)`                          | Anyone                 | Returns whitelist and blacklist status for an address.                                |
 

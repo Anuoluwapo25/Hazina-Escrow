@@ -49,8 +49,10 @@ import {
 } from './common/rateLimit';
 import { initializeWebSocketServer } from './websocket/ws-server';
 import { startDataRefreshWorker, stopDataRefreshWorker } from './providers/refresh.scheduler';
-import { HORIZON_URL } from './lib/stellar.config';
+import { HORIZON_URL, isEscrowContractConfigured } from './lib/stellar.config';
 import { createCorsOptions } from './common/cors';
+import { getDefaultFee } from './lib/escrow.client';
+import { PLATFORM_FEE_BPS } from './common/constants';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -231,6 +233,49 @@ async function checkStellar(): Promise<CheckResult> {
   }
 }
 
+/**
+ * Reconcile the backend's PLATFORM_FEE_RATE env var against the on-chain
+ * default fee at startup. If the contract is deployed and readable, log a
+ * warning when the values disagree so operators know the display-only fee
+ * no longer matches what the contract will actually pay out on release.
+ *
+ * If the contract is unreachable (e.g. testnet down), this is not a fatal
+ * error — the mismatch would appear only if/when the escrow is live.
+ */
+async function reconcileFeeWithContract(): Promise<void> {
+  if (!isEscrowContractConfigured()) {
+    logger.info('[FeeReconciliation] No escrow contract configured — skipping on-chain fee check');
+    return;
+  }
+
+  try {
+    const onChainFeeBps = await getDefaultFee();
+    if (onChainFeeBps !== PLATFORM_FEE_BPS) {
+      logger.warn(
+        {
+          onChainFeeBps,
+          backendFeeBps: PLATFORM_FEE_BPS,
+        },
+        `[FeeReconciliation] Mismatch: on-chain default fee (${onChainFeeBps} bps) ` +
+          `differs from backend PLATFORM_FEE_RATE (${PLATFORM_FEE_BPS} bps). ` +
+          `The fee shown in the UI will NOT match what the contract pays out on release. ` +
+          `Update PLATFORM_FEE_RATE to match or call set_default_fee on the contract.`,
+      );
+    } else {
+      logger.info(
+        { onChainFeeBps },
+        `[FeeReconciliation] On-chain default fee (${onChainFeeBps} bps) matches backend PLATFORM_FEE_RATE`,
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { err },
+      '[FeeReconciliation] Could not read on-chain default fee — ' +
+        'skipping reconciliation (contract may be unreachable)',
+    );
+  }
+}
+
 app.get('/health', async (_req, res) => {
   const [storage, anthropic, stellar] = await Promise.all([
     withHealthTimeout(checkStorage),
@@ -380,6 +425,10 @@ server.listen(PORT, () => {
   } catch (err) {
     logger.warn({ err }, '[AgentWallet] Wallet not configured — agent payment features disabled');
   }
+
+  // #551 — Reconcile backend fee against on-chain contract fee at startup.
+  // Runs async (not awaited) so a slow RPC never delays the server binding.
+  reconcileFeeWithContract();
 });
 
 // Graceful shutdown for WebSocket server
