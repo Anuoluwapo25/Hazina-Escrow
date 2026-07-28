@@ -19,7 +19,6 @@ import { requireSellerJwt, requireSellerMutationAuth } from '../common/auth.midd
 import { domainMetrics } from '../common/datadog';
 import { notifySeller } from '../webhooks/webhook.service';
 import { PLATFORM_FEE_BPS } from '../common/constants';
-import { isEscrowContractConfigured } from '../lib/stellar.config';
 
 const MAX_DATA_KB = 500;
 const MAX_DATA_BYTES = MAX_DATA_KB * 1024;

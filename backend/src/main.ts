@@ -244,9 +244,7 @@ async function checkStellar(): Promise<CheckResult> {
  */
 async function reconcileFeeWithContract(): Promise<void> {
   if (!isEscrowContractConfigured()) {
-    logger.info(
-      '[FeeReconciliation] No escrow contract configured — skipping on-chain fee check',
-    );
+    logger.info('[FeeReconciliation] No escrow contract configured — skipping on-chain fee check');
     return;
   }
 
