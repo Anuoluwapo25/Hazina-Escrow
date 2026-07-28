@@ -14,11 +14,20 @@ soroban-sdk = { version = "22.0.0", features = ["testutils", "alloc"] }
 proptest     = { version = "1", default-features = false, features = ["std"] }
 dotenvy      = "0.15"
 serde_json   = "1.0"
+ethnum = "1.5.3"
 
 
 [features]
 fuzz-tests = []
 integration-tests = []
+
+# Property-based invariant suite (docs/INVARIANTS.md). `required-features`
+# keeps it out of the default `cargo test` gate entirely rather than relying on
+# a `#![cfg]` that still has to compile.
+[[test]]
+name = "fuzz"
+path = "tests/fuzz/main.rs"
+required-features = ["fuzz-tests"]
 
 [profile.release]
 opt-level = "z"
@@ -33,3 +42,4 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
+ 

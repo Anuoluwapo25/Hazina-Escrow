@@ -5,27 +5,42 @@ use soroban_sdk::{
     Address, BytesN, Env, String, Vec,
 };
 
+ 
+
+
 // ─── Constants ───────────────────────────────────────────────────────────────
+
+// These are `pub` on purpose: the property-based invariant suite in
+// `tests/fuzz/` derives its input strategies and expected-value models from
+// them, so the tests and the contract can never disagree about a boundary.
+// See docs/INVARIANTS.md.
 
 /// TTL extension applied to persistent escrow records (~60 days in ledgers).
 const ESCROW_BUMP_LEDGERS: u32 = 518_400;
 
 /// Minimum remaining TTL before a bump is triggered (~24 h in ledgers).
 const ESCROW_MIN_TTL: u32 = 17_280;
-const MAX_BASIS_POINTS: u32 = 10_000;
-const DISPUTE_WINDOW_LEDGERS: u32 = 1_000;
+
+/// Denominator for every basis-point fee calculation.
+pub const MAX_BASIS_POINTS: u32 = 10_000;
+
+/// How many ledgers after `lock` the buyer may still raise a dispute.
+pub const DISPUTE_WINDOW_LEDGERS: u32 = 1_000;
 
 /// Hard cap on the platform fee: 2 000 bps = 20 %.
-const MAX_FEE_BPS: u32 = 2_000;
+pub const MAX_FEE_BPS: u32 = 2_000;
 
 /// Minimum lock amount in stroops (0.001 USDC).
-const MIN_LOCK_AMOUNT: i128 = 10_000;
+pub const MIN_LOCK_AMOUNT: i128 = 10_000;
 
 /// Maximum escrow expiry: 30 days in seconds.
-const MAX_EXPIRY_SECONDS: u64 = 30 * 24 * 60 * 60;
+pub const MAX_EXPIRY_SECONDS: u64 = 30 * 24 * 60 * 60;
 
-const DEFAULT_MAX_ESCROW_AMOUNT: i128 = 1_000_000_000_000;
-const DEFAULT_MAX_ESCROWS_PER_LEDGER: u32 = 100;
+/// Per-escrow amount ceiling applied when the admin has not set one.
+pub const DEFAULT_MAX_ESCROW_AMOUNT: i128 = 1_000_000_000_000;
+
+/// Per-ledger escrow-creation ceiling applied when the admin has not set one.
+pub const DEFAULT_MAX_ESCROWS_PER_LEDGER: u32 = 100;
 
 // ─── Storage keys ────────────────────────────────────────────────────────────
 
@@ -1044,9 +1059,9 @@ mod tests {
         Address, Env, String, Vec,
     };
 
-    const INITIAL_BUYER_BALANCE: i128 = 10_000_000_000;
+    pub(crate) const INITIAL_BUYER_BALANCE: i128 = 10_000_000_000;
 
-    fn setup() -> (
+    pub fn setup() -> (
         Env,
         HazinaEscrowClient<'static>,
         Address,
@@ -1073,7 +1088,7 @@ mod tests {
         (env, client, admin, buyer, seller, usdc)
     }
 
-    fn dataset_id(env: &Env, value: &str) -> String {
+    pub fn dataset_id(env: &Env, value: &str) -> String {
         String::from_str(env, value)
     }
 
@@ -1611,60 +1626,178 @@ mod tests {
     }
 
     // ── Multi-lock / multi-release ────────────────────────────────────────────
+#[test]
+fn test_fee_floor() {
+    let (env, client, admin, buyer, seller, usdc) = setup();
+    let token_client = TokenClient::new(&env, &usdc);
+    
+    // Test 1: Fee = 0 bps
+    client.set_default_fee(&admin, &0);
+    
+    let amount1: i128 = 1_000_000;
+    let escrow_id1 = client.lock(
+        &buyer,
+        &seller,
+        &usdc,
+        &amount1,
+        &dataset_id(&env, "ds-zero-fee"),
+        &3600,
+    );
+    
+    // Verify escrow state before confirmation
+    let record_before = client.get_escrow(&escrow_id1);
+    assert!(!record_before.buyer_confirmed);
+    assert!(!record_before.released);
+    
+    // Confirm and release
+    client.confirm_delivery(&escrow_id1, &buyer);
+    
+    // Verify escrow state after confirmation
+    let record_after = client.get_escrow(&escrow_id1);
+    assert!(record_after.buyer_confirmed);
+    assert!(!record_after.released);
+    
+    client.release(&admin, &escrow_id1);
+    
+    // With 0 bps, all amount should go to seller
+    assert_eq!(token_client.balance(&seller), amount1);
+    assert_eq!(token_client.balance(&admin), 0);
+    
+    // Test 2: Fee = 1 bps
+    client.set_default_fee(&admin, &1);
+    
+    let amount2: i128 = MIN_LOCK_AMOUNT;
+    let escrow_id2 = client.lock(
+        &buyer,
+        &seller,
+        &usdc,
+        &amount2,
+        &dataset_id(&env, "ds-min-fee"),
+        &3600,
+    );
+    
+    // Verify the fee was snapshotted correctly
+    let record = client.get_escrow(&escrow_id2);
+    assert_eq!(record.platform_fee_bps, 1);
+    assert!(!record.buyer_confirmed);
+    
+    // Confirm and release
+    client.confirm_delivery(&escrow_id2, &buyer);
+    
+    // Verify confirmation worked
+    let record_confirmed = client.get_escrow(&escrow_id2);
+    assert!(record_confirmed.buyer_confirmed);
+    
+    client.release(&admin, &escrow_id2);
+    
+    // With 1 bps on MIN_LOCK_AMOUNT, fee = 1 token
+    let expected_fee = 1;
+    let expected_seller_balance = amount1 + (amount2 - expected_fee);
+    let expected_admin_balance = expected_fee;
+    
+    assert_eq!(token_client.balance(&seller), expected_seller_balance);
+    assert_eq!(token_client.balance(&admin), expected_admin_balance);
+}
 
-    #[test]
-    fn test_lock_multi_and_release_multi() {
-        let (env, client, admin, buyer, _seller, usdc) = setup();
-        let token_client = TokenClient::new(&env, &usdc);
+     
+#[test]
+fn test_lock_multi_and_release_multi() {
+    let (env, client, admin, buyer, _seller, usdc) = setup();
+    let token_client = TokenClient::new(&env, &usdc);
 
-        let seller_1 = Address::generate(&env);
-        let seller_2 = Address::generate(&env);
-        let seller_3 = Address::generate(&env);
-        let seller_4 = Address::generate(&env);
-        let amounts: [i128; 4] = [1_000_000, 2_000_000, 3_000_000, 4_000_000];
-        let total: i128 = 10_000_000;
+    let seller_1 = Address::generate(&env);
+    let seller_2 = Address::generate(&env);
+    let seller_3 = Address::generate(&env);
+    let seller_4 = Address::generate(&env);
+    let amounts: [i128; 4] = [1_000_000, 2_000_000, 3_000_000, 4_000_000];
+    let total: i128 = 10_000_000;
 
-        let mut shares = Vec::new(&env);
-        shares.push_back(SellerShare { seller: seller_1.clone(), amount: amounts[0] });
-        shares.push_back(SellerShare { seller: seller_2.clone(), amount: amounts[1] });
-        shares.push_back(SellerShare { seller: seller_3.clone(), amount: amounts[2] });
-        shares.push_back(SellerShare { seller: seller_4.clone(), amount: amounts[3] });
+    let mut shares = Vec::new(&env);
+    shares.push_back(SellerShare { seller: seller_1.clone(), amount: amounts[0] });
+    shares.push_back(SellerShare { seller: seller_2.clone(), amount: amounts[1] });
+    shares.push_back(SellerShare { seller: seller_3.clone(), amount: amounts[2] });
+    shares.push_back(SellerShare { seller: seller_4.clone(), amount: amounts[3] });
 
-        let mut ds_ids = Vec::new(&env);
-        ds_ids.push_back(String::from_str(&env, "ds-001"));
-        ds_ids.push_back(String::from_str(&env, "ds-002"));
-        ds_ids.push_back(String::from_str(&env, "ds-003"));
-        ds_ids.push_back(String::from_str(&env, "ds-004"));
+    let mut ds_ids = Vec::new(&env);
+    ds_ids.push_back(String::from_str(&env, "ds-001"));
+    ds_ids.push_back(String::from_str(&env, "ds-002"));
+    ds_ids.push_back(String::from_str(&env, "ds-003"));
+    ds_ids.push_back(String::from_str(&env, "ds-004"));
 
-        let first_id = client.lock_multi(&buyer, &usdc, &shares, &ds_ids);
-        assert_eq!(first_id, 0);
-        assert_eq!(token_client.balance(&buyer), INITIAL_BUYER_BALANCE - total);
+    let first_id = client.lock_multi(&buyer, &usdc, &shares, &ds_ids);
+    assert_eq!(first_id, 0);
+    assert_eq!(token_client.balance(&buyer), INITIAL_BUYER_BALANCE - total);
 
-        client.confirm_delivery(&first_id, &buyer);
-        client.confirm_delivery(&(first_id + 1), &buyer);
-        client.confirm_delivery(&(first_id + 2), &buyer);
-        client.confirm_delivery(&(first_id + 3), &buyer);
-
-        let mut escrow_ids = Vec::new(&env);
-        escrow_ids.push_back(0u64);
-        escrow_ids.push_back(1u64);
-        escrow_ids.push_back(2u64);
-        escrow_ids.push_back(3u64);
-        client.release_multi(&admin, &escrow_ids);
-
-        let fee_bps: i128 = 500;
-        let s1_expected = amounts[0] - (amounts[0] * fee_bps / 10_000);
-        let s2_expected = amounts[1] - (amounts[1] * fee_bps / 10_000);
-        let s3_expected = amounts[2] - (amounts[2] * fee_bps / 10_000);
-        let s4_expected = amounts[3] - (amounts[3] * fee_bps / 10_000);
-        let admin_expected = total - s1_expected - s2_expected - s3_expected - s4_expected;
-
-        assert_eq!(token_client.balance(&seller_1), s1_expected);
-        assert_eq!(token_client.balance(&seller_2), s2_expected);
-        assert_eq!(token_client.balance(&seller_3), s3_expected);
-        assert_eq!(token_client.balance(&seller_4), s4_expected);
-        assert_eq!(token_client.balance(&admin), admin_expected);
+    // Verify all escrows were created and not confirmed
+    for i in 0..4 {
+        let record = client.get_escrow(&(first_id + i));
+        assert_eq!(record.escrow_id, first_id + i);
+        assert!(!record.buyer_confirmed);
+        assert!(!record.released);
     }
+
+    // Confirm delivery for ALL escrows
+    for i in 0..4 {
+        client.confirm_delivery(&(first_id + i), &buyer);
+    }
+
+    // Verify all escrows are now confirmed
+    for i in 0..4 {
+        let record = client.get_escrow(&(first_id + i));
+        assert!(record.buyer_confirmed);
+        assert!(!record.released);
+    }
+
+    // Release all escrows
+    let mut escrow_ids = Vec::new(&env);
+    for i in 0..4 {
+        escrow_ids.push_back(first_id + i);
+    }
+    client.release_multi(&admin, &escrow_ids);
+
+    // Verify all escrows are released
+    for i in 0..4 {
+        let record = client.get_escrow(&(first_id + i));
+        assert!(record.released);
+    }
+
+    let fee_bps: i128 = 500;
+    // Calculate fee per escrow (with floor of 1 token when fee > 0)
+    let fee_floor = 1i128;
+    
+    let s1_fee = if amounts[0] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
+        fee_floor.min(amounts[0]) 
+    } else { 
+        amounts[0] * fee_bps / 10_000 
+    };
+    let s2_fee = if amounts[1] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
+        fee_floor.min(amounts[1]) 
+    } else { 
+        amounts[1] * fee_bps / 10_000 
+    };
+    let s3_fee = if amounts[2] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
+        fee_floor.min(amounts[2]) 
+    } else { 
+        amounts[2] * fee_bps / 10_000 
+    };
+    let s4_fee = if amounts[3] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
+        fee_floor.min(amounts[3]) 
+    } else { 
+        amounts[3] * fee_bps / 10_000 
+    };
+    
+    let s1_expected = amounts[0] - s1_fee;
+    let s2_expected = amounts[1] - s2_fee;
+    let s3_expected = amounts[2] - s3_fee;
+    let s4_expected = amounts[3] - s4_fee;
+    let admin_expected = total - s1_expected - s2_expected - s3_expected - s4_expected;
+
+    assert_eq!(token_client.balance(&seller_1), s1_expected);
+    assert_eq!(token_client.balance(&seller_2), s2_expected);
+    assert_eq!(token_client.balance(&seller_3), s3_expected);
+    assert_eq!(token_client.balance(&seller_4), s4_expected);
+    assert_eq!(token_client.balance(&admin), admin_expected);
+}
 
     #[test]
     #[should_panic(expected = "Error(Contract, #8)")]
@@ -1765,23 +1898,6 @@ mod tests {
         client.refund(&admin, &escrow_id);
     }
 
-}
-
-// ─── Fuzz / property-based tests ────────────────────────────────────────────
-
-#[cfg(all(test, feature = "fuzz-tests"))]
-mod fuzz_tests {
-    extern crate std;
-
-    use super::*;
-    use proptest::prelude::*;
-    use soroban_sdk::{
-        Env, String,
-        testutils::Address as _,
-        token::{Client as TokenClient, StellarAssetClient},
-    };
-
-
     #[test]
     #[should_panic(expected = "Error(Contract, #12)")]
     fn test_lock_multi_fails_when_paused() {
@@ -1832,14 +1948,59 @@ mod fuzz_tests {
         assert_eq!(env.events().all().len(), 1);
     }
 
+    // ── Circuit breakers ──────────────────────────────────────────────────────
+
+    /// The per-ledger counter is keyed on the ledger sequence, so it must reset
+    /// the moment the sequence advances. Fuzzed coverage lives in
+    /// `tests/fuzz/circuit_breakers.rs`; this pins the reset boundary exactly.
+    #[test]
+    fn test_rate_limit_counter_resets_on_new_ledger() {
+        let (env, client, admin, buyer, seller, usdc) = setup();
+        let ids = ["ds-reset-0", "ds-reset-1", "ds-reset-2"];
+        client.set_max_escrows_per_ledger(&admin, &(ids.len() as u32));
+
+        for id in ids {
+            client.lock(
+                &buyer,
+                &seller,
+                &usdc,
+                &MIN_LOCK_AMOUNT,
+                &dataset_id(&env, id),
+                &3600,
+            );
+        }
+
+        let rejected = client.try_lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-reset-over"),
+            &3600,
+        );
+        assert!(rejected.is_err());
+        assert_eq!(client.get_escrow_count(), ids.len() as u64);
+
+        env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+
+        let escrow_id = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-reset-next"),
+            &3600,
+        );
+        assert_eq!(escrow_id, ids.len() as u64);
+    }
+
     // ── Emergency withdraw ────────────────────────────────────────────────────
 
     #[test]
     fn test_emergency_withdraw_requires_pause() {
         let (env, client, admin, _buyer, seller, usdc) = setup();
         let token_client = TokenClient::new(&env, &usdc);
-        let usdc_admin = StellarAssetClient::new(&env, &usdc);
-        usdc_admin.mint(&client.address, &1_000_000);
+        StellarAssetClient::new(&env, &usdc).mint(&client.address, &1_000_000);
 
         let result = client.try_emergency_withdraw(&admin, &usdc, &seller, &100_000);
         assert!(result.is_err());
@@ -1853,8 +2014,7 @@ mod fuzz_tests {
     #[should_panic(expected = "Error(Contract, #3)")]
     fn test_emergency_withdraw_rejects_non_admin() {
         let (env, client, admin, _buyer, seller, usdc) = setup();
-        let usdc_admin = StellarAssetClient::new(&env, &usdc);
-        usdc_admin.mint(&client.address, &1_000_000);
+        StellarAssetClient::new(&env, &usdc).mint(&client.address, &1_000_000);
         let impostor = Address::generate(&env);
         client.pause(&admin);
         client.emergency_withdraw(&impostor, &usdc, &seller, &10);
@@ -1878,13 +2038,25 @@ mod fuzz_tests {
         let (env, client, _admin, buyer, seller, usdc) = setup();
         assert_eq!(client.get_escrow_count(), 0);
 
-        let id1 =
-            client.lock(&buyer, &seller, &usdc, &1_000_000, &dataset_id(&env, "ds-c1"), &3600);
+        let id1 = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-c1"),
+            &3600,
+        );
         assert_eq!(id1, 0);
         assert_eq!(client.get_escrow_count(), 1);
 
-        let id2 =
-            client.lock(&buyer, &seller, &usdc, &2_000_000, &dataset_id(&env, "ds-c2"), &3600);
+        let id2 = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &MIN_LOCK_AMOUNT,
+            &dataset_id(&env, "ds-c2"),
+            &3600,
+        );
         assert_eq!(id2, 1);
         assert_eq!(client.get_escrow_count(), 2);
     }

@@ -184,9 +184,6 @@ function toDatasetDetail(dataset: Dataset) {
     },
     preview: getPreviewRow(dataset.data),
   };
-
-  const { data: _data, notificationEmail: _notificationEmail, ...meta } = dataset;
-  return meta;
 }
 
 function toTransactionResponse(tx: Transaction) {
@@ -310,6 +307,13 @@ datasetsRouter.get('/', async (req: Request, res: Response) => {
     .flatMap(value => value.split(','))
     .map(value => value.trim())
     .filter(Boolean);
+  const categories = [req.query.category]
+    .flat()
+    .filter((value): value is string => typeof value === 'string')
+    .flatMap(value => value.split(','))
+    .map(value => value.trim())
+    .filter(Boolean);
+  const liveOnly = req.query.live === 'true';
   const minPrice = req.query.minPrice === undefined ? undefined : Number(req.query.minPrice);
   const maxPrice = req.query.maxPrice === undefined ? undefined : Number(req.query.maxPrice);
   const minQueries = req.query.minQueries === undefined ? undefined : Number(req.query.minQueries);
@@ -345,6 +349,13 @@ datasetsRouter.get('/', async (req: Request, res: Response) => {
   if (types.length > 0) {
     const selectedTypes = new Set(types);
     datasets = datasets.filter(d => selectedTypes.has(d.type));
+  }
+  if (categories.length > 0) {
+    const selectedCategories = new Set(categories);
+    datasets = datasets.filter(d => d.category !== undefined && selectedCategories.has(d.category));
+  }
+  if (liveOnly) {
+    datasets = datasets.filter(d => d.live === true);
   }
   if (minPrice !== undefined) {
     datasets = datasets.filter(d => d.pricePerQuery >= minPrice);
@@ -520,6 +531,28 @@ datasetsRouter.get('/:id', async (req: Request, res: Response) => {
   const dataset = await getDataset(id);
   if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
   return res.json({ success: true, dataset: toDatasetDetail(dataset) });
+});
+
+// GET /api/datasets/:id/preview — redacted live sample + freshness for detail page
+datasetsRouter.get('/:id/preview', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'Missing dataset id' });
+  const dataset = await getDataset(id);
+  if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+
+  const data = dataset.data as Record<string, unknown>;
+  const points = Array.isArray(data._points) ? (data._points as unknown[]).slice(0, 30) : [];
+  return res.json({
+    success: true,
+    preview: {
+      sample: getPreviewRow(data),
+      points,
+      headline: typeof data._headline === 'string' ? data._headline : null,
+      live: Boolean(dataset.live),
+      provider: dataset.provider ?? null,
+      lastRefreshedAt: dataset.lastRefreshedAt ?? null,
+    },
+  });
 });
 
 /**

@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `escrow_id` integer;

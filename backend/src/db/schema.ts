@@ -16,6 +16,7 @@ export const datasets = pgTable(
     name: text('name').notNull(),
     description: text('description').notNull(),
     type: text('type').notNull(),
+    category: text('category').notNull().default('other'),
     pricePerQuery: numeric('price_per_query').notNull(),
     paymentToken: text('payment_token').notNull().default('USDC'),
     sellerWallet: text('seller_wallet').notNull(),
@@ -26,10 +27,14 @@ export const datasets = pgTable(
     createdAt: text('created_at').notNull(),
     ratings: text('ratings'),
     priceHistory: text('price_history'),
-    active: boolean('active').notNull().default(true),
+    provider: text('provider'),
+    live: boolean('live').notNull().default(false),
+    lastRefreshedAt: text('last_refreshed_at'),
+    tags: text('tags'),
   },
   table => ({
     typeIdx: index('datasets_type_idx').on(table.type),
+    categoryIdx: index('datasets_category_idx').on(table.category),
     sellerWalletIdx: index('datasets_seller_wallet_idx').on(table.sellerWallet),
     createdAtIdx: index('datasets_created_at_idx').on(table.createdAt),
   }),
@@ -57,6 +62,7 @@ export const transactions = pgTable('transactions', {
   deliveryError: text('delivery_error'),
   verifiedAt: text('verified_at'),
   deliveredAt: text('delivered_at'),
+  escrowId: integer('escrow_id'),
   timestamp: text('timestamp').notNull(),
 });
 
@@ -97,6 +103,7 @@ export const datasetsSqlite = sqliteTable(
     name: sqliteText('name').notNull(),
     description: sqliteText('description').notNull(),
     type: sqliteText('type').notNull(),
+    category: sqliteText('category').notNull().default('other'),
     pricePerQuery: sqliteText('price_per_query').notNull(),
     paymentToken: sqliteText('payment_token').notNull().default('USDC'),
     sellerWallet: sqliteText('seller_wallet').notNull(),
@@ -107,10 +114,14 @@ export const datasetsSqlite = sqliteTable(
     createdAt: sqliteText('created_at').notNull(),
     ratings: sqliteText('ratings'),
     priceHistory: sqliteText('price_history'),
-    active: sqliteInteger('active').notNull().default(1),
+    provider: sqliteText('provider'),
+    live: sqliteInteger('live').notNull().default(0),
+    lastRefreshedAt: sqliteText('last_refreshed_at'),
+    tags: sqliteText('tags'),
   },
   table => ({
     typeIdx: sqliteIndex('datasets_type_idx').on(table.type),
+    categoryIdx: sqliteIndex('datasets_category_idx').on(table.category),
     sellerWalletIdx: sqliteIndex('datasets_seller_wallet_idx').on(table.sellerWallet),
     createdAtIdx: sqliteIndex('datasets_created_at_idx').on(table.createdAt),
   }),
@@ -138,6 +149,7 @@ export const transactionsSqlite = sqliteTable('transactions', {
   deliveryError: sqliteText('delivery_error'),
   verifiedAt: sqliteText('verified_at'),
   deliveredAt: sqliteText('delivered_at'),
+  escrowId: sqliteInteger('escrow_id'),
   timestamp: sqliteText('timestamp').notNull(),
 });
 
