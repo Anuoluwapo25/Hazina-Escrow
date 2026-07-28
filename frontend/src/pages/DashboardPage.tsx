@@ -917,10 +917,7 @@ export default function DashboardPage() {
             aria-modal="true"
             onClick={() => setEditingDataset(null)}
           >
-            <div
-              className="glass-card p-6 w-full max-w-md mx-4"
-              onClick={e => e.stopPropagation()}
-            >
+            <div className="glass-card p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
               <h3 className="font-display font-semibold text-foreground text-lg mb-4">
                 Edit Dataset
               </h3>

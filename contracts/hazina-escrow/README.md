@@ -61,7 +61,7 @@ npm run contracts:formal
 Every main-branch build publishes a **soroban-contract-artifacts** bundle containing:
 
 - `hazina_escrow.wasm` — release-optimized WASM binary
-- `spec.json` — extracted contract spec (auth entries, interfaces, types)
+- `spec.txt` — extracted contract spec (auth entries, interfaces, types)
 
 Download the latest artifact from the
 [Actions tab](../../actions/workflows/ci.yml) → select the most recent

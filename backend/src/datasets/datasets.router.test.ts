@@ -651,8 +651,8 @@ describe('PATCH /api/v1/datasets/:id', () => {
     process.env.API_KEY = 'test-api-key';
     process.env.SELLER_JWT_SECRET = 'test-secret';
     vi.mocked(getDataset).mockResolvedValue({ ...PATCHABLE_DATASET });
-    vi.mocked(updateDataset).mockImplementation(async (_id, updates) =>
-      ({ ...PATCHABLE_DATASET, ...updates }) as Dataset,
+    vi.mocked(updateDataset).mockImplementation(
+      async (_id, updates) => ({ ...PATCHABLE_DATASET, ...updates }) as Dataset,
     );
   });
 
@@ -713,16 +713,14 @@ describe('PATCH /api/v1/datasets/:id', () => {
       PATCHABLE_DATASET.id,
       expect.objectContaining({
         pricePerQuery: 2.5,
-        priceHistory: expect.arrayContaining([
-          { price: 1, changedAt: '2026-01-01T00:00:00.000Z' },
-        ]),
+        priceHistory: expect.arrayContaining([{ price: 1, changedAt: '2026-01-01T00:00:00.000Z' }]),
       }),
     );
     const calls = vi.mocked(updateDataset).mock.calls;
     expect(calls.length).toBeGreaterThan(0);
-    const priceHistory = (calls[0]![1] as Partial<Dataset>).priceHistory!;
+    const priceHistory = (calls[0]?.[1] as Partial<Dataset> | undefined)?.priceHistory;
     expect(priceHistory).toHaveLength(2);
-    expect(priceHistory[1]!.price).toBe(2.5);
+    expect(priceHistory?.[1]?.price).toBe(2.5);
   });
 
   it('returns 404 for unknown dataset', async () => {
@@ -761,8 +759,8 @@ describe('DELETE /api/v1/datasets/:id', () => {
     process.env.API_KEY = 'test-api-key';
     process.env.SELLER_JWT_SECRET = 'test-secret';
     vi.mocked(getDataset).mockResolvedValue({ ...PATCHABLE_DATASET });
-    vi.mocked(updateDataset).mockImplementation(async (_id, updates) =>
-      ({ ...PATCHABLE_DATASET, ...updates }) as Dataset,
+    vi.mocked(updateDataset).mockImplementation(
+      async (_id, updates) => ({ ...PATCHABLE_DATASET, ...updates }) as Dataset,
     );
   });
 
@@ -818,8 +816,7 @@ describe('DELETE /api/v1/datasets/:id', () => {
   });
 
   it('returns 401 without auth', async () => {
-    const res = await request(app)
-      .delete(`/api/v1/datasets/${PATCHABLE_DATASET.id}`);
+    const res = await request(app).delete(`/api/v1/datasets/${PATCHABLE_DATASET.id}`);
 
     expect(res.status).toBe(401);
   });

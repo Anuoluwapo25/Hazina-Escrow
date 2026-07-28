@@ -468,23 +468,17 @@ export const api = {
       notificationEmail?: string;
     },
   ) =>
-    request<{ success: boolean; dataset: DatasetMeta }>(
-      `${getApiBaseUrl()}/datasets/${id}`,
-      {
-        method: 'PATCH',
-        headers: authHeaders(),
-        body: JSON.stringify(payload),
-      },
-    ).then(r => r.dataset),
+    request<{ success: boolean; dataset: DatasetMeta }>(`${getApiBaseUrl()}/datasets/${id}`, {
+      method: 'PATCH',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    }).then(r => r.dataset),
 
   deleteDataset: (id: string) =>
-    request<{ success: boolean; message: string }>(
-      `${getApiBaseUrl()}/datasets/${id}`,
-      {
-        method: 'DELETE',
-        headers: authHeaders(),
-      },
-    ),
+    request<{ success: boolean; message: string }>(`${getApiBaseUrl()}/datasets/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    }),
 };
 
 export function __resetRequestThrottleForTests() {

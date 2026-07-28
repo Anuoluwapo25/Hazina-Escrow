@@ -106,7 +106,11 @@ jobs:
         run: npm install --ignore-scripts --prefix frontend
 
       - name: Audit root dependencies
-        run: npm audit --audit-level=high
+        # --omit=dev: root only has devDependencies (eslint/prettier toolchain).
+        # The brace-expansion DoS (GHSA-mh99-v99m-4gvg) is in the eslint
+        # minimatch chain and has no CJS-compatible fix yet; it never ships
+        # to production.
+        run: npm audit --audit-level=high --omit=dev
 
       - name: Audit backend dependencies
         run: npm audit --audit-level=high --prefix backend
@@ -235,11 +239,11 @@ jobs:
       - name: Install Stellar CLI
         run: cargo install --locked stellar-cli
 
-      - name: Extract contract spec to JSON
+      - name: Extract contract spec
         run: >
           stellar contract inspect
           --wasm target/wasm32v1-none/release/hazina_escrow.wasm
-          --output json > spec.json
+          > spec.txt
 
       - name: Upload contract artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -248,5 +252,5 @@ jobs:
           name: soroban-contract-artifacts
           path: |
             contracts/hazina-escrow/target/wasm32v1-none/release/hazina_escrow.wasm
-            contracts/hazina-escrow/spec.json
+            contracts/hazina-escrow/spec.txt
           retention-days: 90

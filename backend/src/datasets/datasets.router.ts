@@ -334,9 +334,7 @@ datasetsRouter.get('/', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Minimum price cannot exceed maximum price' });
   }
 
-  let datasets = (await getAllDatasets())
-    .filter(d => d.active !== false)
-    .map(withoutRawData);
+  let datasets = (await getAllDatasets()).filter(d => d.active !== false).map(withoutRawData);
 
   // Filter
   if (search) {
@@ -865,21 +863,17 @@ datasetsRouter.patch(
  *       404:
  *         description: Dataset not found
  */
-datasetsRouter.delete(
-  '/:id',
-  requireSellerMutationAuth,
-  async (req: Request, res: Response) => {
-    const { id } = req.params;
-    if (!id) return res.status(400).json({ error: 'Missing dataset id' });
+datasetsRouter.delete('/:id', requireSellerMutationAuth, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: 'Missing dataset id' });
 
-    const dataset = await getDataset(id);
-    if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+  const dataset = await getDataset(id);
+  if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
 
-    if (dataset.sellerWallet !== req.sellerAuth?.sellerWallet) {
-      return res.status(403).json({ error: 'Dataset does not belong to authenticated seller' });
-    }
+  if (dataset.sellerWallet !== req.sellerAuth?.sellerWallet) {
+    return res.status(403).json({ error: 'Dataset does not belong to authenticated seller' });
+  }
 
-    await updateDataset(id, { active: false });
-    return res.json({ success: true, message: 'Dataset deactivated' });
-  },
-);
+  await updateDataset(id, { active: false });
+  return res.json({ success: true, message: 'Dataset deactivated' });
+});
