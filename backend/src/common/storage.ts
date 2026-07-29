@@ -83,11 +83,7 @@ export interface Transaction {
   timestamp: string;
 }
 export type WebhookEvent =
-  | 'payment.received'
-  | 'payment.forwarded'
-  | 'dataset.queried'
-  | 'dataset.created'
-  | 'ping';
+  'payment.received' | 'payment.forwarded' | 'dataset.queried' | 'dataset.created' | 'ping';
 export interface WebhookSubscription {
   id: string;
   sellerWallet: string;
