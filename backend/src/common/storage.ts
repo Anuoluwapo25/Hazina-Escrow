@@ -48,6 +48,8 @@ export interface Dataset {
   lastRefreshedAt?: string;
   /** Free-form discovery tags. */
   tags?: string[];
+  /** Soft-delete / visibility flag; defaults to true. */
+  active?: boolean;
 }
 export interface Transaction {
   id: string;
@@ -133,6 +135,7 @@ function rowToDataset(row: any): Dataset {
     live: row.live === null || row.live === undefined ? undefined : Boolean(row.live),
     lastRefreshedAt: row.lastRefreshedAt ?? undefined,
     tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
+    active: row.active === null || row.active === undefined ? undefined : Boolean(row.active),
   };
 }
 
@@ -157,6 +160,7 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     live: dataset.live ? 1 : 0,
     lastRefreshedAt: dataset.lastRefreshedAt ?? null,
     tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
+    active: dataset.active ? 1 : 0,
   };
 }
 
