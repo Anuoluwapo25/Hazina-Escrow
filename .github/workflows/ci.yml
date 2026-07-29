@@ -126,3 +126,30 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # ── Smart contract ────────────────────────────────────────────────────────────
+  contract:
+    name: Smart Contract (Build + Test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/hazina-escrow
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: Build contract
+        run: cargo build --release
+
+      - name: Run contract tests
+        run: cargo test
+
+      - name: Run fuzz tests
+        run: cargo test --features fuzz-tests
+        env:
+          PROPTEST_CASES: "16"

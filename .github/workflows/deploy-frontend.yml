@@ -44,11 +44,38 @@ jobs:
           path: frontend/dist
           if-no-files-found: error
 
+  check-secrets:
+    name: Check Deployment Secrets
+    runs-on: ubuntu-latest
+    outputs:
+      vercel-ready: ${{ steps.check.outputs.vercel-ready }}
+      netlify-ready: ${{ steps.check.outputs.netlify-ready }}
+    steps:
+      - name: Check secrets
+        id: check
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+            echo "vercel-ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "vercel-ready=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$NETLIFY_AUTH_TOKEN" ] && [ -n "$NETLIFY_SITE_ID" ]; then
+            echo "netlify-ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "netlify-ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy-vercel:
     name: Deploy to Vercel
     runs-on: ubuntu-latest
-    needs: build-frontend
-    if: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
+    needs: [build-frontend, check-secrets]
+    if: needs.check-secrets.outputs.vercel-ready == 'true'
     defaults:
       run:
         working-directory: frontend
@@ -88,8 +115,8 @@ jobs:
   deploy-netlify:
     name: Deploy to Netlify
     runs-on: ubuntu-latest
-    needs: build-frontend
-    if: ${{ secrets.NETLIFY_AUTH_TOKEN != '' && secrets.NETLIFY_SITE_ID != '' }}
+    needs: [build-frontend, check-secrets]
+    if: needs.check-secrets.outputs.netlify-ready == 'true'
 
     steps:
       - name: Download dist artifact

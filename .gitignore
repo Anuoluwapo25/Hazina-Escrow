@@ -19,6 +19,11 @@ frontend/test-results/
 
 # Avoid committing property-test snapshot explosions (enable with `--features fuzz-tests` if needed).
 contracts/hazina-escrow/test_snapshots/fuzz_tests/
+contracts/hazina-escrow/test_snapshots/prop_*
+contracts/hazina-escrow/test_snapshots/test_fee_floor.*
+contracts/hazina-escrow/test_snapshots/test_initialize_twice_reverts.*
+contracts/hazina-escrow/test_snapshots/test_lock_multi_and_release_multi.*
+contracts/hazina-escrow/test_snapshots/test_update_fee_out_of_bounds_reverts.*
 
 # Added by cargo
 
