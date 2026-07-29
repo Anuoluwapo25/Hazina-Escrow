@@ -21,6 +21,14 @@ ethnum = "1.5.3"
 fuzz-tests = []
 integration-tests = []
 
+# Property-based invariant suite (docs/INVARIANTS.md). `required-features`
+# keeps it out of the default `cargo test` gate entirely rather than relying on
+# a `#![cfg]` that still has to compile.
+[[test]]
+name = "fuzz"
+path = "tests/fuzz/main.rs"
+required-features = ["fuzz-tests"]
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true
