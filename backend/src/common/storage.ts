@@ -58,13 +58,7 @@ export interface Transaction {
   amount: number;
   paymentToken?: string;
   status?:
-    | 'pending'
-    | 'verifying'
-    | 'verified'
-    | 'completed'
-    | 'failed'
-    | 'refunded'
-    | 'delivery_failed';
+    'pending' | 'verifying' | 'verified' | 'completed' | 'failed' | 'refunded' | 'delivery_failed';
   deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
