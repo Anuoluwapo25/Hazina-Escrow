@@ -10,7 +10,7 @@ import {
   reserveTxHash,
 } from '../common/storage';
 import { verifyStellarPayment } from '../payments/stellar.service';
-import { sendUsdcPayment, getAgentPublicKey } from './agent.wallet';
+import { sendTokenPayment, getAgentPublicKey } from './agent.wallet';
 import { isEscrowContractConfigured } from '../lib/stellar.config';
 import { lockAsAgent, releaseEscrow, refundEscrow } from '../lib/escrow.client';
 import { logger } from '../lib/logger';

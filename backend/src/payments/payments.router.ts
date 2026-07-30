@@ -25,7 +25,7 @@ import {
   runDuePayoutRetries,
   scheduleRetrySweep,
 } from './payout-retry.service';
-import { sendUsdcPayment } from '../agent/agent.wallet';
+import { sendTokenPayment } from '../agent/agent.wallet';
 import { isEscrowContractConfigured, getEscrowContractId } from '../lib/stellar.config';
 import { releaseEscrow } from '../lib/escrow.client';
 import { PLATFORM_FEE_BPS } from '../common/constants';
