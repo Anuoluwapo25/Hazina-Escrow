@@ -179,7 +179,7 @@ jobs:
 
       - name: Extract contract spec to JSON
         run: >
-          stellar contract inspect
+          stellar contract info interface
           --wasm target/wasm32v1-none/release/hazina_escrow.wasm
           --output json > spec.json
 
