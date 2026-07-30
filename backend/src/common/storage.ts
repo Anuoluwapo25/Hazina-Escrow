@@ -48,6 +48,8 @@ export interface Dataset {
   lastRefreshedAt?: string;
   /** Free-form discovery tags. */
   tags?: string[];
+  /** Soft-delete / visibility flag; defaults to true. */
+  active?: boolean;
 }
 export interface Transaction {
   id: string;
@@ -133,6 +135,7 @@ function rowToDataset(row: any): Dataset {
     live: row.live === null || row.live === undefined ? undefined : Boolean(row.live),
     lastRefreshedAt: row.lastRefreshedAt ?? undefined,
     tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
+    active: row.active === null || row.active === undefined ? undefined : Boolean(row.active),
   };
 }
 
@@ -157,6 +160,7 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     live: dataset.live ? 1 : 0,
     lastRefreshedAt: dataset.lastRefreshedAt ?? null,
     tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
+    active: dataset.active ? 1 : 0,
   };
 }
 
@@ -302,25 +306,22 @@ export async function readStore(): Promise<Store> {
 }
 
 export async function writeStore(store: Store): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await db.transaction(async (tx: any) => {
-    await tx.delete(datasetsSqlite);
-    await tx.delete(transactionsSqlite);
-    await tx.delete(webhooksSqlite);
-    await tx.delete(payoutFailuresSqlite);
-    for (const dataset of store.datasets) {
-      await tx.insert(datasetsSqlite).values(datasetToRow(dataset));
-    }
-    for (const transaction of store.transactions) {
-      await tx.insert(transactionsSqlite).values(transactionToRow(transaction));
-    }
-    for (const webhook of store.webhooks) {
-      await tx.insert(webhooksSqlite).values(webhookToRow(webhook));
-    }
-    for (const pf of store.payoutFailures) {
-      await tx.insert(payoutFailuresSqlite).values(payoutFailureToRow(pf));
-    }
-  });
+  await db.delete(datasetsSqlite);
+  await db.delete(transactionsSqlite);
+  await db.delete(webhooksSqlite);
+  await db.delete(payoutFailuresSqlite);
+  for (const dataset of store.datasets) {
+    await db.insert(datasetsSqlite).values(datasetToRow(dataset));
+  }
+  for (const transaction of store.transactions) {
+    await db.insert(transactionsSqlite).values(transactionToRow(transaction));
+  }
+  for (const webhook of store.webhooks) {
+    await db.insert(webhooksSqlite).values(webhookToRow(webhook));
+  }
+  for (const pf of store.payoutFailures) {
+    await db.insert(payoutFailuresSqlite).values(payoutFailureToRow(pf));
+  }
 }
 
 export async function getDataset(id: string): Promise<Dataset | undefined> {

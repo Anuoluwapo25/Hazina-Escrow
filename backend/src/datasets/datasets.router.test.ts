@@ -624,3 +624,273 @@ describe('GET /api/v1/datasets/:id/ratings', () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ── PATCH /api/datasets/:id ──────────────────────────────────────────────────
+
+const PATCHABLE_DATASET: Dataset = {
+  id: 'ds-patch-me',
+  name: 'Patchable Dataset',
+  description: 'Original description',
+  type: 'yield-data',
+  pricePerQuery: 1,
+  sellerWallet: SELLER_A,
+  data: {},
+  queriesServed: 0,
+  totalEarned: 0,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  priceHistory: [{ price: 1, changedAt: '2026-01-01T00:00:00.000Z' }],
+};
+
+describe('PATCH /api/v1/datasets/:id', () => {
+  let app: Express;
+  const originalApiKey = process.env.API_KEY;
+  const originalSellerJwtSecret = process.env.SELLER_JWT_SECRET;
+
+  beforeEach(() => {
+    app = makeApp();
+    process.env.API_KEY = 'test-api-key';
+    process.env.SELLER_JWT_SECRET = 'test-secret';
+    vi.mocked(getDataset).mockResolvedValue({ ...PATCHABLE_DATASET });
+    vi.mocked(updateDataset).mockImplementation(
+      async (_id, updates) => ({ ...PATCHABLE_DATASET, ...updates }) as Dataset,
+    );
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    if (originalApiKey === undefined) delete process.env.API_KEY;
+    else process.env.API_KEY = originalApiKey;
+    if (originalSellerJwtSecret === undefined) delete process.env.SELLER_JWT_SECRET;
+    else process.env.SELLER_JWT_SECRET = originalSellerJwtSecret;
+  });
+
+  it('updates seller-controlled fields for the owning seller', async () => {
+    const token = signSellerJwt({
+      sellerWallet: SELLER_A,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    const res = await request(app)
+      .patch(`/api/v1/datasets/${PATCHABLE_DATASET.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Updated Name', description: 'Updated description' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(updateDataset).toHaveBeenCalledWith(
+      PATCHABLE_DATASET.id,
+      expect.objectContaining({ name: 'Updated Name', description: 'Updated description' }),
+    );
+  });
+
+  it('returns 403 when a non-owner tries to edit', async () => {
+    const token = signSellerJwt({
+      sellerWallet: SELLER_B,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    const res = await request(app)
+      .patch(`/api/v1/datasets/${PATCHABLE_DATASET.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Hacked Name' });
+
+    expect(res.status).toBe(403);
+    expect(updateDataset).not.toHaveBeenCalled();
+  });
+
+  it('appends to priceHistory when pricePerQuery changes', async () => {
+    const token = signSellerJwt({
+      sellerWallet: SELLER_A,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    await request(app)
+      .patch(`/api/v1/datasets/${PATCHABLE_DATASET.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ pricePerQuery: 2.5 });
+
+    expect(updateDataset).toHaveBeenCalledWith(
+      PATCHABLE_DATASET.id,
+      expect.objectContaining({
+        pricePerQuery: 2.5,
+        priceHistory: expect.arrayContaining([{ price: 1, changedAt: '2026-01-01T00:00:00.000Z' }]),
+      }),
+    );
+    const calls = vi.mocked(updateDataset).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const priceHistory = (calls[0]?.[1] as Partial<Dataset> | undefined)?.priceHistory;
+    expect(priceHistory).toHaveLength(2);
+    expect(priceHistory?.[1]?.price).toBe(2.5);
+  });
+
+  it('returns 404 for unknown dataset', async () => {
+    vi.mocked(getDataset).mockResolvedValue(undefined);
+    const token = signSellerJwt({
+      sellerWallet: SELLER_A,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    const res = await request(app)
+      .patch('/api/v1/datasets/nonexistent')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'Nope' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 401 without auth', async () => {
+    const res = await request(app)
+      .patch(`/api/v1/datasets/${PATCHABLE_DATASET.id}`)
+      .send({ name: 'No Auth' });
+
+    expect(res.status).toBe(401);
+  });
+});
+
+// ── DELETE /api/datasets/:id ──────────────────────────────────────────────────
+
+describe('DELETE /api/v1/datasets/:id', () => {
+  let app: Express;
+  const originalApiKey = process.env.API_KEY;
+  const originalSellerJwtSecret = process.env.SELLER_JWT_SECRET;
+
+  beforeEach(() => {
+    app = makeApp();
+    process.env.API_KEY = 'test-api-key';
+    process.env.SELLER_JWT_SECRET = 'test-secret';
+    vi.mocked(getDataset).mockResolvedValue({ ...PATCHABLE_DATASET });
+    vi.mocked(updateDataset).mockImplementation(
+      async (_id, updates) => ({ ...PATCHABLE_DATASET, ...updates }) as Dataset,
+    );
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    if (originalApiKey === undefined) delete process.env.API_KEY;
+    else process.env.API_KEY = originalApiKey;
+    if (originalSellerJwtSecret === undefined) delete process.env.SELLER_JWT_SECRET;
+    else process.env.SELLER_JWT_SECRET = originalSellerJwtSecret;
+  });
+
+  it('soft-deletes via active=false for the owning seller', async () => {
+    const token = signSellerJwt({
+      sellerWallet: SELLER_A,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    const res = await request(app)
+      .delete(`/api/v1/datasets/${PATCHABLE_DATASET.id}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(updateDataset).toHaveBeenCalledWith(PATCHABLE_DATASET.id, { active: false });
+  });
+
+  it('returns 403 when a non-owner tries to delete', async () => {
+    const token = signSellerJwt({
+      sellerWallet: SELLER_B,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    const res = await request(app)
+      .delete(`/api/v1/datasets/${PATCHABLE_DATASET.id}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(403);
+    expect(updateDataset).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for unknown dataset', async () => {
+    vi.mocked(getDataset).mockResolvedValue(undefined);
+    const token = signSellerJwt({
+      sellerWallet: SELLER_A,
+      exp: Math.floor(Date.now() / 1000) + 60,
+    });
+
+    const res = await request(app)
+      .delete('/api/v1/datasets/nonexistent')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 401 without auth', async () => {
+    const res = await request(app).delete(`/api/v1/datasets/${PATCHABLE_DATASET.id}`);
+
+    expect(res.status).toBe(401);
+  });
+});
+
+// ── GET / excludes inactive datasets ─────────────────────────────────────────
+
+describe('GET /api/v1/datasets excludes inactive datasets', () => {
+  let app: Express;
+
+  beforeEach(() => {
+    app = makeApp();
+    vi.mocked(getTransactions).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('filters out datasets where active is false', async () => {
+    const activeDataset: Dataset = {
+      id: 'ds-active',
+      name: 'Active',
+      description: 'visible',
+      type: 'yield-data',
+      pricePerQuery: 1,
+      sellerWallet: SELLER_A,
+      data: {},
+      queriesServed: 0,
+      totalEarned: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      active: true,
+    };
+    const inactiveDataset: Dataset = {
+      id: 'ds-inactive',
+      name: 'Inactive',
+      description: 'hidden',
+      type: 'yield-data',
+      pricePerQuery: 1,
+      sellerWallet: SELLER_A,
+      data: {},
+      queriesServed: 0,
+      totalEarned: 0,
+      createdAt: '2026-01-02T00:00:00.000Z',
+      active: false,
+    };
+    vi.mocked(getAllDatasets).mockResolvedValue([activeDataset, inactiveDataset]);
+
+    const res = await request(app).get('/api/v1/datasets');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].id).toBe('ds-active');
+  });
+
+  it('includes datasets with undefined active (legacy rows)', async () => {
+    const legacyDataset: Dataset = {
+      id: 'ds-legacy',
+      name: 'Legacy',
+      description: 'no active flag',
+      type: 'yield-data',
+      pricePerQuery: 1,
+      sellerWallet: SELLER_A,
+      data: {},
+      queriesServed: 0,
+      totalEarned: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    vi.mocked(getAllDatasets).mockResolvedValue([legacyDataset]);
+
+    const res = await request(app).get('/api/v1/datasets');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].id).toBe('ds-legacy');
+  });
+});

@@ -21,6 +21,8 @@ import {
   Activity,
   ChevronRight,
   Loader2,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 
 import { api, DatasetMeta, PaginatedDatasets, SellerAnalytics, Transaction } from '../lib/api';
@@ -174,6 +176,18 @@ export default function DashboardPage() {
 
   const [isMobile, setIsMobile] = useState(false);
   const hasLoadedOnceRef = useRef(false);
+
+  const [editingDataset, setEditingDataset] = useState<DatasetMeta | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    description: '',
+    pricePerQuery: 0,
+    paymentToken: 'USDC' as 'USDC' | 'EURC' | 'XLM',
+    notificationEmail: '',
+  });
+  const [editSaving, setEditSaving] = useState(false);
+  const [delistConfirmId, setDelistConfirmId] = useState<string | null>(null);
+  const [delistLoading, setDelistLoading] = useState(false);
   const websocketOptions = useMemo(() => ({ enabled: hasLoadedOnce }), [hasLoadedOnce]);
   const websocketCallbacks = useMemo(() => ({}), []);
   const { connected: wsConnected, error: wsError } = useTransactionWebSocket(
@@ -255,6 +269,51 @@ export default function DashboardPage() {
     link.download = 'hazina-transactions.csv';
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const openEdit = (ds: DatasetMeta) => {
+    setEditingDataset(ds);
+    setEditForm({
+      name: ds.name,
+      description: ds.description,
+      pricePerQuery: ds.pricePerQuery,
+      paymentToken: 'USDC',
+      notificationEmail: '',
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editingDataset) return;
+    setEditSaving(true);
+    try {
+      await api.updateDataset(editingDataset.id, {
+        name: editForm.name,
+        description: editForm.description,
+        pricePerQuery: editForm.pricePerQuery,
+        paymentToken: editForm.paymentToken,
+      });
+      setEditingDataset(null);
+      const ds = await api.getDatasets();
+      setDatasets(ds.data);
+    } catch {
+      // silently fail — the user can retry
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const delistDataset = async (id: string) => {
+    setDelistLoading(true);
+    try {
+      await api.deleteDataset(id);
+      setDelistConfirmId(null);
+      const ds = await api.getDatasets();
+      setDatasets(ds.data);
+    } catch {
+      // silently fail — the user can retry
+    } finally {
+      setDelistLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -707,6 +766,25 @@ export default function DashboardPage() {
                               }}
                             />
                           </div>
+                          {/* Edit / Delist controls */}
+                          <div className="flex items-center gap-2 mt-2">
+                            <button
+                              type="button"
+                              onClick={() => openEdit(ds)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-body font-medium text-foreground-muted hover:text-gold hover:bg-gold/10 transition-all"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDelistConfirmId(ds.id)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-body font-medium text-foreground-muted hover:text-red-400 hover:bg-red-400/10 transition-all"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Delist
+                            </button>
+                          </div>
                         </div>
                       );
                     })
@@ -830,6 +908,138 @@ export default function DashboardPage() {
             List New Dataset
           </Link>
         </div>
+
+        {/* Edit dataset modal */}
+        {editingDataset && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setEditingDataset(null)}
+          >
+            <div className="glass-card p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+              <h3 className="font-display font-semibold text-foreground text-lg mb-4">
+                Edit Dataset
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-foreground-muted font-body block mb-1">Name</label>
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border/40 text-sm text-foreground font-body focus:outline-none focus:border-gold/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-foreground-muted font-body block mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    value={editForm.description}
+                    onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border/40 text-sm text-foreground font-body focus:outline-none focus:border-gold/50 resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-foreground-muted font-body block mb-1">
+                    Price per Query
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editForm.pricePerQuery}
+                    onChange={e =>
+                      setEditForm(f => ({ ...f, pricePerQuery: parseFloat(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border/40 text-sm text-foreground font-body focus:outline-none focus:border-gold/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-foreground-muted font-body block mb-1">
+                    Payment Token
+                  </label>
+                  <select
+                    value={editForm.paymentToken}
+                    onChange={e =>
+                      setEditForm(f => ({
+                        ...f,
+                        paymentToken: e.target.value as 'USDC' | 'EURC' | 'XLM',
+                      }))
+                    }
+                    className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border/40 text-sm text-foreground font-body focus:outline-none focus:border-gold/50"
+                  >
+                    <option value="USDC">USDC</option>
+                    <option value="EURC">EURC</option>
+                    <option value="XLM">XLM</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 mt-5">
+                <button
+                  type="button"
+                  onClick={() => setEditingDataset(null)}
+                  className="px-4 py-2 rounded-lg text-sm font-body font-medium text-foreground-muted hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveEdit}
+                  disabled={editSaving}
+                  className="btn-gold px-4 py-2 text-sm flex items-center gap-2"
+                >
+                  {editSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delist confirmation */}
+        {delistConfirmId && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setDelistConfirmId(null)}
+          >
+            <div
+              className="glass-card p-6 w-full max-w-sm mx-4 text-center"
+              onClick={e => e.stopPropagation()}
+            >
+              <Trash2 className="w-10 h-10 text-red-400 mx-auto mb-3" />
+              <h3 className="font-display font-semibold text-foreground text-lg mb-2">
+                Delist Dataset?
+              </h3>
+              <p className="text-sm text-foreground-muted font-body mb-5">
+                This will hide the dataset from the marketplace. Buyers with existing transactions
+                can still view it.
+              </p>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDelistConfirmId(null)}
+                  className="px-4 py-2 rounded-lg text-sm font-body font-medium text-foreground-muted hover:text-foreground transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => delistDataset(delistConfirmId)}
+                  disabled={delistLoading}
+                  className="px-4 py-2 rounded-lg text-sm font-body font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors flex items-center gap-2"
+                >
+                  {delistLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Delist
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
