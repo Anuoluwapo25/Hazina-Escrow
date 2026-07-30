@@ -58,13 +58,7 @@ export interface Transaction {
   amount: number;
   paymentToken?: string;
   status?:
-    | 'pending'
-    | 'verifying'
-    | 'verified'
-    | 'completed'
-    | 'failed'
-    | 'refunded'
-    | 'delivery_failed';
+    'pending' | 'verifying' | 'verified' | 'completed' | 'failed' | 'refunded' | 'delivery_failed';
   deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
@@ -83,11 +77,7 @@ export interface Transaction {
   timestamp: string;
 }
 export type WebhookEvent =
-  | 'payment.received'
-  | 'payment.forwarded'
-  | 'dataset.queried'
-  | 'dataset.created'
-  | 'ping';
+  'payment.received' | 'payment.forwarded' | 'dataset.queried' | 'dataset.created' | 'ping';
 export interface WebhookSubscription {
   id: string;
   sellerWallet: string;

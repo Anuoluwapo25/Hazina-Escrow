@@ -56,6 +56,16 @@ npm run contracts:formal
 
 `contracts:formal` runs the invariant-oriented tests whose names start with `formal_`.
 
+## CI Artifacts
+
+Every main-branch build publishes a **soroban-contract-artifacts** bundle containing:
+
+- `hazina_escrow.wasm` — release-optimized WASM binary
+- `spec.json` — extracted contract spec (auth entries, interfaces, types)
+
+Download the latest artifact from the
+[Actions tab](../../actions/workflows/ci.yml) → select the most recent
+**Contract Artifacts (WASM + Spec)** run → expand the **Artifacts** section.
 ## Property-based invariant suite
 
 ```sh
