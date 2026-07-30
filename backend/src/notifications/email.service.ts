@@ -7,9 +7,10 @@ export interface SellerNotificationEmail {
   sellerAmount: number;
   txHash: string;
   timestamp: string;
+  paymentToken?: string; // defaults to USDC
 }
 
-function formatUsdc(amount: number): string {
+function formatAmount(amount: number): string {
   return amount.toFixed(4).replace(/\.?0+$/, '');
 }
 
@@ -29,11 +30,12 @@ export async function sendSellerNotificationEmail(
   if (!apiKey) return;
 
   const resend = new Resend(apiKey);
-  const sellerAmount = formatUsdc(notification.sellerAmount);
-  const queryAmount = formatUsdc(notification.amount);
+  const sellerAmount = formatAmount(notification.sellerAmount);
+  const queryAmount = formatAmount(notification.amount);
+  const token = notification.paymentToken || 'USDC';
   const timestamp = new Date(notification.timestamp).toISOString();
-  const subject = `Your dataset "${notification.datasetName}" was queried — ${queryAmount} USDC earned`;
-  const body = `A buyer queried your dataset at ${timestamp}. You earned ${sellerAmount} USDC (tx: ${notification.txHash}).`;
+  const subject = `Your dataset "${notification.datasetName}" was queried — ${queryAmount} ${token} earned`;
+  const body = `A buyer queried your dataset at ${timestamp}. You earned ${sellerAmount} ${token} (tx: ${notification.txHash}).`;
 
   const { error } = await resend.emails.send({
     from: process.env.RESEND_FROM_EMAIL || 'Hazina <onboarding@resend.dev>',
@@ -42,8 +44,8 @@ export async function sendSellerNotificationEmail(
     text: body,
     html:
       `<p>A buyer queried your dataset at ${escapeHtml(timestamp)}.</p>` +
-      `<p>You earned <strong>${escapeHtml(sellerAmount)} USDC</strong> ` +
-      `(query price: ${escapeHtml(queryAmount)} USDC).</p>` +
+      `<p>You earned <strong>${escapeHtml(sellerAmount)} ${escapeHtml(token)}</strong> ` +
+      `(query price: ${escapeHtml(queryAmount)} ${escapeHtml(token)}).</p>` +
       `<p>Transaction: <code>${escapeHtml(notification.txHash)}</code></p>`,
   });
 

@@ -33,14 +33,14 @@ vi.mock('../agent/agent.service', () => ({
 }));
 
 vi.mock('../agent/agent.wallet', () => ({
-  sendUsdcPayment: vi.fn(() => Promise.resolve({ txHash: 'tx-hash' })),
+  sendTokenPayment: vi.fn(() => Promise.resolve({ txHash: 'tx-hash' })),
   getAgentPublicKey: vi.fn(() => 'mock-agent-wallet'),
 }));
 
 import { runResearchAgentDemo } from '../agent/agent.service';
 import { generateDataSummary } from '../ai/claude.service';
 import { verifyStellarPayment, StellarTimeoutError } from './stellar.service';
-import { sendUsdcPayment } from '../agent/agent.wallet';
+import { sendTokenPayment } from '../agent/agent.wallet';
 import { agentRouter } from '../agent/agent.router';
 import { paymentsRouter } from './payments.router';
 
@@ -210,19 +210,19 @@ describeSocket('payments and agent integration routes', () => {
   });
 
   it('persists failed seller payout for retries', async () => {
-    vi.mocked(sendUsdcPayment).mockRejectedValueOnce(new Error('temporary network error'));
+    vi.mocked(sendTokenPayment).mockRejectedValueOnce(new Error('temporary network error'));
     const response = await request(app).post('/api/v1/payments/verify/ds-payment-1').send({
       txHash: 'tx-failed-seller-payout',
       buyerQuestion: 'What changed?',
     });
 
-    // The payment verifies and delivery succeeds (sendUsdcPayment failure is handled internally)
+    // The payment verifies and delivery succeeds (sendTokenPayment failure is handled internally)
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
   });
 
   it('persists failed seller payout when a non-Error value is thrown', async () => {
-    vi.mocked(sendUsdcPayment).mockRejectedValueOnce('temporary network error');
+    vi.mocked(sendTokenPayment).mockRejectedValueOnce('temporary network error');
     const response = await request(app).post('/api/v1/payments/verify/ds-payment-1').send({
       txHash: 'tx-failed-seller-payout-string',
       buyerQuestion: 'What changed?',

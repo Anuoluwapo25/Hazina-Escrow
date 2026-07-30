@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4b489aea-ee04-432b-b25e-529aac6a2350",
+  "id": "ce87cd33-8aff-423e-9b1d-ff3464f5d046",
   "prevId": "3194ca99-afa7-44e2-8e3b-abb8ae43f264",
   "tables": {
     "datasets": {
@@ -219,6 +219,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "payment_token": {
+          "name": "payment_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'USDC'"
         },
         "seller_tx_hash": {
           "name": "seller_tx_hash",

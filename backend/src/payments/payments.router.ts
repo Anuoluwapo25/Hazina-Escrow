@@ -25,7 +25,7 @@ import {
   runDuePayoutRetries,
   scheduleRetrySweep,
 } from './payout-retry.service';
-import { sendUsdcPayment } from '../agent/agent.wallet';
+import { sendTokenPayment } from '../agent/agent.wallet';
 import { isEscrowContractConfigured, getEscrowContractId } from '../lib/stellar.config';
 import { releaseEscrow } from '../lib/escrow.client';
 import { PLATFORM_FEE_BPS } from '../common/constants';
@@ -371,34 +371,33 @@ paymentsRouter.post(
         buyerQuestion,
       });
 
-      // Forward seller's share on-chain from the Hazina hot wallet. This is the
-      // CUSTODIAL path and only runs when no escrow contract is configured — with
-      // ESCROW_CONTRACT_ID set, the contract performs the split via /verify/:id/escrow
-      // and no funds ever touch a Hazina-controlled key. Failures enter the DLQ.
-      if (!isEscrowContractConfigured()) {
-        const sellerAmount = sellerShare(dataset.pricePerQuery);
-        try {
-          const payment = await sendUsdcPayment({
-            destinationAddress: dataset.sellerWallet,
-            amount: sellerAmount.toFixed(7),
-            memo: `hazina-${dataset.id.slice(0, 10)}`,
-          });
-          console.log(
-            `[Escrow] (demo/custodial) Paid seller ${sellerAmount} USDC → ${dataset.sellerWallet} (${payment.txHash})`,
-          );
-        } catch (payErr) {
-          console.warn(
-            '[Escrow] Seller payment failed (data still delivered):',
-            payErr instanceof Error ? payErr.message : payErr,
-          );
-          await recordPayoutFailure({
-            datasetId: dataset.id,
-            sellerWallet: dataset.sellerWallet,
-            buyerTxHash: txHash,
-            intendedAmount: sellerAmount,
-            error: payErr instanceof Error ? payErr.message : String(payErr),
-          });
-        }
+      // Forward seller's share on-chain; failures enter the DLQ for retry.
+      // Sellers are paid in the same token the buyer paid in.
+      const sellerAmount = sellerShare(dataset.pricePerQuery);
+      const tokenCode = dataset.paymentToken || 'USDC';
+      try {
+        const payment = await sendTokenPayment({
+          destinationAddress: dataset.sellerWallet,
+          amount: sellerAmount.toFixed(7),
+          memo: `hazina-${dataset.id.slice(0, 10)}`,
+          tokenCode,
+        });
+        console.log(
+          `[Escrow] Paid seller ${sellerAmount} ${tokenCode} → ${dataset.sellerWallet} (${payment.txHash})`,
+        );
+      } catch (payErr) {
+        console.warn(
+          '[Escrow] Seller payment failed (data still delivered):',
+          payErr instanceof Error ? payErr.message : payErr,
+        );
+        await recordPayoutFailure({
+          datasetId: dataset.id,
+          sellerWallet: dataset.sellerWallet,
+          buyerTxHash: txHash,
+          intendedAmount: sellerAmount,
+          paymentToken: tokenCode,
+          error: payErr instanceof Error ? payErr.message : String(payErr),
+        });
       }
 
       if (result.pendingDelivery) {

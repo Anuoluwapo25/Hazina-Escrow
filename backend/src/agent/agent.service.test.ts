@@ -15,7 +15,7 @@ vi.mock('../payments/stellar.service', () => ({
 
 vi.mock('./agent.wallet', () => ({
   getAgentPublicKey: vi.fn(() => 'GAGENT'),
-  sendUsdcPayment: vi.fn(() => Promise.resolve({ txHash: 'seller-payment-hash' })),
+  sendTokenPayment: vi.fn(() => Promise.resolve({ txHash: 'seller-payment-hash' })),
 }));
 
 vi.mock('../ai/research.service', () => ({

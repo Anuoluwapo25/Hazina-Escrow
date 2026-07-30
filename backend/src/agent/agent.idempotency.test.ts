@@ -5,17 +5,17 @@ vi.mock('uuid', () => ({
 }));
 
 import { runResearchAgent } from './agent.service';
-import { sendUsdcPayment } from './agent.wallet';
+import { sendTokenPayment } from './agent.wallet';
 import { verifyStellarPayment } from '../payments/stellar.service';
 
 vi.mock('../common/storage', () => {
   const pending = new Set<string>();
   const transactions: Array<{ txHash: string; datasetId: string }> = [];
   const SELLER_TYPES = [
-    { type: 'yield-data' },
-    { type: 'whale-wallets' },
-    { type: 'risk-scores' },
-    { type: 'sentiment' },
+    { type: 'yield-data', paymentToken: 'EURC' },
+    { type: 'whale-wallets', paymentToken: 'XLM' },
+    { type: 'risk-scores', paymentToken: undefined },
+    { type: 'sentiment', paymentToken: 'USDC' },
   ];
   return {
     getAllDatasets: vi.fn(() =>
@@ -24,6 +24,7 @@ vi.mock('../common/storage', () => {
           id: `ds-${t.type}`,
           type: t.type,
           pricePerQuery: 0.1,
+          paymentToken: t.paymentToken,
           sellerWallet: 'G_SELLER',
         })),
       ),
@@ -63,7 +64,7 @@ vi.mock('../payments/stellar.service', () => ({
 
 vi.mock('./agent.wallet', () => ({
   getAgentPublicKey: vi.fn(() => 'GAGENT'),
-  sendUsdcPayment: vi.fn(() => Promise.resolve({ txHash: 'seller-payment-hash' })),
+  sendTokenPayment: vi.fn(() => Promise.resolve({ txHash: 'seller-payment-hash' })),
 }));
 
 vi.mock('../ai/research.service', () => ({
@@ -129,8 +130,16 @@ describe('runResearchAgent Idempotency', () => {
     // verifyStellarPayment should be called ONLY ONCE
     expect(verifyStellarPayment).toHaveBeenCalledTimes(1);
 
-    // sendUsdcPayment should be called once for each SELLER_TYPE (4 times)
+    // sendTokenPayment should be called once for each SELLER_TYPE (4 times)
     // if it was called twice (the bug), it would be 8 times.
-    expect(sendUsdcPayment).toHaveBeenCalledTimes(4);
+    expect(sendTokenPayment).toHaveBeenCalledTimes(4);
+  });
+
+  it('pays each seller in the token their dataset is priced in', async () => {
+    await runResearchAgent('token aware query', 'token-tx-hash');
+
+    const tokens = vi.mocked(sendTokenPayment).mock.calls.map(([params]) => params.tokenCode);
+    // EURC and XLM datasets keep their token; the untokened dataset falls back to USDC
+    expect(tokens).toEqual(['EURC', 'XLM', 'USDC', 'USDC']);
   });
 });
