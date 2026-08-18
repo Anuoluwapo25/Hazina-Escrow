@@ -239,6 +239,22 @@ export function requireSellerReadAuth(req: Request, res: Response, next: NextFun
   next();
 }
 
+/**
+ * Attaches seller claims when a valid token is present, and does nothing when
+ * one is not. For routes that are public but reveal more to the owning seller —
+ * dataset history, where anyone may read the shape of the timeline but only the
+ * seller (or a buyer with a completed purchase) may read the payloads.
+ */
+export function attachSellerAuthIfPresent(req: Request, _res: Response, next: NextFunction) {
+  const secret = process.env.SELLER_JWT_SECRET;
+  const token = getBearerToken(req.headers.authorization);
+  if (secret && token) {
+    const claims = verifySellerJwt(token, secret);
+    if (claims) req.sellerAuth = claims;
+  }
+  next();
+}
+
 /** Protects seller dashboard reads with a non-optional, expiring HS256 JWT. */
 export function requireSellerJwt(req: Request, res: Response, next: NextFunction) {
   const secret = process.env.SELLER_JWT_SECRET;

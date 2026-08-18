@@ -229,6 +229,32 @@ export const DatasetPreviewSchema = z.object({
 });
 export type DatasetPreview = z.infer<typeof DatasetPreviewSchema>;
 
+/** One immutable version of a dataset payload (#600). Metadata only — no payload. */
+export const SnapshotMetaSchema = z.object({
+  id: z.string(),
+  datasetId: z.string(),
+  contentHash: z.string(),
+  validFrom: z.string(),
+  validTo: z.string().nullable(),
+  byteSize: z.number(),
+  rawByteSize: z.number(),
+  observations: z.number(),
+  lastObservedAt: z.string(),
+  providerRunId: z.string().nullish(),
+  createdAt: z.string(),
+});
+
+export const DatasetHistorySchema = z.object({
+  datasetId: z.string(),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+  snapshots: z.array(SnapshotMetaSchema).catch([]),
+  changeFrequency: z.array(z.object({ date: z.string(), changes: z.number() })).catch([]),
+});
+export type SnapshotMeta = z.infer<typeof SnapshotMetaSchema>;
+export type DatasetHistory = z.infer<typeof DatasetHistorySchema>;
+
 export const TransactionSchema = z.object({
   id: z.string(),
   datasetId: z.string(),
@@ -421,6 +447,16 @@ export const api = {
     request<{ success: boolean; preview: unknown }>(
       `${getApiBaseUrl()}/datasets/${id}/preview`,
     ).then(r => parseApiResponse(DatasetPreviewSchema, r.preview)),
+
+  getDatasetHistory: (id: string, params?: { limit?: number; days?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.days) searchParams.append('days', params.days.toString());
+    const query = searchParams.toString();
+    return request<unknown>(
+      `${getApiBaseUrl()}/datasets/${id}/history${query ? `?${query}` : ''}`,
+    ).then(r => parseApiResponse(DatasetHistorySchema, r));
+  },
 
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(

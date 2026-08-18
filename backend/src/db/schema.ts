@@ -31,6 +31,7 @@ export const datasets = pgTable(
     live: boolean('live').notNull().default(false),
     lastRefreshedAt: text('last_refreshed_at'),
     tags: text('tags'),
+    snapshotPolicy: text('snapshot_policy'),
   },
   table => ({
     typeIdx: index('datasets_type_idx').on(table.type),
@@ -63,6 +64,7 @@ export const transactions = pgTable('transactions', {
   verifiedAt: text('verified_at'),
   deliveredAt: text('delivered_at'),
   escrowId: integer('escrow_id'),
+  snapshotId: text('snapshot_id'),
   timestamp: text('timestamp').notNull(),
 });
 
@@ -95,6 +97,41 @@ export const payoutFailures = pgTable('payout_failures', {
   updatedAt: text('updated_at').notNull(),
 });
 
+/**
+ * Immutable, content-addressed history of every dataset payload (#600).
+ *
+ * A snapshot owns a half-open validity interval `[valid_from, valid_to)`; the
+ * single row with `valid_to IS NULL` is the payload that is live right now. Two
+ * consecutive refreshes that produce the same `content_hash` never create a
+ * second row — the existing one records another observation instead.
+ */
+export const datasetSnapshots = pgTable(
+  'dataset_snapshots',
+  {
+    id: text('id').primaryKey(),
+    datasetId: text('dataset_id').notNull(),
+    contentHash: text('content_hash').notNull(),
+    payload: text('payload').notNull(),
+    encoding: text('encoding').notNull().default('gzip+base64'),
+    validFrom: text('valid_from').notNull(),
+    validTo: text('valid_to'),
+    byteSize: integer('byte_size').notNull(),
+    rawByteSize: integer('raw_byte_size').notNull(),
+    observations: integer('observations').notNull().default(1),
+    lastObservedAt: text('last_observed_at').notNull(),
+    providerRunId: text('provider_run_id'),
+    createdAt: text('created_at').notNull(),
+  },
+  table => ({
+    datasetValidFromIdx: index('dataset_snapshots_dataset_valid_from_idx').on(
+      table.datasetId,
+      table.validFrom,
+    ),
+    contentHashIdx: index('dataset_snapshots_content_hash_idx').on(table.contentHash),
+    currentIdx: index('dataset_snapshots_current_idx').on(table.datasetId, table.validTo),
+  }),
+);
+
 // ── SQLite tables (used when DATABASE_URL is not postgres) ───────────────────
 
 export const datasetsSqlite = sqliteTable(
@@ -119,6 +156,7 @@ export const datasetsSqlite = sqliteTable(
     live: sqliteInteger('live').notNull().default(0),
     lastRefreshedAt: sqliteText('last_refreshed_at'),
     tags: sqliteText('tags'),
+    snapshotPolicy: sqliteText('snapshot_policy'),
   },
   table => ({
     typeIdx: sqliteIndex('datasets_type_idx').on(table.type),
@@ -151,6 +189,7 @@ export const transactionsSqlite = sqliteTable('transactions', {
   verifiedAt: sqliteText('verified_at'),
   deliveredAt: sqliteText('delivered_at'),
   escrowId: sqliteInteger('escrow_id'),
+  snapshotId: sqliteText('snapshot_id'),
   timestamp: sqliteText('timestamp').notNull(),
 });
 
@@ -179,3 +218,31 @@ export const payoutFailuresSqlite = sqliteTable('payout_failures', {
   createdAt: sqliteText('created_at').notNull(),
   updatedAt: sqliteText('updated_at').notNull(),
 });
+
+/** SQLite mirror of {@link datasetSnapshots}. */
+export const datasetSnapshotsSqlite = sqliteTable(
+  'dataset_snapshots',
+  {
+    id: sqliteText('id').primaryKey(),
+    datasetId: sqliteText('dataset_id').notNull(),
+    contentHash: sqliteText('content_hash').notNull(),
+    payload: sqliteText('payload').notNull(),
+    encoding: sqliteText('encoding').notNull().default('gzip+base64'),
+    validFrom: sqliteText('valid_from').notNull(),
+    validTo: sqliteText('valid_to'),
+    byteSize: sqliteInteger('byte_size').notNull(),
+    rawByteSize: sqliteInteger('raw_byte_size').notNull(),
+    observations: sqliteInteger('observations').notNull().default(1),
+    lastObservedAt: sqliteText('last_observed_at').notNull(),
+    providerRunId: sqliteText('provider_run_id'),
+    createdAt: sqliteText('created_at').notNull(),
+  },
+  table => ({
+    datasetValidFromIdx: sqliteIndex('dataset_snapshots_dataset_valid_from_idx').on(
+      table.datasetId,
+      table.validFrom,
+    ),
+    contentHashIdx: sqliteIndex('dataset_snapshots_content_hash_idx').on(table.contentHash),
+    currentIdx: sqliteIndex('dataset_snapshots_current_idx').on(table.datasetId, table.validTo),
+  }),
+);

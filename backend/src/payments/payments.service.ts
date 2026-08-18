@@ -19,6 +19,7 @@ import {
 } from '../common/storage';
 import { Sentry } from '../common/sentry';
 import { sendSellerNotificationEmail } from '../notifications/email.service';
+import { recordDatasetSnapshot } from '../snapshots/snapshots.service';
 
 export interface DeliveryResult {
   success: boolean;
@@ -66,6 +67,23 @@ export async function deliverVerifiedPayment(params: {
   const sellerAmount = sellerShare(dataset.pricePerQuery);
   const platformFee = computePlatformFee(dataset.pricePerQuery);
 
+  // Pin the exact snapshot this buyer was served (#600). Without it a later
+  // refresh overwrites the row and nobody can reconstruct what was sold; with
+  // it the purchase stays auditable and compaction is forbidden from ever
+  // deleting that snapshot. History must never block a delivery, so a failure
+  // here is logged and the sale proceeds.
+  let snapshotId: string | undefined;
+  try {
+    const recorded = await recordDatasetSnapshot(dataset.id, dataset.data);
+    snapshotId = recorded.snapshot.id;
+  } catch (snapshotErr) {
+    logger.error(
+      `[Escrow] Could not pin snapshot for txHash=${txHash} dataset=${dataset.id}: ${
+        snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr)
+      }`,
+    );
+  }
+
   await updateDataset(dataset.id, {
     queriesServed: dataset.queriesServed + 1,
     totalEarned: parseFloat((dataset.totalEarned + sellerAmount).toFixed(4)),
@@ -79,6 +97,7 @@ export async function deliverVerifiedPayment(params: {
     aiSummary: summaryResult.summary,
     sellerPaid: true,
     sellerAmount,
+    snapshotId,
   });
 
   transactionEventEmitter.updateTransactionStatus(transactionId, dataset.id, 'completed', {
