@@ -2,6 +2,7 @@ import { getAllDatasets, updateDataset, type Dataset } from '../common/storage';
 import { getProviderById, getProviderByType } from './registry';
 import { logger } from '../lib/logger';
 import type { ProviderSnapshot } from './provider.types';
+import { auditDataset, canAudit } from '../audit/auditor';
 
 export interface RefreshResult {
   datasetId: string;
@@ -47,6 +48,17 @@ export async function refreshDataset(dataset: Dataset): Promise<RefreshResult> {
       live: true,
       lastRefreshedAt: snapshot.fetchedAt,
     });
+
+    // Re-audit after refresh (non-blocking, respects cost cap)
+    if (canAudit()) {
+      auditDataset({
+        datasetId: dataset.id,
+        triggeredBy: 'refresh',
+      }).catch(err => {
+        logger.error(`[Audit] Post-refresh audit failed for ${dataset.id}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+
     return { datasetId: dataset.id, provider: provider.id, live: snapshot.live, ok: true };
   } catch (err) {
     logger.error(

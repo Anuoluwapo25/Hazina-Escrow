@@ -320,6 +320,56 @@ export const domainMetrics = {
       service: tags.service,
     });
   },
+
+  // ============= AUDIT METRICS =============
+  /**
+   * Track completed audit runs
+   * @param tags.datasetType - Type of dataset
+   * @param tags.overallScore - Final quality score (0-1)
+   * @param tags.triggeredBy - What triggered the audit
+   * @param tags.usedLlm - Whether LLM judge was used
+   */
+  auditCompleted(tags: {
+    datasetType: string;
+    overallScore: number;
+    triggeredBy: string;
+    usedLlm: boolean;
+  }) {
+    incrementMetric('audit.completed', 1, {
+      dataset_type: tags.datasetType,
+      triggered_by: tags.triggeredBy,
+      used_llm: tags.usedLlm,
+    });
+    incrementMetric('audit.score', tags.overallScore, {
+      dataset_type: tags.datasetType,
+    });
+  },
+
+  /**
+   * Track LLM judge completion
+   * @param tags.datasetType - Type of dataset
+   * @param tags.tokensUsed - Tokens consumed
+   */
+  auditJudgeCompleted(tags: { datasetType: string; tokensUsed: number }) {
+    incrementMetric('audit.judge.completed', 1, {
+      dataset_type: tags.datasetType,
+    });
+    incrementMetric('audit.judge.tokens', tags.tokensUsed, {
+      dataset_type: tags.datasetType,
+    });
+  },
+
+  /**
+   * Track audit appeals
+   * @param tags.datasetType - Type of dataset
+   * @param tags.status - 'completed' or 'denied'
+   */
+  auditAppeal(tags: { datasetType: string; status: 'completed' | 'denied' }) {
+    incrementMetric('audit.appeal', 1, {
+      dataset_type: tags.datasetType,
+      status: tags.status,
+    });
+  },
 };
 
 export function initializeDatadog(): void {

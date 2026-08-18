@@ -6,6 +6,7 @@ import { ShoppingCart, TrendingUp, User, Zap, Clock, ImageOff, Star, Radio } fro
 import clsx from 'clsx';
 import { DatasetMeta } from '../../lib/api';
 import { truncateAddress, formatUSDC, getTypeMeta, formatTimeAgo } from '../../lib/utils';
+import { QualityScoreBadge } from './QualityScoreBadge';
 
 import { useI18n } from '../../i18n';
 
@@ -86,6 +87,13 @@ export default function DatasetCard({ dataset, onBuy }: Props) {
               <Radio className="w-3 h-3 animate-pulse" />
               {t('marketplace.live.badge')}
             </span>
+          </div>
+        )}
+
+        {/* Quality score badge */}
+        {!dataset.live && (
+          <div className="absolute top-4 right-4 z-10">
+            <QualityScoreBadge auditReport={dataset.auditReport} compact />
           </div>
         )}
       </div>

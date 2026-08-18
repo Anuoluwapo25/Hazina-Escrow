@@ -170,6 +170,27 @@ export interface SellerAnalytics {
   topBuyers: { wallet: string; count: number }[];
 }
 
+export const AuditReportSchema = z.object({
+  datasetId: z.string(),
+  version: z.number(),
+  overallScore: z.number(),
+  checks: z.array(
+    z.object({
+      check: z.string(),
+      passed: z.boolean(),
+      score: z.number(),
+      reason: z.string(),
+      details: z.record(z.string(), z.unknown()).optional(),
+    }),
+  ),
+  auditorVersion: z.string(),
+  createdAt: z.string(),
+  auditedBy: z.string(),
+  appealCount: z.number().optional(),
+  tokensSpent: z.number().optional(),
+});
+export type AuditReport = z.infer<typeof AuditReportSchema>;
+
 export const DatasetMetaSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -190,6 +211,7 @@ export const DatasetMetaSchema = z.object({
 
   ratings: z.object({ score: z.number(), count: z.number() }).optional(),
   priceHistory: z.array(z.object({ price: z.number(), changedAt: z.string() })).optional(),
+  auditReport: AuditReportSchema.nullable().optional(),
 });
 
 export const DatasetDetailSchema = DatasetMetaSchema.extend({
@@ -577,6 +599,26 @@ export const api = {
       method: 'DELETE',
       headers: authHeaders(),
     }),
+
+  getAuditReport: (datasetId: string) =>
+    request<{ success: boolean; auditReport: AuditReport | null }>(
+      `${getApiBaseUrl()}/audit/report/${datasetId}`,
+    ),
+
+  requestAuditAppeal: (datasetId: string, reason?: string) =>
+    request<{ success: boolean; report: AuditReport }>(
+      `${getApiBaseUrl()}/audit/appeal/${datasetId}`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ reason }),
+      },
+    ),
+
+  getAuditStatus: () =>
+    request<{ success: boolean; queue: { active: number; queued: number; dailySpendUsd: number }; canAudit: boolean }>(
+      `${getApiBaseUrl()}/audit/status`,
+    ),
 };
 
 export function __resetRequestThrottleForTests() {

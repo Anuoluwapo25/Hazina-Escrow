@@ -18,6 +18,7 @@ import {
 import { requireSellerJwt, requireSellerMutationAuth } from '../common/auth.middleware';
 import { domainMetrics } from '../common/datadog';
 import { notifySeller } from '../webhooks/webhook.service';
+import { auditDataset } from '../audit/auditor';
 
 const MAX_DATA_KB = 500;
 const MAX_DATA_BYTES = MAX_DATA_KB * 1024;
@@ -163,10 +164,13 @@ function getSampleSize(data: Record<string, unknown>): number {
 
 function withoutRawData(dataset: Dataset) {
   const { data: _data, ...meta } = dataset;
+  const ratings = meta.ratings ?? { score: 0, count: 0, reviews: [] };
+  const auditReport = (ratings as unknown as Record<string, unknown>)?.auditReport ?? null;
   return {
     ...meta,
     active: meta.active !== false,
-    ratings: meta.ratings ?? { score: 0, count: 0 },
+    ratings: { score: ratings.score ?? 0, count: ratings.count ?? 0 },
+    auditReport,
     priceHistory: meta.priceHistory ?? [
       { price: dataset.pricePerQuery, changedAt: dataset.createdAt },
     ],
@@ -765,6 +769,18 @@ datasetsRouter.post(
     };
 
     await addDataset(dataset);
+
+    // Trigger async audit (non-blocking)
+    auditDataset({
+      datasetId: dataset.id,
+      triggeredBy: 'publish',
+      sellerWallet: dataset.sellerWallet,
+    }).catch(err => {
+      // Audit failures should not block dataset creation
+      if (process.env.NODE_ENV !== 'test') {
+        console.error('[Audit] Post-create audit failed:', err);
+      }
+    });
 
     // Track dataset creation
     domainMetrics.datasetCreated({
