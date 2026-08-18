@@ -456,6 +456,40 @@ export async function getEscrow(escrowId: number): Promise<EscrowState> {
 }
 
 /**
+ * Read the contract's escrow counter via read-only simulation. Escrow ids are
+ * assigned sequentially from 0, so this is also the exclusive upper bound for
+ * a full `get_escrow` sweep (used by Sentinel's solvency reconciliation).
+ */
+export async function getEscrowCount(): Promise<number> {
+  const contractId = getEscrowContractId();
+  const admin = getAgentPublicKey();
+  const sourceAddr = admin ?? contractId;
+
+  const rpc = getRpc();
+  const contract = new StellarSdk.Contract(contractId);
+  const account = await sorobanBreaker
+    .execute(() => rpc.getAccount(sourceAddr))
+    .catch(() => new StellarSdk.Account(sourceAddr, '0'));
+
+  const tx = new StellarSdk.TransactionBuilder(account, {
+    fee: StellarSdk.BASE_FEE,
+    networkPassphrase: getNetworkPassphrase(),
+  })
+    .addOperation(contract.call('get_escrow_count'))
+    .setTimeout(30)
+    .build();
+
+  const sim = await sorobanBreaker.execute(() => rpc.simulateTransaction(tx));
+  if (!StellarSdk.rpc.Api.isSimulationSuccess(sim) || !sim.result?.retval) {
+    const rawDetail = JSON.stringify(sim);
+    logger.error(`[Escrow] get_escrow_count() simulation failed: ${rawDetail}`);
+    throwSanitized(rawDetail, 'get_escrow_count() simulation failed — please try again');
+  }
+
+  return Number(StellarSdk.scValToNative(sim.result.retval));
+}
+
+/**
  * Decode a contract EscrowRecord ScVal into an EscrowState. The struct is
  * returned as a map keyed by field name; scValToNative gives us a plain object.
  */

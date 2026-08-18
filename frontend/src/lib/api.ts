@@ -170,6 +170,19 @@ export interface SellerAnalytics {
   topBuyers: { wallet: string; count: number }[];
 }
 
+/** Sentinel's public transparency endpoint — see docs/MONITORING.md. */
+export interface SolvencyReport {
+  tokens: {
+    token: string;
+    onChainBalance: string;
+    openLiability: string;
+    delta: string;
+  }[];
+  openEscrowCount: number;
+  lastCheckedLedger: number;
+  checkedAt: string;
+}
+
 export const DatasetMetaSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -613,6 +626,17 @@ export const api = {
       method: 'DELETE',
       headers: authHeaders(),
     }),
+
+  // ── Sentinel (#599) ───────────────────────────────────────────────────────
+
+  /** Public: total locked on-chain vs. open escrow liability, per token. */
+  getSolvency: () =>
+    request<{ success: boolean } & SolvencyReport>(`${getApiBaseUrl()}/solvency`).then(r => ({
+      tokens: r.tokens,
+      openEscrowCount: r.openEscrowCount,
+      lastCheckedLedger: r.lastCheckedLedger,
+      checkedAt: r.checkedAt,
+    })),
 };
 
 export function __resetRequestThrottleForTests() {
