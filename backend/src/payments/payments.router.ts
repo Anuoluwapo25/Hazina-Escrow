@@ -25,6 +25,8 @@ import {
   runDuePayoutRetries,
   scheduleRetrySweep,
 } from './payout-retry.service';
+import { checkDestinationReady, classifyDestinationFailure } from './trustline.service';
+import { settleAsClaimableBalance } from './claimable.service';
 import { sendTokenPayment } from '../agent/agent.wallet';
 import { isEscrowContractConfigured, getEscrowContractId } from '../lib/stellar.config';
 import { releaseEscrow } from '../lib/escrow.client';
@@ -375,29 +377,68 @@ paymentsRouter.post(
       // Sellers are paid in the same token the buyer paid in.
       const sellerAmount = sellerShare(dataset.pricePerQuery);
       const tokenCode = dataset.paymentToken || 'USDC';
-      try {
-        const payment = await sendTokenPayment({
-          destinationAddress: dataset.sellerWallet,
-          amount: sellerAmount.toFixed(7),
-          memo: `hazina-${dataset.id.slice(0, 10)}`,
-          tokenCode,
-        });
-        console.log(
-          `[Escrow] Paid seller ${sellerAmount} ${tokenCode} → ${dataset.sellerWallet} (${payment.txHash})`,
-        );
-      } catch (payErr) {
+
+      const preflight = await checkDestinationReady(dataset.sellerWallet, tokenCode).catch(
+        // A preflight check failing (e.g. Horizon timeout) must not block the
+        // payout attempt itself — fall through and let sendTokenPayment try.
+        () => ({ ready: true as const }),
+      );
+
+      if (!preflight.ready) {
         console.warn(
-          '[Escrow] Seller payment failed (data still delivered):',
-          payErr instanceof Error ? payErr.message : payErr,
+          `[Escrow] Seller ${dataset.sellerWallet} cannot receive ${tokenCode} directly ` +
+            `(${preflight.reason}) — settling as a claimable balance`,
         );
-        await recordPayoutFailure({
+        await settleAsClaimableBalance({
           datasetId: dataset.id,
           sellerWallet: dataset.sellerWallet,
           buyerTxHash: txHash,
-          intendedAmount: sellerAmount,
-          paymentToken: tokenCode,
-          error: payErr instanceof Error ? payErr.message : String(payErr),
+          amount: sellerAmount,
+          tokenCode,
+          notificationEmail: dataset.notificationEmail,
         });
+      } else {
+        try {
+          const payment = await sendTokenPayment({
+            destinationAddress: dataset.sellerWallet,
+            amount: sellerAmount.toFixed(7),
+            memo: `hazina-${dataset.id.slice(0, 10)}`,
+            tokenCode,
+          });
+          console.log(
+            `[Escrow] Paid seller ${sellerAmount} ${tokenCode} → ${dataset.sellerWallet} (${payment.txHash})`,
+          );
+        } catch (payErr) {
+          console.warn(
+            '[Escrow] Seller payment failed (data still delivered):',
+            payErr instanceof Error ? payErr.message : payErr,
+          );
+
+          // Preflight passed but the live submit still bounced with a
+          // destination-related error (stale cache, race with account
+          // deletion, ...) — route to the same claimable-balance fallback
+          // instead of the DLQ, since a retry would fail identically.
+          const destinationFailure = classifyDestinationFailure(payErr);
+          if (destinationFailure) {
+            await settleAsClaimableBalance({
+              datasetId: dataset.id,
+              sellerWallet: dataset.sellerWallet,
+              buyerTxHash: txHash,
+              amount: sellerAmount,
+              tokenCode,
+              notificationEmail: dataset.notificationEmail,
+            });
+          } else {
+            await recordPayoutFailure({
+              datasetId: dataset.id,
+              sellerWallet: dataset.sellerWallet,
+              buyerTxHash: txHash,
+              intendedAmount: sellerAmount,
+              paymentToken: tokenCode,
+              error: payErr instanceof Error ? payErr.message : String(payErr),
+            });
+          }
+        }
       }
 
       if (result.pendingDelivery) {

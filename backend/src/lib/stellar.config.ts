@@ -119,6 +119,20 @@ export function getTokenByCode(code: string): StellarToken | null {
   return SUPPORTED_TOKENS[code] || null;
 }
 
+// ── Claimable balance payout fallback ────────────────────────────────────────
+
+/**
+ * Seconds after which Hazina's treasury claimant predicate on a seller
+ * payout claimable balance becomes claimable, letting unclaimed funds be
+ * swept back instead of being stranded on-chain forever. Default 180 days.
+ * Read per-call so tests can override it without re-importing the module.
+ */
+export const getClaimReclaimSeconds = (): number => {
+  const raw = process.env.CLAIM_RECLAIM_SECONDS;
+  const parsed = raw ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 180 * 24 * 60 * 60;
+};
+
 export const getNetworkPassphrase = () => {
   if (STELLAR_NETWORK === 'mainnet') {
     return 'Public Global Stellar Network ; September 2015';

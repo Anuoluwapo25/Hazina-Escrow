@@ -10,6 +10,8 @@ import SellPage from './pages/SellPage';
 import DashboardPage from './pages/DashboardPage';
 import AgentPage from './pages/AgentPage';
 import TermsPage from './pages/TermsPage';
+import ClaimPage from './pages/ClaimPage';
+import AdminClaimablesPage from './pages/AdminClaimablesPage';
 import { useI18n } from './i18n';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/ui/ToastProvider';
@@ -98,6 +100,22 @@ export default function App() {
               element={
                 <RouteBoundary label="Agent">
                   <AgentPage />
+                </RouteBoundary>
+              }
+            />
+            <Route
+              path="/claim"
+              element={
+                <RouteBoundary label="Claim">
+                  <ClaimPage />
+                </RouteBoundary>
+              }
+            />
+            <Route
+              path="/admin/claimables"
+              element={
+                <RouteBoundary label="Admin claimables">
+                  <AdminClaimablesPage />
                 </RouteBoundary>
               }
             />

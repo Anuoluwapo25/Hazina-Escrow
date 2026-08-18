@@ -33,6 +33,8 @@ import {
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
+import { claimableRouter } from './payments/claimable.router';
+import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
 import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
@@ -290,6 +292,9 @@ v1Router.use('/payments', requireApiKey, paymentsRouter);
 // admin release/refund/resolve endpoints self-protect with requireAdminKey.
 v1Router.use('/payments', escrowRouter);
 v1Router.use('/backups', backupRouter);
+// Claimable-balance routes self-protect per-route (requireSellerReadAuth /
+// requireAdminKey) since the seller-facing endpoints are scoped by wallet.
+v1Router.use('/', claimableRouter);
 
 app.use('/api/v1', v1Router);
 
@@ -309,6 +314,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 app.use('/api/datasets', datasetsRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
+app.use('/api', claimableRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
@@ -349,6 +355,7 @@ app.use(
 startDeliveryRetryWorker();
 startSellerNotificationRetryWorker();
 startDataRefreshWorker();
+startClaimableSweepWorker();
 
 // Create HTTP server and attach Express app
 const server = http.createServer(app);
@@ -387,6 +394,7 @@ process.on('SIGTERM', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
+  stopClaimableSweepWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -398,6 +406,7 @@ process.on('SIGINT', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
+  stopClaimableSweepWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');

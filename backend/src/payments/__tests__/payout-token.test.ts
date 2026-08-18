@@ -37,6 +37,11 @@ vi.mock('../../agent/agent.wallet', () => ({
   getAgentPublicKey: vi.fn(() => 'GAGENT'),
 }));
 
+vi.mock('../trustline.service', () => ({
+  checkDestinationReady: vi.fn(() => Promise.resolve({ ready: true })),
+  classifyDestinationFailure: vi.fn(() => null),
+}));
+
 vi.mock('../payout-retry.service', async importOriginal => {
   const actual = await importOriginal<typeof import('../payout-retry.service')>();
   return {
