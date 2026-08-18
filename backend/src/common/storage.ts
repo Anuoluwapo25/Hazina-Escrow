@@ -61,13 +61,7 @@ export interface Transaction {
   amount: number;
   paymentToken?: string;
   status?:
-    | 'pending'
-    | 'verifying'
-    | 'verified'
-    | 'completed'
-    | 'failed'
-    | 'refunded'
-    | 'delivery_failed';
+    'pending' | 'verifying' | 'verified' | 'completed' | 'failed' | 'refunded' | 'delivery_failed';
   deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
@@ -104,10 +98,7 @@ export interface WebhookSubscription {
   createdAt: string;
 }
 export type PayoutFailureStatus =
-  | 'pending_retry'
-  | 'manual_review_needed'
-  | 'paid'
-  | 'settled_as_claimable';
+  'pending_retry' | 'manual_review_needed' | 'paid' | 'settled_as_claimable';
 export interface PayoutFailure {
   id: string;
   datasetId: string;
