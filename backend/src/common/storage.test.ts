@@ -32,7 +32,7 @@ async function seedStore(overrides?: Partial<Store>): Promise<void> {
     transactions: [],
     webhooks: [],
     payoutFailures: [],
-  claimableBalances: [],
+    claimableBalances: [],
   };
   await writeStore({
     ...base,
@@ -46,7 +46,13 @@ describe('storage', () => {
   });
 
   afterEach(async () => {
-    await writeStore({ datasets: [], transactions: [], webhooks: [], payoutFailures: [], claimableBalances: [] });
+    await writeStore({
+      datasets: [],
+      transactions: [],
+      webhooks: [],
+      payoutFailures: [],
+      claimableBalances: [],
+    });
   });
 
   it('txHashUsed returns true only for existing hashes', async () => {

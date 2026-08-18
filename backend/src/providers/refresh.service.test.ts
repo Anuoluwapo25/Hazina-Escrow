@@ -41,7 +41,7 @@ async function seed(): Promise<void> {
     transactions: [],
     webhooks: [],
     payoutFailures: [],
-  claimableBalances: [],
+    claimableBalances: [],
   };
   await writeStore(store);
 }

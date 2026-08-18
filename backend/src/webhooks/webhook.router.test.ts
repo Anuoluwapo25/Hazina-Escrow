@@ -74,7 +74,7 @@ vi.mock('../common/storage', () => ({
     transactions: [],
     webhooks: [],
     payoutFailures: [],
-  claimableBalances: [],
+    claimableBalances: [],
   })),
   invalidateCache: vi.fn(),
 }));

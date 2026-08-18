@@ -14,7 +14,11 @@ vi.mock('@stellar/stellar-sdk', () => {
   };
 });
 
-import { checkDestinationReady, classifyDestinationFailure, __clearPreflightCache } from './trustline.service';
+import {
+  checkDestinationReady,
+  classifyDestinationFailure,
+  __clearPreflightCache,
+} from './trustline.service';
 import { getCircuitBreaker } from '../common/circuit-breaker';
 
 describe('checkDestinationReady', () => {
