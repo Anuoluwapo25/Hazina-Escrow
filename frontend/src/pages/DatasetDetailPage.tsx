@@ -18,6 +18,7 @@ import { api, DatasetDetail, DatasetPreview } from '../lib/api';
 import { formatTimeAgo, formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
 import QueryModal from '../components/ui/QueryModal';
 import { Skeleton } from '../components/ui/SkeletonLoader';
+import { QualityScorePanel } from '../components/ui/QualityScoreBadge';
 import { useI18n } from '../i18n';
 
 function Stars({ value, onSelect }: { value: number; onSelect?: (value: number) => void }) {
@@ -275,6 +276,7 @@ export default function DatasetDetailPage() {
           </article>
 
           <aside className="space-y-6 lg:sticky lg:top-28 self-start">
+            <QualityScorePanel auditReport={dataset.auditReport ?? null} />
             <div className="glass-card p-6">
               <p className="text-sm text-muted mb-1">Seller</p>
               <p className="font-mono text-foreground mb-5">

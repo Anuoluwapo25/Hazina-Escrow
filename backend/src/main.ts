@@ -49,6 +49,7 @@ import {
 } from './common/rateLimit';
 import { initializeWebSocketServer } from './websocket/ws-server';
 import { startDataRefreshWorker, stopDataRefreshWorker } from './providers/refresh.scheduler';
+import { auditRouter } from './audit/audit.router';
 import { HORIZON_URL } from './lib/stellar.config';
 import { createCorsOptions } from './common/cors';
 
@@ -283,6 +284,7 @@ process.on('uncaughtException', (err: Error) => {
 const v1Router = express.Router();
 
 v1Router.use('/datasets', datasetsRouter);
+v1Router.use('/audit', auditRouter);
 v1Router.use('/agent', requireApiKey, agentRouter);
 v1Router.use('/webhooks', webhooksRouter);
 v1Router.use('/payments', requireApiKey, paymentsRouter);
