@@ -21,9 +21,12 @@ const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_GLOBAL_MAX_REQUESTS = 200;
 const DEFAULT_PAYMENTS_MAX_REQUESTS = 10;
 const DEFAULT_AGENT_MAX_REQUESTS = 5;
+// Each request here can trigger a Launchtube-sponsored deploy/submit — cap it
+// tighter than the payments tier so a burst can't drain Hazina's fee budget.
+const DEFAULT_PASSKEY_MAX_REQUESTS = 5;
 
 export function getRateLimitConfig(
-  tier: 'global' | 'payments' | 'agent',
+  tier: 'global' | 'payments' | 'agent' | 'passkey',
   overrides: RateLimitOptions = {},
 ): ResolvedRateLimitConfig {
   const windowMs =
@@ -34,14 +37,18 @@ export function getRateLimitConfig(
       ? DEFAULT_GLOBAL_MAX_REQUESTS
       : tier === 'payments'
         ? DEFAULT_PAYMENTS_MAX_REQUESTS
-        : DEFAULT_AGENT_MAX_REQUESTS;
+        : tier === 'agent'
+          ? DEFAULT_AGENT_MAX_REQUESTS
+          : DEFAULT_PASSKEY_MAX_REQUESTS;
 
   const envKey =
     tier === 'global'
       ? 'RATE_LIMIT_MAX'
       : tier === 'payments'
         ? 'RATE_LIMIT_PAYMENTS_MAX'
-        : 'RATE_LIMIT_AGENT_MAX';
+        : tier === 'agent'
+          ? 'RATE_LIMIT_AGENT_MAX'
+          : 'RATE_LIMIT_PASSKEY_MAX';
 
   const maxRequests =
     overrides.maxRequests ?? parsePositiveInt(process.env[envKey], defaultMaxRequests);
@@ -102,6 +109,9 @@ export const createPaymentsRateLimitMiddleware = (options: RateLimitOptions = {}
 
 export const createAgentRateLimitMiddleware = (options: RateLimitOptions = {}) =>
   createRateLimitMiddleware(getRateLimitConfig('agent', options));
+
+export const createPasskeyRateLimitMiddleware = (options: RateLimitOptions = {}) =>
+  createRateLimitMiddleware(getRateLimitConfig('passkey', options));
 
 // Export a default instance for convenience
 export const rateLimitMiddleware = createGlobalRateLimitMiddleware();
