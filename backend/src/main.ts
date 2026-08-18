@@ -33,6 +33,8 @@ import {
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
+import { sentinelRouter } from './sentinel/router';
+import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
 import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
@@ -297,6 +299,8 @@ v1Router.use('/payments', requireApiKey, paymentsRouter);
 // admin release/refund/resolve endpoints self-protect with requireAdminKey.
 v1Router.use('/payments', escrowRouter);
 v1Router.use('/backups', backupRouter);
+// Sentinel self-protects per-route: /solvency is public, /sentinel/alerts* need requireAdminKey.
+v1Router.use('/', sentinelRouter);
 
 app.use('/api/v1', v1Router);
 
@@ -321,6 +325,7 @@ app.use('/api/agent', agentRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api', backupRouter);
+app.use('/api', sentinelRouter);
 
 // Global error handling middleware — Issue #283 (standard error shape)
 app.use(

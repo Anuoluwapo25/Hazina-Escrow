@@ -12,6 +12,23 @@ services:
       - /app/node_modules
       - ./data:/app/data
 
+  # Escrow contract watcher — deliberately its own container, not a replica
+  # of `backend`, so a compromised or crashed API host can't silently take
+  # the watcher down with it. See docs/MONITORING.md. Set SENTINEL_ENABLED=true
+  # and ESCROW_CONTRACT_ID in backend/.env to arm it.
+  sentinel:
+    build:
+      context: ./backend
+      target: sentinel-dev
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - ./data:/app/data
+
   frontend:
     build:
       context: ./frontend

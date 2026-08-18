@@ -5,7 +5,14 @@ import { drizzle as drizzleSqlite } from 'drizzle-orm/better-sqlite3';
 import { migrate as migrateSqlite } from 'drizzle-orm/better-sqlite3/migrator';
 import { Pool } from 'pg';
 import * as pgSchema from './schema';
-import { datasetsSqlite, transactionsSqlite, webhooksSqlite, payoutFailuresSqlite } from './schema';
+import {
+  datasetsSqlite,
+  transactionsSqlite,
+  webhooksSqlite,
+  payoutFailuresSqlite,
+  sentinelCursorSqlite,
+  sentinelAlertsSqlite,
+} from './schema';
 
 const databaseUrl = process.env.DATABASE_URL || 'file:./sqlite.db';
 
@@ -28,6 +35,8 @@ const db = (() => {
         transactions: transactionsSqlite,
         webhooks: webhooksSqlite,
         payoutFailures: payoutFailuresSqlite,
+        sentinelCursor: sentinelCursorSqlite,
+        sentinelAlerts: sentinelAlertsSqlite,
       },
     });
     migrateSqlite(sqliteDb, { migrationsFolder: path.resolve(__dirname, '../../drizzle') });
