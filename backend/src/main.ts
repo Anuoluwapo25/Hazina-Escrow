@@ -33,6 +33,7 @@ import {
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
+import { wellKnownRouter } from './wellknown/x402.router';
 import { sentinelRouter } from './sentinel/router';
 import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
 import { validateAgentWallet } from './agent/agent.wallet';
@@ -280,6 +281,10 @@ process.on('uncaughtException', (err: Error) => {
     Sentry.captureException(err);
   });
 });
+
+// RFC 8615 well-known URIs are always root-relative, never under /api — mount
+// before the versioned API namespace and the /api legacy-redirect middleware.
+app.use(wellKnownRouter);
 
 // Routes under versioned API namespace.
 const v1Router = express.Router();
