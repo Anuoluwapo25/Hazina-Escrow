@@ -6,7 +6,7 @@ import {
 } from '@stellar/freighter-api';
 import { getEnv } from './env';
 
-export type StellarWalletProvider = 'freighter' | 'albedo';
+export type StellarWalletProvider = 'freighter' | 'albedo' | 'passkey';
 
 export interface StellarPaymentRequest {
   paymentAddress: string;
@@ -49,7 +49,7 @@ function albedoNetwork() {
   return getEnv().stellarNetwork === 'public' ? 'public' : 'testnet';
 }
 
-function networkPassphrase() {
+export function networkPassphrase() {
   return albedoNetwork() === 'public' ? PUBLIC_PASSPHRASE : TESTNET_PASSPHRASE;
 }
 

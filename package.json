@@ -4,15 +4,16 @@
   "description": "Hazina Data Escrow — Web3 data marketplace on Stellar",
   "private": true,
   "scripts": {
-    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "install:all": "npm install --prefix backend && npm install --prefix frontend && npm install --prefix packages/hazina-mcp",
     "dev": "concurrently --names \"API,UI\" --prefix-colors \"yellow,cyan\" \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "dev:backend": "npm run start:dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
-    "build": "npm run build --prefix backend && npm run build --prefix frontend",
+    "dev:mcp": "npm run dev --prefix packages/hazina-mcp",
+    "build": "npm run build --prefix backend && npm run build --prefix frontend && npm run build --prefix packages/hazina-mcp",
     "prepare": "husky",
-    "format": "prettier --write \"backend/src/**/*.ts\" \"frontend/src/**/*.{ts,tsx}\"",
-    "format:check": "prettier --check \"backend/src/**/*.ts\" \"frontend/src/**/*.{ts,tsx}\"",
-    "lint": "eslint \"backend/src/**/*.{ts,tsx}\" \"frontend/src/**/*.{ts,tsx}\"",
+    "format": "prettier --write \"backend/src/**/*.ts\" \"frontend/src/**/*.{ts,tsx}\" \"packages/hazina-mcp/src/**/*.ts\"",
+    "format:check": "prettier --check \"backend/src/**/*.ts\" \"frontend/src/**/*.{ts,tsx}\" \"packages/hazina-mcp/src/**/*.ts\"",
+    "lint": "eslint \"backend/src/**/*.{ts,tsx}\" \"frontend/src/**/*.{ts,tsx}\" \"packages/hazina-mcp/src/**/*.ts\"",
     "lint:fix": "npm run lint -- --fix",
     "format:all": "prettier --check .",
     "format:write": "prettier --write .",
@@ -39,6 +40,10 @@
       "npx eslint --max-warnings=0"
     ],
     "frontend/src/**/*.{ts,tsx}": [
+      "npx prettier --write",
+      "npx eslint --max-warnings=0"
+    ],
+    "packages/hazina-mcp/src/**/*.ts": [
       "npx prettier --write",
       "npx eslint --max-warnings=0"
     ]
