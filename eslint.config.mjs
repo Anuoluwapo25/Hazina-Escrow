@@ -5,7 +5,11 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier';
 
-const sourceFiles = ['backend/src/**/*.{ts,tsx}', 'frontend/src/**/*.{ts,tsx}'];
+const sourceFiles = [
+  'backend/src/**/*.{ts,tsx}',
+  'frontend/src/**/*.{ts,tsx}',
+  'packages/hazina-mcp/src/**/*.ts',
+];
 
 export default tseslint.config(
   {
@@ -47,7 +51,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['backend/src/**/*.ts'],
+    files: ['backend/src/**/*.ts', 'packages/hazina-mcp/src/**/*.ts'],
     languageOptions: {
       globals: {
         ...globals.node,
