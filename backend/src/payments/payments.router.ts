@@ -37,6 +37,7 @@ import {
   startSellerNotificationRetryWorker,
   stopSellerNotificationRetryWorker,
 } from './payments.service';
+import { getQuote } from './quote.service';
 
 export const paymentsRouter = Router();
 
@@ -270,6 +271,48 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
       ],
     },
   });
+});
+
+/**
+ * @openapi
+ * /api/query/{id}/quote:
+ *   get:
+ *     summary: Get a payment quote for an asset conversion
+ *     description: Returns a signed quote to pay with a different Stellar asset
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sourceAsset
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Signed quote
+ *       400:
+ *         description: Bad Request
+ *       404:
+ *         description: Dataset not found
+ */
+paymentsRouter.get('/query/:id/quote', async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const sourceAsset = req.query.sourceAsset as string;
+
+  if (!sourceAsset) {
+    return res.status(400).json({ error: 'sourceAsset query parameter is required' });
+  }
+
+  try {
+    const quote = await getQuote(id, sourceAsset);
+    return res.json(quote);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return res.status(400).json({ error: msg });
+  }
 });
 
 export async function retryFailedDeliveries(): Promise<void> {

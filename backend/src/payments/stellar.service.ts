@@ -122,8 +122,8 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
 
     const paymentOps = ops.records.filter(
       op =>
-        op.type === 'payment' &&
-        (op as StellarSdk.Horizon.ServerApi.PaymentOperationRecord).to === destinationAddress,
+        (op.type === 'payment' || op.type === 'path_payment_strict_receive') &&
+        (op as StellarSdk.Horizon.ServerApi.PaymentOperationRecord | StellarSdk.Horizon.ServerApi.PathPaymentStrictReceiveOperationRecord).to === destinationAddress,
     );
 
     if (paymentOps.length === 0) {
@@ -139,7 +139,7 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
     // For XLM (native), check asset_type === 'native'
     // For USDC/EURC (tokens), match both asset_code and issuer
     const matchingOps = paymentOps.filter(op => {
-      const payOp = op as StellarSdk.Horizon.ServerApi.PaymentOperationRecord;
+      const payOp = op as StellarSdk.Horizon.ServerApi.PaymentOperationRecord | StellarSdk.Horizon.ServerApi.PathPaymentStrictReceiveOperationRecord;
 
       if (tokenCode === 'XLM') {
         return payOp.asset_type === 'native';

@@ -28,7 +28,8 @@ import { callContract, getAgentPublicKey, ContractCallError } from '../agent/age
 import { getCircuitBreaker } from '../common/circuit-breaker';
 import { PaymentError } from '../payments/stellar.service';
 import { logger } from './logger';
-import { u64ToScVal, i128ToScVal, addressToScVal, stringToScVal, boolToScVal } from './scval';
+import { u64ToScVal, i128ToScVal, addressToScVal, stringToScVal, boolToScVal, arrayToScVal } from './scval';
+import type { Quote } from '../payments/quote.service';
 
 /** Decimals used by USDC/EURC/XLM on Stellar — amounts are i128 stroops. */
 const TOKEN_DECIMALS = 7;
@@ -159,8 +160,9 @@ export async function buildLockTx(params: {
   datasetId: string;
   tokenCode?: string;
   expirySeconds?: number;
+  quote?: Quote;
 }): Promise<{ xdr: string; contractId: string }> {
-  const { buyer, seller, amount, datasetId } = params;
+  const { buyer, seller, amount, datasetId, quote } = params;
   const tokenCode = params.tokenCode ?? 'USDC';
   const expirySeconds = params.expirySeconds ?? DEFAULT_ESCROW_EXPIRY_SECONDS;
 
@@ -186,10 +188,42 @@ export async function buildLockTx(params: {
     u64ToScVal(expirySeconds),
   ];
 
-  const tx = new StellarSdk.TransactionBuilder(buyerAccount, {
+  const txBuilder = new StellarSdk.TransactionBuilder(buyerAccount, {
     fee: StellarSdk.BASE_FEE,
     networkPassphrase: getNetworkPassphrase(),
-  })
+  });
+
+  if (quote && quote.source.asset !== quote.destination.asset) {
+    const routerId = process.env.SOROSWAP_ROUTER_ID;
+    if (!routerId) throw new Error('SOROSWAP_ROUTER_ID not configured for swap');
+    const router = new StellarSdk.Contract(routerId);
+    
+    // Convert path to addresses (Assuming SACs are used)
+    const pathAddresses = quote.path.map(p => {
+      if (p === 'native') return getTokenSacAddress('XLM')!;
+      const code = p.split(':')[0];
+      return getTokenSacAddress(code) || p.split(':')[1];
+    });
+    // Add source and dest
+    const sourceAddr = quote.source.asset === 'native' ? getTokenSacAddress('XLM')! : getTokenSacAddress(quote.source.asset.split(':')[0]) || quote.source.asset.split(':')[1];
+    const destAddr = quote.destination.asset === 'native' ? getTokenSacAddress('XLM')! : getTokenSacAddress(quote.destination.asset.split(':')[0]) || quote.destination.asset.split(':')[1];
+    
+    const fullPath = [sourceAddr, ...pathAddresses, destAddr].filter(Boolean);
+
+    const swapArgs = [
+      addressToScVal(routerId), // Wait, swap_tokens_for_exact_tokens doesn't take router address as arg, but Soroban contract call doesn't need it. 
+      i128ToScVal(toStroops(parseFloat(quote.destination.amount))), // amount_out
+      i128ToScVal(toStroops(parseFloat(quote.source.maxAmount))), // amount_in_max
+      arrayToScVal(fullPath.map(p => addressToScVal(p))), // path
+      addressToScVal(buyer), // to
+      u64ToScVal(Math.floor(Date.now() / 1000) + 300) // deadline
+    ];
+    
+    // We'll use swap_tokens_for_exact_tokens to get the exact USDC amount needed for lock.
+    txBuilder.addOperation(router.call('swap_tokens_for_exact_tokens', swapArgs[1], swapArgs[2], swapArgs[3], swapArgs[4], swapArgs[5]));
+  }
+
+  const tx = txBuilder
     .addOperation(contract.call('lock', ...args))
     .setTimeout(300)
     .build();
