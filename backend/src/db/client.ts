@@ -11,6 +11,8 @@ import {
   webhooksSqlite,
   payoutFailuresSqlite,
   claimableBalancesSqlite,
+  sentinelCursorSqlite,
+  sentinelAlertsSqlite,
 } from './schema';
 
 const databaseUrl = process.env.DATABASE_URL || 'file:./sqlite.db';
@@ -35,6 +37,8 @@ const db = (() => {
         webhooks: webhooksSqlite,
         payoutFailures: payoutFailuresSqlite,
         claimableBalances: claimableBalancesSqlite,
+        sentinelCursor: sentinelCursorSqlite,
+        sentinelAlerts: sentinelAlertsSqlite,
       },
     });
     migrateSqlite(sqliteDb, { migrationsFolder: path.resolve(__dirname, '../../drizzle') });

@@ -115,6 +115,35 @@ export const claimableBalances = pgTable('claimable_balances', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const sentinelCursor = pgTable('sentinel_cursor', {
+  id: text('id').primaryKey(),
+  cursor: text('cursor'),
+  lastLedger: integer('last_ledger').notNull().default(0),
+  backfillComplete: boolean('backfill_complete').notNull().default(false),
+  lastWasmHash: text('last_wasm_hash'),
+  lastProgressAt: text('last_progress_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const sentinelAlerts = pgTable('sentinel_alerts', {
+  id: text('id').primaryKey(),
+  dedupeKey: text('dedupe_key').notNull().unique(),
+  invariant: text('invariant').notNull(),
+  severity: text('severity').notNull(),
+  status: text('status').notNull(),
+  escrowId: integer('escrow_id'),
+  txHash: text('tx_hash'),
+  ledger: integer('ledger'),
+  message: text('message').notNull(),
+  details: text('details'),
+  count: integer('count').notNull().default(1),
+  firstSeenAt: text('first_seen_at').notNull(),
+  lastSeenAt: text('last_seen_at').notNull(),
+  lastNotifiedAt: text('last_notified_at'),
+  resolvedAt: text('resolved_at'),
+  resolvedBy: text('resolved_by'),
+});
+
 // ── SQLite tables (used when DATABASE_URL is not postgres) ───────────────────
 
 export const datasetsSqlite = sqliteTable(
@@ -218,4 +247,32 @@ export const claimableBalancesSqlite = sqliteTable('claimable_balances', {
   reclaimedAt: sqliteText('reclaimed_at'),
   createdAt: sqliteText('created_at').notNull(),
   updatedAt: sqliteText('updated_at').notNull(),
+});
+export const sentinelCursorSqlite = sqliteTable('sentinel_cursor', {
+  id: sqliteText('id').primaryKey(),
+  cursor: sqliteText('cursor'),
+  lastLedger: sqliteInteger('last_ledger').notNull().default(0),
+  backfillComplete: sqliteInteger('backfill_complete').notNull().default(0),
+  lastWasmHash: sqliteText('last_wasm_hash'),
+  lastProgressAt: sqliteText('last_progress_at').notNull(),
+  updatedAt: sqliteText('updated_at').notNull(),
+});
+
+export const sentinelAlertsSqlite = sqliteTable('sentinel_alerts', {
+  id: sqliteText('id').primaryKey(),
+  dedupeKey: sqliteText('dedupe_key').notNull().unique(),
+  invariant: sqliteText('invariant').notNull(),
+  severity: sqliteText('severity').notNull(),
+  status: sqliteText('status').notNull(),
+  escrowId: sqliteInteger('escrow_id'),
+  txHash: sqliteText('tx_hash'),
+  ledger: sqliteInteger('ledger'),
+  message: sqliteText('message').notNull(),
+  details: sqliteText('details'),
+  count: sqliteInteger('count').notNull().default(1),
+  firstSeenAt: sqliteText('first_seen_at').notNull(),
+  lastSeenAt: sqliteText('last_seen_at').notNull(),
+  lastNotifiedAt: sqliteText('last_notified_at'),
+  resolvedAt: sqliteText('resolved_at'),
+  resolvedBy: sqliteText('resolved_by'),
 });

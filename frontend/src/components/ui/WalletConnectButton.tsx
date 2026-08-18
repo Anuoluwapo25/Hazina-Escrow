@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Zap, ExternalLink, Loader2, Wallet } from 'lucide-react';
+import { Zap, ExternalLink, Loader2, Wallet, Fingerprint } from 'lucide-react';
 import { detectWallets, launchStellarWalletProvider } from '../../lib/stellarWallets';
 import type {
   StellarWalletProvider,
   StellarPaymentRequest,
   WalletDetectionResult,
 } from '../../lib/stellarWallets';
+import { isPasskeySupported, createOrConnectPasskeyWallet } from '../../lib/passkeyWallet';
 import clsx from 'clsx';
 
 interface WalletConnectButtonProps {
@@ -13,6 +14,8 @@ interface WalletConnectButtonProps {
   onTxHash: (hash: string) => void;
   onStatusChange?: (status: string) => void;
   onError?: (error: string) => void;
+  /** Called once a passkey smart wallet is created or reconnected. */
+  onPasskeyWallet?: (contractId: string) => void;
   className?: string;
 }
 
@@ -21,14 +24,36 @@ export default function WalletConnectButton({
   onTxHash,
   onStatusChange,
   onError,
+  onPasskeyWallet,
   className,
 }: WalletConnectButtonProps) {
   const [detected, setDetected] = useState<WalletDetectionResult | null>(null);
   const [loading, setLoading] = useState<StellarWalletProvider | null>(null);
+  const [passkeySupported, setPasskeySupported] = useState<boolean | null>(null);
 
   useEffect(() => {
     detectWallets().then(setDetected);
+    isPasskeySupported().then(setPasskeySupported);
   }, []);
+
+  const handlePasskey = async () => {
+    setLoading('passkey');
+    onStatusChange?.('');
+    try {
+      const userName = `hazina-buyer-${Math.random().toString(36).slice(2, 10)}`;
+      const wallet = await createOrConnectPasskeyWallet(userName);
+      onPasskeyWallet?.(wallet.contractId);
+      onStatusChange?.(
+        `Passkey wallet connected (${wallet.contractId.slice(0, 6)}…${wallet.contractId.slice(-4)}).`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Passkey request failed.';
+      onError?.(msg);
+      onStatusChange?.(msg);
+    } finally {
+      setLoading(null);
+    }
+  };
 
   const handlePay = async (provider: StellarWalletProvider) => {
     setLoading(provider);
@@ -69,7 +94,7 @@ export default function WalletConnectButton({
         Pay with wallet
       </p>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className={clsx('grid gap-2', passkeySupported ? 'grid-cols-3' : 'grid-cols-2')}>
         <button
           type="button"
           onClick={() => handlePay('freighter')}
@@ -117,6 +142,25 @@ export default function WalletConnectButton({
             />
           )}
         </button>
+
+        {passkeySupported && (
+          <button
+            type="button"
+            onClick={handlePasskey}
+            disabled={loading !== null}
+            className={clsx(
+              'btn-ghost py-2.5 text-xs flex items-center justify-center gap-2 transition-all',
+              loading === 'passkey' && 'opacity-70',
+            )}
+          >
+            {loading === 'passkey' ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Fingerprint className="w-3.5 h-3.5" />
+            )}
+            Passkey
+          </button>
+        )}
       </div>
 
       {!hasAnyWallet && (
@@ -131,6 +175,12 @@ export default function WalletConnectButton({
             Freighter
           </a>{' '}
           or use Albedo (opens in a new tab).
+        </p>
+      )}
+
+      {passkeySupported === false && (
+        <p className="text-xs text-muted font-body">
+          Passkey checkout needs a device with Face ID, Touch ID, Windows Hello, or a security key.
         </p>
       )}
     </div>

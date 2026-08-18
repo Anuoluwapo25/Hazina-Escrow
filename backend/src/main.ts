@@ -35,6 +35,10 @@ import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
 import { claimableRouter } from './payments/claimable.router';
 import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
+import { wellKnownRouter } from './wellknown/x402.router';
+import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
+import { sentinelRouter } from './sentinel/router';
+import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
 import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
@@ -47,6 +51,7 @@ import { sanitizeBody } from './common/sanitize';
 import {
   createAgentRateLimitMiddleware,
   createGlobalRateLimitMiddleware,
+  createPasskeyRateLimitMiddleware,
   createPaymentsRateLimitMiddleware,
 } from './common/rateLimit';
 import { initializeWebSocketServer } from './websocket/ws-server';
@@ -127,6 +132,7 @@ app.use(sanitizeBody);
 const globalLimiter = createGlobalRateLimitMiddleware();
 const paymentsLimiter = createPaymentsRateLimitMiddleware();
 const agentLimiter = createAgentRateLimitMiddleware();
+const passkeyLimiter = createPasskeyRateLimitMiddleware();
 Sentry.setupExpressErrorHandler(app);
 
 // Rate limiting — global + per-route limits for sensitive endpoints
@@ -135,6 +141,8 @@ Sentry.setupExpressErrorHandler(app);
 app.use(globalLimiter);
 app.use('/api/v1/payments', paymentsLimiter);
 app.use('/api/v1/agent', agentLimiter);
+app.use('/api/v1/wallet/passkey', passkeyLimiter);
+app.use('/api/wallet/passkey', passkeyLimiter);
 Sentry.setupExpressErrorHandler(app);
 
 // Initialize backup scheduler
@@ -281,6 +289,10 @@ process.on('uncaughtException', (err: Error) => {
   });
 });
 
+// RFC 8615 well-known URIs are always root-relative, never under /api — mount
+// before the versioned API namespace and the /api legacy-redirect middleware.
+app.use(wellKnownRouter);
+
 // Routes under versioned API namespace.
 const v1Router = express.Router();
 
@@ -291,10 +303,15 @@ v1Router.use('/payments', requireApiKey, paymentsRouter);
 // Escrow routes are buyer-facing (build/submit/read need no API key); the
 // admin release/refund/resolve endpoints self-protect with requireAdminKey.
 v1Router.use('/payments', escrowRouter);
+// Passkey wallet routes are buyer-facing and self-guard with a 503 when
+// LAUNCHTUBE_JWT is unset; the passkeyLimiter above caps their fee-budget exposure.
+v1Router.use('/', passkeyWalletRouter);
 v1Router.use('/backups', backupRouter);
 // Claimable-balance routes self-protect per-route (requireSellerReadAuth /
 // requireAdminKey) since the seller-facing endpoints are scoped by wallet.
 v1Router.use('/', claimableRouter);
+// Sentinel self-protects per-route: /solvency is public, /sentinel/alerts* need requireAdminKey.
+v1Router.use('/', sentinelRouter);
 
 app.use('/api/v1', v1Router);
 
@@ -315,10 +332,12 @@ app.use('/api/datasets', datasetsRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
 app.use('/api', claimableRouter);
+app.use('/api', passkeyWalletRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api', backupRouter);
+app.use('/api', sentinelRouter);
 
 // Global error handling middleware — Issue #283 (standard error shape)
 app.use(
@@ -355,7 +374,7 @@ app.use(
 startDeliveryRetryWorker();
 startSellerNotificationRetryWorker();
 startDataRefreshWorker();
-startClaimableSweepWorker();
+void startSentinelIfEnabled();
 
 // Create HTTP server and attach Express app
 const server = http.createServer(app);
@@ -394,7 +413,7 @@ process.on('SIGTERM', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
-  stopClaimableSweepWorker();
+  stopSentinel();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -407,6 +426,7 @@ process.on('SIGINT', () => {
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
   stopClaimableSweepWorker();
+  stopSentinel();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');

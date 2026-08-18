@@ -5,6 +5,9 @@
   "scripts": {
     "start": "node dist/main.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "sentinel": "node dist/sentinel/standalone.js",
+    "sentinel:dev": "ts-node-dev --respawn --transpile-only src/sentinel/standalone.ts",
+    "sentinel:replay": "ts-node src/sentinel/replay.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src",
@@ -59,6 +62,7 @@
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitest/coverage-v8": "^4.1.9",
+    "ajv": "^8.20.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
