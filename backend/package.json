@@ -5,6 +5,9 @@
   "scripts": {
     "start": "node dist/main.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "sentinel": "node dist/sentinel/standalone.js",
+    "sentinel:dev": "ts-node-dev --respawn --transpile-only src/sentinel/standalone.ts",
+    "sentinel:replay": "ts-node src/sentinel/replay.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src",

@@ -5,6 +5,8 @@ import {
   transactionsSqlite,
   webhooksSqlite,
   payoutFailuresSqlite,
+  sentinelCursorSqlite,
+  sentinelAlertsSqlite,
 } from '../db/schema';
 
 const pendingTxHashes = new Set<string>();
@@ -110,6 +112,49 @@ export interface Store {
   transactions: Transaction[];
   webhooks: WebhookSubscription[];
   payoutFailures: PayoutFailure[];
+}
+
+// ── Sentinel (contract monitoring) ──────────────────────────────────────────
+// Not part of Store/readStore/writeStore: this is regenerable operational
+// state, not business data — a point-in-time restore of datasets/transactions
+// must not rewind the monitoring cursor or resurrect resolved alerts.
+
+export interface SentinelCursor {
+  id: string;
+  /** Soroban RPC event paging token; null before the first successful page. */
+  cursor: string | null;
+  lastLedger: number;
+  /** True once the genesis→cursor state rebuild has completed at least once. */
+  backfillComplete: boolean;
+  /** sha256 of the contract's current WASM, used to detect `upgrade()` (which emits no event). */
+  lastWasmHash: string | null;
+  /** Last time ingestion observed forward ledger progress — powers the stalled-stream check. */
+  lastProgressAt: string;
+  updatedAt: string;
+}
+
+export type SentinelAlertSeverity = 'critical' | 'high' | 'medium';
+export type SentinelAlertStatus = 'open' | 'resolved';
+export interface SentinelAlert {
+  id: string;
+  /** Stable dedupe key: `${invariant}:${escrowId ?? 'global'}`. */
+  dedupeKey: string;
+  invariant: string;
+  severity: SentinelAlertSeverity;
+  status: SentinelAlertStatus;
+  escrowId?: number;
+  txHash?: string;
+  ledger?: number;
+  message: string;
+  details?: Record<string, unknown>;
+  /** How many times this exact (invariant, escrow) has re-fired since it was first seen. */
+  count: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** Last time this alert was actually dispatched to Sentry/Datadog/webhook/email (suppression window). */
+  lastNotifiedAt?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 // ── Row ↔ domain converters ──────────────────────────────────────────────────
@@ -284,6 +329,75 @@ function payoutFailureToRow(pf: PayoutFailure): Record<string, unknown> {
     lastError: pf.lastError,
     createdAt: pf.createdAt,
     updatedAt: pf.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToSentinelCursor(row: any): SentinelCursor {
+  return {
+    id: row.id,
+    cursor: row.cursor ?? null,
+    lastLedger: Number(row.lastLedger ?? 0),
+    backfillComplete: Boolean(row.backfillComplete),
+    lastWasmHash: row.lastWasmHash ?? null,
+    lastProgressAt: row.lastProgressAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function sentinelCursorToRow(c: SentinelCursor): Record<string, unknown> {
+  return {
+    id: c.id,
+    cursor: c.cursor,
+    lastLedger: c.lastLedger,
+    backfillComplete: c.backfillComplete ? 1 : 0,
+    lastWasmHash: c.lastWasmHash,
+    lastProgressAt: c.lastProgressAt,
+    updatedAt: c.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToSentinelAlert(row: any): SentinelAlert {
+  return {
+    id: row.id,
+    dedupeKey: row.dedupeKey,
+    invariant: row.invariant,
+    severity: row.severity as SentinelAlertSeverity,
+    status: row.status as SentinelAlertStatus,
+    escrowId:
+      row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
+    txHash: row.txHash ?? undefined,
+    ledger: row.ledger === null || row.ledger === undefined ? undefined : Number(row.ledger),
+    message: row.message,
+    details: row.details ? JSON.parse(row.details) : undefined,
+    count: Number(row.count ?? 1),
+    firstSeenAt: row.firstSeenAt,
+    lastSeenAt: row.lastSeenAt,
+    lastNotifiedAt: row.lastNotifiedAt ?? undefined,
+    resolvedAt: row.resolvedAt ?? undefined,
+    resolvedBy: row.resolvedBy ?? undefined,
+  };
+}
+
+function sentinelAlertToRow(a: SentinelAlert): Record<string, unknown> {
+  return {
+    id: a.id,
+    dedupeKey: a.dedupeKey,
+    invariant: a.invariant,
+    severity: a.severity,
+    status: a.status,
+    escrowId: a.escrowId ?? null,
+    txHash: a.txHash ?? null,
+    ledger: a.ledger ?? null,
+    message: a.message,
+    details: a.details !== undefined ? JSON.stringify(a.details) : null,
+    count: a.count,
+    firstSeenAt: a.firstSeenAt,
+    lastSeenAt: a.lastSeenAt,
+    lastNotifiedAt: a.lastNotifiedAt ?? null,
+    resolvedAt: a.resolvedAt ?? null,
+    resolvedBy: a.resolvedBy ?? null,
   };
 }
 
@@ -580,4 +694,99 @@ export async function getTransactionsWithFailedSellerNotification(): Promise<Tra
       ),
     );
   return result.map(rowToTransaction);
+}
+
+export async function getTransactionByEscrowId(escrowId: number): Promise<Transaction | undefined> {
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.escrowId, escrowId))
+    .limit(1);
+  return result[0] ? rowToTransaction(result[0]) : undefined;
+}
+
+// ── Sentinel ─────────────────────────────────────────────────────────────────
+
+const SENTINEL_CURSOR_ID = 'escrow-contract';
+
+export async function getSentinelCursor(): Promise<SentinelCursor | undefined> {
+  const result = await db
+    .select()
+    .from(sentinelCursorSqlite)
+    .where(eq(sentinelCursorSqlite.id, SENTINEL_CURSOR_ID))
+    .limit(1);
+  return result[0] ? rowToSentinelCursor(result[0]) : undefined;
+}
+
+export async function saveSentinelCursor(
+  updates: Partial<Omit<SentinelCursor, 'id'>>,
+): Promise<SentinelCursor> {
+  const nowIso = new Date().toISOString();
+  const existing = await getSentinelCursor();
+  const merged: SentinelCursor = {
+    id: SENTINEL_CURSOR_ID,
+    cursor: existing?.cursor ?? null,
+    lastLedger: existing?.lastLedger ?? 0,
+    backfillComplete: existing?.backfillComplete ?? false,
+    lastWasmHash: existing?.lastWasmHash ?? null,
+    lastProgressAt: existing?.lastProgressAt ?? nowIso,
+    ...existing,
+    ...updates,
+    updatedAt: nowIso,
+  };
+  if (existing) {
+    await db
+      .update(sentinelCursorSqlite)
+      .set(sentinelCursorToRow(merged))
+      .where(eq(sentinelCursorSqlite.id, SENTINEL_CURSOR_ID));
+  } else {
+    await db.insert(sentinelCursorSqlite).values(sentinelCursorToRow(merged));
+  }
+  return merged;
+}
+
+export async function addSentinelAlert(alert: SentinelAlert): Promise<void> {
+  await db.insert(sentinelAlertsSqlite).values(sentinelAlertToRow(alert));
+}
+
+export async function getSentinelAlertByDedupeKey(
+  dedupeKey: string,
+): Promise<SentinelAlert | undefined> {
+  const result = await db
+    .select()
+    .from(sentinelAlertsSqlite)
+    .where(eq(sentinelAlertsSqlite.dedupeKey, dedupeKey))
+    .limit(1);
+  return result[0] ? rowToSentinelAlert(result[0]) : undefined;
+}
+
+export async function updateSentinelAlert(
+  id: string,
+  updates: Partial<SentinelAlert>,
+): Promise<SentinelAlert | null> {
+  const existing = await db
+    .select()
+    .from(sentinelAlertsSqlite)
+    .where(eq(sentinelAlertsSqlite.id, id))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToSentinelAlert(existing[0]), ...updates };
+  await db
+    .update(sentinelAlertsSqlite)
+    .set(sentinelAlertToRow(merged))
+    .where(eq(sentinelAlertsSqlite.id, id));
+  return merged;
+}
+
+export async function getOpenSentinelAlerts(): Promise<SentinelAlert[]> {
+  const result = await db
+    .select()
+    .from(sentinelAlertsSqlite)
+    .where(eq(sentinelAlertsSqlite.status, 'open'));
+  return result.map(rowToSentinelAlert);
+}
+
+export async function getAllSentinelAlerts(): Promise<SentinelAlert[]> {
+  const result = await db.select().from(sentinelAlertsSqlite);
+  return result.map(rowToSentinelAlert);
 }
