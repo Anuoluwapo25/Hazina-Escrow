@@ -33,6 +33,8 @@ import {
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
+import { wellKnownRouter } from './wellknown/x402.router';
+import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
 import { sentinelRouter } from './sentinel/router';
 import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
 import { validateAgentWallet } from './agent/agent.wallet';
@@ -47,6 +49,7 @@ import { sanitizeBody } from './common/sanitize';
 import {
   createAgentRateLimitMiddleware,
   createGlobalRateLimitMiddleware,
+  createPasskeyRateLimitMiddleware,
   createPaymentsRateLimitMiddleware,
 } from './common/rateLimit';
 import { initializeWebSocketServer } from './websocket/ws-server';
@@ -133,6 +136,7 @@ app.use(sanitizeBody);
 const globalLimiter = createGlobalRateLimitMiddleware();
 const paymentsLimiter = createPaymentsRateLimitMiddleware();
 const agentLimiter = createAgentRateLimitMiddleware();
+const passkeyLimiter = createPasskeyRateLimitMiddleware();
 Sentry.setupExpressErrorHandler(app);
 
 // Rate limiting — global + per-route limits for sensitive endpoints
@@ -141,6 +145,8 @@ Sentry.setupExpressErrorHandler(app);
 app.use(globalLimiter);
 app.use('/api/v1/payments', paymentsLimiter);
 app.use('/api/v1/agent', agentLimiter);
+app.use('/api/v1/wallet/passkey', passkeyLimiter);
+app.use('/api/wallet/passkey', passkeyLimiter);
 Sentry.setupExpressErrorHandler(app);
 
 // Initialize backup scheduler
@@ -287,6 +293,10 @@ process.on('uncaughtException', (err: Error) => {
   });
 });
 
+// RFC 8615 well-known URIs are always root-relative, never under /api — mount
+// before the versioned API namespace and the /api legacy-redirect middleware.
+app.use(wellKnownRouter);
+
 // Routes under versioned API namespace.
 const v1Router = express.Router();
 
@@ -298,6 +308,9 @@ v1Router.use('/payments', requireApiKey, paymentsRouter);
 // Escrow routes are buyer-facing (build/submit/read need no API key); the
 // admin release/refund/resolve endpoints self-protect with requireAdminKey.
 v1Router.use('/payments', escrowRouter);
+// Passkey wallet routes are buyer-facing and self-guard with a 503 when
+// LAUNCHTUBE_JWT is unset; the passkeyLimiter above caps their fee-budget exposure.
+v1Router.use('/', passkeyWalletRouter);
 v1Router.use('/backups', backupRouter);
 // Sentinel self-protects per-route: /solvency is public, /sentinel/alerts* need requireAdminKey.
 v1Router.use('/', sentinelRouter);
@@ -321,6 +334,7 @@ app.use('/api/datasets', datasetsRouter);
 app.use('/api/datasets', snapshotsRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
+app.use('/api', passkeyWalletRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
