@@ -37,7 +37,13 @@ function makeDataset(overrides: Partial<Dataset> = {}): Dataset {
 }
 
 async function seed(dataset: Dataset, transactions: Transaction[] = []): Promise<void> {
-  const store: Store = { datasets: [dataset], transactions, webhooks: [], payoutFailures: [] };
+  const store: Store = {
+    datasets: [dataset],
+    transactions,
+    webhooks: [],
+    payoutFailures: [],
+    claimableBalances: [],
+  };
   await writeStore(store);
   await deleteSnapshotsForDataset(dataset.id);
 }

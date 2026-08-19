@@ -64,6 +64,7 @@ export const transactions = pgTable('transactions', {
   verifiedAt: text('verified_at'),
   deliveredAt: text('delivered_at'),
   escrowId: integer('escrow_id'),
+  balanceId: text('balance_id'),
   snapshotId: text('snapshot_id'),
   timestamp: text('timestamp').notNull(),
 });
@@ -93,6 +94,25 @@ export const payoutFailures = pgTable('payout_failures', {
   retryCount: integer('retry_count').notNull().default(0),
   nextRetryAt: text('next_retry_at').notNull(),
   lastError: text('last_error').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const claimableBalances = pgTable('claimable_balances', {
+  id: text('id').primaryKey(),
+  balanceId: text('balance_id').notNull().unique(),
+  datasetId: text('dataset_id').notNull(),
+  sellerWallet: text('seller_wallet').notNull(),
+  buyerTxHash: text('buyer_tx_hash').notNull(),
+  amount: numeric('amount').notNull(),
+  paymentToken: text('payment_token').notNull().default('USDC'),
+  status: text('status').notNull(),
+  creationTxHash: text('creation_tx_hash').notNull(),
+  reclaimableAt: text('reclaimable_at').notNull(),
+  claimedTxHash: text('claimed_tx_hash'),
+  claimedAt: text('claimed_at'),
+  reclaimedTxHash: text('reclaimed_tx_hash'),
+  reclaimedAt: text('reclaimed_at'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -218,6 +238,7 @@ export const transactionsSqlite = sqliteTable('transactions', {
   verifiedAt: sqliteText('verified_at'),
   deliveredAt: sqliteText('delivered_at'),
   escrowId: sqliteInteger('escrow_id'),
+  balanceId: sqliteText('balance_id'),
   snapshotId: sqliteText('snapshot_id'),
   timestamp: sqliteText('timestamp').notNull(),
 });
@@ -244,6 +265,25 @@ export const payoutFailuresSqlite = sqliteTable('payout_failures', {
   retryCount: sqliteInteger('retry_count').notNull().default(0),
   nextRetryAt: sqliteText('next_retry_at').notNull(),
   lastError: sqliteText('last_error').notNull(),
+  createdAt: sqliteText('created_at').notNull(),
+  updatedAt: sqliteText('updated_at').notNull(),
+});
+
+export const claimableBalancesSqlite = sqliteTable('claimable_balances', {
+  id: sqliteText('id').primaryKey(),
+  balanceId: sqliteText('balance_id').notNull().unique(),
+  datasetId: sqliteText('dataset_id').notNull(),
+  sellerWallet: sqliteText('seller_wallet').notNull(),
+  buyerTxHash: sqliteText('buyer_tx_hash').notNull(),
+  amount: sqliteText('amount').notNull(),
+  paymentToken: sqliteText('payment_token').notNull().default('USDC'),
+  status: sqliteText('status').notNull(),
+  creationTxHash: sqliteText('creation_tx_hash').notNull(),
+  reclaimableAt: sqliteText('reclaimable_at').notNull(),
+  claimedTxHash: sqliteText('claimed_tx_hash'),
+  claimedAt: sqliteText('claimed_at'),
+  reclaimedTxHash: sqliteText('reclaimed_tx_hash'),
+  reclaimedAt: sqliteText('reclaimed_at'),
   createdAt: sqliteText('created_at').notNull(),
   updatedAt: sqliteText('updated_at').notNull(),
 });

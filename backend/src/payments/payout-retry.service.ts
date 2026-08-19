@@ -4,6 +4,7 @@ import {
   getPendingPayoutFailures,
   getPayoutFailureByBuyerTxHash,
   getPayoutFailuresByStatus,
+  getDataset,
   type PayoutFailure,
   type PayoutFailureStatus,
   updatePayoutFailure,
@@ -11,6 +12,8 @@ import {
 import { sendTokenPayment } from '../agent/agent.wallet';
 import { notifySeller } from '../webhooks/webhook.service';
 import { logger } from '../lib/logger';
+import { classifyDestinationFailure } from './trustline.service';
+import { settleAsClaimableBalance } from './claimable.service';
 
 const RETRY_BACKOFF_MS = [30_000, 120_000, 600_000] as const;
 const MANUAL_REVIEW_RETRY_COUNT = RETRY_BACKOFF_MS.length;
@@ -103,6 +106,37 @@ async function attemptRetry(failure: PayoutFailure): Promise<void> {
     }).catch(() => {});
     return;
   } catch (err) {
+    // A destination-related failure (no trustline, unfunded/merged account)
+    // will keep failing identically on every future retry — route it to the
+    // claimable-balance settlement fallback instead of burning through the
+    // backoff schedule and landing in manual review.
+    const destinationFailure = classifyDestinationFailure(err);
+    if (destinationFailure) {
+      try {
+        const dataset = await getDataset(failure.datasetId);
+        await settleAsClaimableBalance({
+          datasetId: failure.datasetId,
+          sellerWallet: failure.sellerWallet,
+          buyerTxHash: failure.buyerTxHash,
+          amount: failure.intendedAmount,
+          tokenCode: failure.paymentToken || 'USDC',
+          notificationEmail: dataset?.notificationEmail,
+        });
+        await updatePayoutFailure(failure.id, {
+          status: 'settled_as_claimable',
+          lastError: err instanceof Error ? err.message : String(err),
+          updatedAt: new Date().toISOString(),
+        });
+        return;
+      } catch (settleErr) {
+        logger.error(
+          `[Escrow] Claimable-balance settlement failed for ${failure.sellerWallet}, ` +
+            `falling back to normal retry: ${settleErr instanceof Error ? settleErr.message : String(settleErr)}`,
+        );
+        // Fall through to the normal backoff/manual-review path below.
+      }
+    }
+
     const retryCount = failure.retryCount + 1;
     const nextDelayMs = getRetryDelayMs(retryCount);
     const now = Date.now();

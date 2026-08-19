@@ -43,7 +43,13 @@ function at<T>(items: readonly T[], index: number): T {
 }
 
 async function seed(datasets: Dataset[]): Promise<void> {
-  const store: Store = { datasets, transactions: [], webhooks: [], payoutFailures: [] };
+  const store: Store = {
+    datasets,
+    transactions: [],
+    webhooks: [],
+    payoutFailures: [],
+    claimableBalances: [],
+  };
   await writeStore(store);
   for (const dataset of datasets) {
     await deleteSnapshotsForDataset(dataset.id);

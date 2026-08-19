@@ -38,6 +38,8 @@ const TESTNET_USDC_ISSUER = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZL
 const MAINNET_USDC_ISSUER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
 const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
 const PUBLIC_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
+const TESTNET_HORIZON_URL = 'https://horizon-testnet.stellar.org';
+const PUBLIC_HORIZON_URL = 'https://horizon.stellar.org';
 
 function configuredUsdcIssuer() {
   const { usdcIssuer, stellarNetwork } = getEnv();
@@ -119,6 +121,35 @@ export async function signWithFreighter(xdr: string): Promise<string> {
     networkPassphrase: networkPassphrase(),
   });
   return signedXdr;
+}
+
+function horizonUrl(): string {
+  return albedoNetwork() === 'public' ? PUBLIC_HORIZON_URL : TESTNET_HORIZON_URL;
+}
+
+/**
+ * Submits a fully-signed transaction envelope XDR directly to Horizon, using
+ * the plain HTTP API rather than pulling in the full @stellar/stellar-sdk
+ * dependency just to POST one transaction from the browser.
+ */
+export async function submitSignedTransaction(signedXdr: string): Promise<string> {
+  const response = await fetch(`${horizonUrl()}/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ tx: signedXdr }).toString(),
+  });
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      data?.extras?.result_codes?.transaction ||
+      data?.extras?.result_codes?.operations?.join(', ') ||
+      data?.title ||
+      'Transaction submission failed';
+    throw new Error(detail);
+  }
+
+  return data.hash as string;
 }
 
 export async function launchStellarWalletProvider(

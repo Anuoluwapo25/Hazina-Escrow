@@ -123,7 +123,7 @@ const seed = async () => {
   );
 
   const store: Store = clean
-    ? { datasets: [], transactions: [], webhooks: [], payoutFailures: [] }
+    ? { datasets: [], transactions: [], webhooks: [], payoutFailures: [], claimableBalances: [] }
     : await readStore();
 
   const newDatasets: Dataset[] = [];

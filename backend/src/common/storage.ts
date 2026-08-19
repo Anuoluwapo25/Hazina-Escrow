@@ -1,11 +1,12 @@
 import db from '../db/client';
-import { eq, sql, and } from 'drizzle-orm';
+import { eq, sql, and, lte } from 'drizzle-orm';
 import type { SnapshotRetentionPolicy } from '../snapshots/snapshots.types';
 import {
   datasetsSqlite,
   transactionsSqlite,
   webhooksSqlite,
   payoutFailuresSqlite,
+  claimableBalancesSqlite,
   sentinelCursorSqlite,
   sentinelAlertsSqlite,
 } from '../db/schema';
@@ -87,6 +88,8 @@ export interface Transaction {
   deliveredAt?: string;
   /** On-chain escrow id (from the contract's lock()); undefined for demo/legacy txns. */
   escrowId?: number;
+  /** Claimable balance id, set when the seller payout for this tx settled into a claimable balance instead of a direct payment. */
+  balanceId?: string;
   /** Snapshot the buyer was served — what a dispute is reconstructed from (#600). */
   snapshotId?: string;
   timestamp: string;
@@ -94,6 +97,7 @@ export interface Transaction {
 export type WebhookEvent =
   | 'payment.received'
   | 'payment.forwarded'
+  | 'payout.claimable'
   | 'dataset.queried'
   | 'dataset.created'
   | 'ping';
@@ -106,7 +110,11 @@ export interface WebhookSubscription {
   active: boolean;
   createdAt: string;
 }
-export type PayoutFailureStatus = 'pending_retry' | 'manual_review_needed' | 'paid';
+export type PayoutFailureStatus =
+  | 'pending_retry'
+  | 'manual_review_needed'
+  | 'paid'
+  | 'settled_as_claimable';
 export interface PayoutFailure {
   id: string;
   datasetId: string;
@@ -122,11 +130,34 @@ export interface PayoutFailure {
   createdAt: string;
   updatedAt: string;
 }
+export type ClaimableBalanceStatus = 'pending' | 'claimed' | 'reclaimed';
+export interface ClaimableBalance {
+  id: string;
+  /** On-chain claimable balance id (Horizon's `balance_id`). */
+  balanceId: string;
+  datasetId: string;
+  sellerWallet: string;
+  buyerTxHash: string;
+  amount: number;
+  paymentToken?: string;
+  status: ClaimableBalanceStatus;
+  /** Hash of the createClaimableBalance transaction. */
+  creationTxHash: string;
+  /** ISO timestamp after which Hazina's treasury claimant predicate becomes claimable. */
+  reclaimableAt: string;
+  claimedTxHash?: string;
+  claimedAt?: string;
+  reclaimedTxHash?: string;
+  reclaimedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 export interface Store {
   datasets: Dataset[];
   transactions: Transaction[];
   webhooks: WebhookSubscription[];
   payoutFailures: PayoutFailure[];
+  claimableBalances: ClaimableBalance[];
 }
 
 // ── Sentinel (contract monitoring) ──────────────────────────────────────────
@@ -257,6 +288,7 @@ function rowToTransaction(row: any): Transaction {
     deliveredAt: row.deliveredAt ?? undefined,
     escrowId:
       row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
+    balanceId: row.balanceId ?? undefined,
     snapshotId: row.snapshotId ?? undefined,
     timestamp: row.timestamp,
   };
@@ -286,6 +318,7 @@ function transactionToRow(tx: Transaction): Record<string, unknown> {
     verifiedAt: tx.verifiedAt ?? null,
     deliveredAt: tx.deliveredAt ?? null,
     escrowId: tx.escrowId ?? null,
+    balanceId: tx.balanceId ?? null,
     snapshotId: tx.snapshotId ?? null,
     timestamp: tx.timestamp,
   };
@@ -351,6 +384,49 @@ function payoutFailureToRow(pf: PayoutFailure): Record<string, unknown> {
     lastError: pf.lastError,
     createdAt: pf.createdAt,
     updatedAt: pf.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToClaimableBalance(row: any): ClaimableBalance {
+  return {
+    id: row.id,
+    balanceId: row.balanceId,
+    datasetId: row.datasetId,
+    sellerWallet: row.sellerWallet,
+    buyerTxHash: row.buyerTxHash,
+    amount: Number(row.amount),
+    paymentToken: row.paymentToken ?? undefined,
+    status: row.status as ClaimableBalanceStatus,
+    creationTxHash: row.creationTxHash,
+    reclaimableAt: row.reclaimableAt,
+    claimedTxHash: row.claimedTxHash ?? undefined,
+    claimedAt: row.claimedAt ?? undefined,
+    reclaimedTxHash: row.reclaimedTxHash ?? undefined,
+    reclaimedAt: row.reclaimedAt ?? undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function claimableBalanceToRow(cb: ClaimableBalance): Record<string, unknown> {
+  return {
+    id: cb.id,
+    balanceId: cb.balanceId,
+    datasetId: cb.datasetId,
+    sellerWallet: cb.sellerWallet,
+    buyerTxHash: cb.buyerTxHash,
+    amount: String(cb.amount),
+    paymentToken: cb.paymentToken ?? 'USDC',
+    status: cb.status,
+    creationTxHash: cb.creationTxHash,
+    reclaimableAt: cb.reclaimableAt,
+    claimedTxHash: cb.claimedTxHash ?? null,
+    claimedAt: cb.claimedAt ?? null,
+    reclaimedTxHash: cb.reclaimedTxHash ?? null,
+    reclaimedAt: cb.reclaimedAt ?? null,
+    createdAt: cb.createdAt,
+    updatedAt: cb.updatedAt,
   };
 }
 
@@ -430,17 +506,19 @@ export function invalidateCache(): void {
 }
 
 export async function readStore(): Promise<Store> {
-  const [datasets, transactions, webhooks, payoutFailures] = await Promise.all([
+  const [datasets, transactions, webhooks, payoutFailures, claimableBalances] = await Promise.all([
     db.select().from(datasetsSqlite),
     db.select().from(transactionsSqlite),
     db.select().from(webhooksSqlite),
     db.select().from(payoutFailuresSqlite),
+    db.select().from(claimableBalancesSqlite),
   ]);
   return {
     datasets: datasets.map(rowToDataset),
     transactions: transactions.map(rowToTransaction),
     webhooks: webhooks.map(rowToWebhook),
     payoutFailures: payoutFailures.map(rowToPayoutFailure),
+    claimableBalances: claimableBalances.map(rowToClaimableBalance),
   };
 }
 
@@ -449,6 +527,7 @@ export async function writeStore(store: Store): Promise<void> {
   await db.delete(transactionsSqlite);
   await db.delete(webhooksSqlite);
   await db.delete(payoutFailuresSqlite);
+  await db.delete(claimableBalancesSqlite);
   for (const dataset of store.datasets) {
     await db.insert(datasetsSqlite).values(datasetToRow(dataset));
   }
@@ -460,6 +539,9 @@ export async function writeStore(store: Store): Promise<void> {
   }
   for (const pf of store.payoutFailures) {
     await db.insert(payoutFailuresSqlite).values(payoutFailureToRow(pf));
+  }
+  for (const cb of store.claimableBalances) {
+    await db.insert(claimableBalancesSqlite).values(claimableBalanceToRow(cb));
   }
 }
 
@@ -694,6 +776,62 @@ export async function getPendingPayoutFailures(nowIso: string): Promise<PayoutFa
   const now = new Date(nowIso).getTime();
   const pending = await getPayoutFailuresByStatus('pending_retry');
   return pending.filter(pf => new Date(pf.nextRetryAt).getTime() <= now);
+}
+
+export async function addClaimableBalance(cb: ClaimableBalance): Promise<void> {
+  await db.insert(claimableBalancesSqlite).values(claimableBalanceToRow(cb));
+}
+
+export async function getClaimableBalanceByBalanceId(
+  balanceId: string,
+): Promise<ClaimableBalance | undefined> {
+  const result = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(eq(claimableBalancesSqlite.balanceId, balanceId))
+    .limit(1);
+  return result[0] ? rowToClaimableBalance(result[0]) : undefined;
+}
+
+export async function getClaimableBalancesForSeller(
+  sellerWallet: string,
+): Promise<ClaimableBalance[]> {
+  const result = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(eq(claimableBalancesSqlite.sellerWallet, sellerWallet));
+  return result.map(rowToClaimableBalance);
+}
+
+export async function getReclaimableBalances(nowIso: string): Promise<ClaimableBalance[]> {
+  const result = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(
+      and(
+        eq(claimableBalancesSqlite.status, 'pending'),
+        lte(claimableBalancesSqlite.reclaimableAt, nowIso),
+      ),
+    );
+  return result.map(rowToClaimableBalance);
+}
+
+export async function updateClaimableBalance(
+  id: string,
+  updates: Partial<ClaimableBalance>,
+): Promise<ClaimableBalance | null> {
+  const existing = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(eq(claimableBalancesSqlite.id, id))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToClaimableBalance(existing[0]), ...updates };
+  await db
+    .update(claimableBalancesSqlite)
+    .set(claimableBalanceToRow(merged))
+    .where(eq(claimableBalancesSqlite.id, id));
+  return merged;
 }
 
 export async function getUnpaidTransactions(): Promise<Transaction[]> {

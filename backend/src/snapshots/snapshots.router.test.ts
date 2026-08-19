@@ -100,6 +100,7 @@ beforeEach(async () => {
     transactions: [purchase, pendingPurchase],
     webhooks: [],
     payoutFailures: [],
+    claimableBalances: [],
   };
   await writeStore(store);
   await deleteSnapshotsForDataset(DATASET_ID);

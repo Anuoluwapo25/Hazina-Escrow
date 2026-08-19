@@ -36,6 +36,20 @@
       "when": 1787058580237,
       "tag": "0004_add_dataset_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787132064903,
+      "tag": "0005_add_claimable_balances",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787132064904,
+      "tag": "0001_nebulous_goliath",
+      "breakpoints": true
     }
   ]
 }

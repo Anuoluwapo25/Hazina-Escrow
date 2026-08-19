@@ -163,6 +163,26 @@ export interface AgentInfo {
   };
 }
 
+export interface ClaimableBalanceItem {
+  balanceId: string;
+  amount: string;
+  assetCode: string;
+  createdAt: string | null;
+  reclaimableAt: string | null;
+  datasetId?: string;
+  status: string;
+}
+
+export interface ReclaimableBalance {
+  id: string;
+  balanceId: string;
+  sellerWallet: string;
+  amount: number;
+  paymentToken?: string;
+  reclaimableAt: string;
+  createdAt: string;
+}
+
 export interface SellerAnalytics {
   revenueSeries: { date: string; usdc: number }[];
   queryVolumeSeries: { date: string; count: number }[];
@@ -627,6 +647,40 @@ export const api = {
       headers: authHeaders(),
     }),
 
+  // ── Claimable balance payout fallback (#589) ─────────────────────────────
+
+  /** Pending claimable balances for a seller wallet, merged with our dataset context. */
+  getSellerClaimables: (wallet: string) =>
+    request<{ success: boolean; claimables: ClaimableBalanceItem[] }>(
+      `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claimables`,
+    ).then(r => r.claimables),
+
+  /** Sponsor-signed (not seller-signed) claim XDR — the seller's wallet must still sign it. */
+  buildClaimTx: (wallet: string, balanceId: string) =>
+    request<{ success: boolean; xdr: string }>(
+      `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claim-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ balanceId }),
+      },
+    ),
+
+  /** Admin: balances past the treasury reclaim cutoff. */
+  adminGetReclaimableBalances: (adminKey: string) =>
+    request<{ success: boolean; reclaimable: ReclaimableBalance[] }>(
+      `${getApiBaseUrl()}/admin/claimables/reclaimable`,
+      { headers: { Authorization: `Bearer ${adminKey}` } },
+    ).then(r => r.reclaimable),
+
+  /** Admin: sweep expired balances back to the treasury. */
+  adminSweepClaimables: (adminKey: string) =>
+    request<{ success: boolean; swept: string[]; failed: string[] }>(
+      `${getApiBaseUrl()}/admin/claimables/sweep`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminKey}` },
+      },
+    ),
   // ── Sentinel (#599) ───────────────────────────────────────────────────────
 
   /** Public: total locked on-chain vs. open escrow liability, per token. */

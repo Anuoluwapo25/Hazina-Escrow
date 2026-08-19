@@ -33,6 +33,8 @@ import {
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
+import { claimableRouter } from './payments/claimable.router';
+import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
 import { wellKnownRouter } from './wellknown/x402.router';
 import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
 import { sentinelRouter } from './sentinel/router';
@@ -312,6 +314,9 @@ v1Router.use('/payments', escrowRouter);
 // LAUNCHTUBE_JWT is unset; the passkeyLimiter above caps their fee-budget exposure.
 v1Router.use('/', passkeyWalletRouter);
 v1Router.use('/backups', backupRouter);
+// Claimable-balance routes self-protect per-route (requireSellerReadAuth /
+// requireAdminKey) since the seller-facing endpoints are scoped by wallet.
+v1Router.use('/', claimableRouter);
 // Sentinel self-protects per-route: /solvency is public, /sentinel/alerts* need requireAdminKey.
 v1Router.use('/', sentinelRouter);
 
@@ -334,6 +339,7 @@ app.use('/api/datasets', datasetsRouter);
 app.use('/api/datasets', snapshotsRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
+app.use('/api', claimableRouter);
 app.use('/api', passkeyWalletRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/webhooks', webhooksRouter);
@@ -378,6 +384,7 @@ startSellerNotificationRetryWorker();
 startDataRefreshWorker();
 void startSentinelIfEnabled();
 startSnapshotCompactionWorker();
+startClaimableSweepWorker();
 
 // Give every pre-existing dataset a first snapshot so history starts now rather
 // than at its next refresh (#600). Idempotent, so a restart is free; skipped in
@@ -440,6 +447,7 @@ process.on('SIGINT', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
+  stopClaimableSweepWorker();
   stopSentinel();
   stopSnapshotCompactionWorker();
   wsServer.shutdown();

@@ -10,6 +10,7 @@ import {
   transactionsSqlite,
   webhooksSqlite,
   payoutFailuresSqlite,
+  claimableBalancesSqlite,
   sentinelCursorSqlite,
   sentinelAlertsSqlite,
 } from './schema';
@@ -35,6 +36,7 @@ const db = (() => {
         transactions: transactionsSqlite,
         webhooks: webhooksSqlite,
         payoutFailures: payoutFailuresSqlite,
+        claimableBalances: claimableBalancesSqlite,
         sentinelCursor: sentinelCursorSqlite,
         sentinelAlerts: sentinelAlertsSqlite,
       },

@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "169ba44f-7330-45e2-a8f2-83069e09569e",
-  "prevId": "ce87cd33-8aff-423e-9b1d-ff3464f5d046",
+  "id": "bbb3213e-8808-4e16-958d-4ef1cadcf48f",
+  "prevId": "462905f5-f96f-4efc-9e98-09f7f16e7386",
   "tables": {
     "claimable_balances": {
       "name": "claimable_balances",
@@ -128,6 +128,133 @@
             "balance_id"
           ],
           "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "dataset_snapshots": {
+      "name": "dataset_snapshots",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dataset_id": {
+          "name": "dataset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "encoding": {
+          "name": "encoding",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'gzip+base64'"
+        },
+        "valid_from": {
+          "name": "valid_from",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "valid_to": {
+          "name": "valid_to",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "raw_byte_size": {
+          "name": "raw_byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "observations": {
+          "name": "observations",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "last_observed_at": {
+          "name": "last_observed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider_run_id": {
+          "name": "provider_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "dataset_snapshots_dataset_valid_from_idx": {
+          "name": "dataset_snapshots_dataset_valid_from_idx",
+          "columns": [
+            "dataset_id",
+            "valid_from"
+          ],
+          "isUnique": false
+        },
+        "dataset_snapshots_content_hash_idx": {
+          "name": "dataset_snapshots_content_hash_idx",
+          "columns": [
+            "content_hash"
+          ],
+          "isUnique": false
+        },
+        "dataset_snapshots_current_idx": {
+          "name": "dataset_snapshots_current_idx",
+          "columns": [
+            "dataset_id",
+            "valid_to"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -272,6 +399,13 @@
         },
         "tags": {
           "name": "tags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "snapshot_policy": {
+          "name": "snapshot_policy",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -776,6 +910,13 @@
         },
         "balance_id": {
           "name": "balance_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
