@@ -1,5 +1,6 @@
 import db from '../db/client';
 import { eq, sql, and, lte } from 'drizzle-orm';
+import type { SnapshotRetentionPolicy } from '../snapshots/snapshots.types';
 import {
   datasetsSqlite,
   transactionsSqlite,
@@ -53,6 +54,8 @@ export interface Dataset {
   tags?: string[];
   /** Soft-delete / visibility flag; defaults to true. */
   active?: boolean;
+  /** Per-dataset snapshot retention overrides; platform defaults when unset. */
+  snapshotPolicy?: Partial<SnapshotRetentionPolicy>;
 }
 export interface Transaction {
   id: string;
@@ -63,7 +66,13 @@ export interface Transaction {
   amount: number;
   paymentToken?: string;
   status?:
-    'pending' | 'verifying' | 'verified' | 'completed' | 'failed' | 'refunded' | 'delivery_failed';
+    | 'pending'
+    | 'verifying'
+    | 'verified'
+    | 'completed'
+    | 'failed'
+    | 'refunded'
+    | 'delivery_failed';
   deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
@@ -81,6 +90,8 @@ export interface Transaction {
   escrowId?: number;
   /** Claimable balance id, set when the seller payout for this tx settled into a claimable balance instead of a direct payment. */
   balanceId?: string;
+  /** Snapshot the buyer was served — what a dispute is reconstructed from (#600). */
+  snapshotId?: string;
   timestamp: string;
 }
 export type WebhookEvent =
@@ -214,6 +225,9 @@ function rowToDataset(row: any): Dataset {
     lastRefreshedAt: row.lastRefreshedAt ?? undefined,
     tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
     active: row.active === null || row.active === undefined ? undefined : Boolean(row.active),
+    snapshotPolicy: row.snapshotPolicy
+      ? (JSON.parse(row.snapshotPolicy) as Partial<SnapshotRetentionPolicy>)
+      : undefined,
   };
 }
 
@@ -239,6 +253,8 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     lastRefreshedAt: dataset.lastRefreshedAt ?? null,
     tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
     active: dataset.active ? 1 : 0,
+    snapshotPolicy:
+      dataset.snapshotPolicy !== undefined ? JSON.stringify(dataset.snapshotPolicy) : null,
   };
 }
 
@@ -270,6 +286,7 @@ function rowToTransaction(row: any): Transaction {
     escrowId:
       row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
     balanceId: row.balanceId ?? undefined,
+    snapshotId: row.snapshotId ?? undefined,
     timestamp: row.timestamp,
   };
 }
@@ -299,6 +316,7 @@ function transactionToRow(tx: Transaction): Record<string, unknown> {
     deliveredAt: tx.deliveredAt ?? null,
     escrowId: tx.escrowId ?? null,
     balanceId: tx.balanceId ?? null,
+    snapshotId: tx.snapshotId ?? null,
     timestamp: tx.timestamp,
   };
 }
@@ -406,6 +424,22 @@ function claimableBalanceToRow(cb: ClaimableBalance): Record<string, unknown> {
     reclaimedAt: cb.reclaimedAt ?? null,
     createdAt: cb.createdAt,
     updatedAt: cb.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToSentinelCursor(row: any): SentinelCursor {
+  return {
+    id: row.id,
+    cursor: row.cursor ?? null,
+    lastLedger: Number(row.lastLedger ?? 0),
+    backfillComplete: Boolean(row.backfillComplete),
+    lastWasmHash: row.lastWasmHash ?? null,
+    lastProgressAt: row.lastProgressAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 function sentinelCursorToRow(c: SentinelCursor): Record<string, unknown> {
   return {
     id: c.id,
@@ -803,6 +837,30 @@ export async function getUnpaidTransactions(): Promise<Transaction[]> {
     .from(transactionsSqlite)
     .where(eq(transactionsSqlite.sellerPaid, 0));
   return result.map(rowToTransaction);
+}
+
+/**
+ * Snapshot ids referenced by a completed purchase (#600).
+ *
+ * These are the rows compaction must never delete: they are the only record of
+ * what a buyer actually received, and a dispute has to be resolvable against
+ * them long after the retention window would otherwise have dropped them.
+ */
+export async function getPurchasedSnapshotIds(datasetId?: string): Promise<Set<string>> {
+  const conditions = [
+    eq(transactionsSqlite.status, 'completed'),
+    sql`${transactionsSqlite.snapshotId} IS NOT NULL`,
+  ];
+  if (datasetId) conditions.push(eq(transactionsSqlite.datasetId, datasetId));
+  const result = await db
+    .select({ snapshotId: transactionsSqlite.snapshotId })
+    .from(transactionsSqlite)
+    .where(and(...conditions));
+  return new Set(
+    result
+      .map((row: { snapshotId: string | null }) => row.snapshotId)
+      .filter((id: string | null): id is string => typeof id === 'string' && id.length > 0),
+  );
 }
 
 export async function getTransactionsWithFailedSellerNotification(): Promise<Transaction[]> {

@@ -56,6 +56,12 @@ import {
 } from './common/rateLimit';
 import { initializeWebSocketServer } from './websocket/ws-server';
 import { startDataRefreshWorker, stopDataRefreshWorker } from './providers/refresh.scheduler';
+import { snapshotsRouter } from './snapshots/snapshots.router';
+import { backfillSnapshots } from './snapshots/snapshots.service';
+import {
+  startSnapshotCompactionWorker,
+  stopSnapshotCompactionWorker,
+} from './snapshots/snapshots.compaction';
 import { HORIZON_URL } from './lib/stellar.config';
 import { createCorsOptions } from './common/cors';
 
@@ -297,6 +303,7 @@ app.use(wellKnownRouter);
 const v1Router = express.Router();
 
 v1Router.use('/datasets', datasetsRouter);
+v1Router.use('/datasets', snapshotsRouter);
 v1Router.use('/agent', requireApiKey, agentRouter);
 v1Router.use('/webhooks', webhooksRouter);
 v1Router.use('/payments', requireApiKey, paymentsRouter);
@@ -329,6 +336,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
 // Routes
 app.use('/api/datasets', datasetsRouter);
+app.use('/api/datasets', snapshotsRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
 app.use('/api', claimableRouter);
@@ -375,6 +383,18 @@ startDeliveryRetryWorker();
 startSellerNotificationRetryWorker();
 startDataRefreshWorker();
 void startSentinelIfEnabled();
+startSnapshotCompactionWorker();
+
+// Give every pre-existing dataset a first snapshot so history starts now rather
+// than at its next refresh (#600). Idempotent, so a restart is free; skipped in
+// tests, which seed their own timelines.
+if (process.env.SNAPSHOT_BACKFILL_ON_START !== 'false' && process.env.NODE_ENV !== 'test') {
+  backfillSnapshots().catch(err =>
+    logger.error(
+      `[Snapshots] Backfill failed: ${err instanceof Error ? err.message : String(err)}`,
+    ),
+  );
+}
 
 // Create HTTP server and attach Express app
 const server = http.createServer(app);
@@ -414,6 +434,7 @@ process.on('SIGTERM', () => {
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
   stopSentinel();
+  stopSnapshotCompactionWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -427,6 +448,7 @@ process.on('SIGINT', () => {
   stopDataRefreshWorker();
   stopClaimableSweepWorker();
   stopSentinel();
+  stopSnapshotCompactionWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
