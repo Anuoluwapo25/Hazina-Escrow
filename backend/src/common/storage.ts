@@ -111,7 +111,10 @@ export interface WebhookSubscription {
   createdAt: string;
 }
 export type PayoutFailureStatus =
-  'pending_retry' | 'manual_review_needed' | 'paid' | 'settled_as_claimable';
+  | 'pending_retry'
+  | 'manual_review_needed'
+  | 'paid'
+  | 'settled_as_claimable';
 export interface PayoutFailure {
   id: string;
   datasetId: string;

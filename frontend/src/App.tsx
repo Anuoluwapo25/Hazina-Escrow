@@ -117,6 +117,10 @@ export default function App() {
               element={
                 <RouteBoundary label="Admin claimables">
                   <AdminClaimablesPage />
+                </RouteBoundary>
+              }
+            />
+            <Route
               path="/solvency"
               element={
                 <RouteBoundary label="Solvency">

@@ -384,6 +384,7 @@ startSellerNotificationRetryWorker();
 startDataRefreshWorker();
 void startSentinelIfEnabled();
 startSnapshotCompactionWorker();
+startClaimableSweepWorker();
 
 // Give every pre-existing dataset a first snapshot so history starts now rather
 // than at its next refresh (#600). Idempotent, so a restart is free; skipped in
