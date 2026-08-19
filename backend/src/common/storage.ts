@@ -1,5 +1,6 @@
 import db from '../db/client';
 import { eq, sql, and } from 'drizzle-orm';
+import type { SnapshotRetentionPolicy } from '../snapshots/snapshots.types';
 import {
   datasetsSqlite,
   transactionsSqlite,
@@ -52,6 +53,8 @@ export interface Dataset {
   tags?: string[];
   /** Soft-delete / visibility flag; defaults to true. */
   active?: boolean;
+  /** Per-dataset snapshot retention overrides; platform defaults when unset. */
+  snapshotPolicy?: Partial<SnapshotRetentionPolicy>;
 }
 export interface Transaction {
   id: string;
@@ -62,7 +65,13 @@ export interface Transaction {
   amount: number;
   paymentToken?: string;
   status?:
-    'pending' | 'verifying' | 'verified' | 'completed' | 'failed' | 'refunded' | 'delivery_failed';
+    | 'pending'
+    | 'verifying'
+    | 'verified'
+    | 'completed'
+    | 'failed'
+    | 'refunded'
+    | 'delivery_failed';
   deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
@@ -78,10 +87,16 @@ export interface Transaction {
   deliveredAt?: string;
   /** On-chain escrow id (from the contract's lock()); undefined for demo/legacy txns. */
   escrowId?: number;
+  /** Snapshot the buyer was served — what a dispute is reconstructed from (#600). */
+  snapshotId?: string;
   timestamp: string;
 }
 export type WebhookEvent =
-  'payment.received' | 'payment.forwarded' | 'dataset.queried' | 'dataset.created' | 'ping';
+  | 'payment.received'
+  | 'payment.forwarded'
+  | 'dataset.queried'
+  | 'dataset.created'
+  | 'ping';
 export interface WebhookSubscription {
   id: string;
   sellerWallet: string;
@@ -182,6 +197,9 @@ function rowToDataset(row: any): Dataset {
     lastRefreshedAt: row.lastRefreshedAt ?? undefined,
     tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
     active: row.active === null || row.active === undefined ? undefined : Boolean(row.active),
+    snapshotPolicy: row.snapshotPolicy
+      ? (JSON.parse(row.snapshotPolicy) as Partial<SnapshotRetentionPolicy>)
+      : undefined,
   };
 }
 
@@ -207,6 +225,8 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     lastRefreshedAt: dataset.lastRefreshedAt ?? null,
     tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
     active: dataset.active ? 1 : 0,
+    snapshotPolicy:
+      dataset.snapshotPolicy !== undefined ? JSON.stringify(dataset.snapshotPolicy) : null,
   };
 }
 
@@ -237,6 +257,7 @@ function rowToTransaction(row: any): Transaction {
     deliveredAt: row.deliveredAt ?? undefined,
     escrowId:
       row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
+    snapshotId: row.snapshotId ?? undefined,
     timestamp: row.timestamp,
   };
 }
@@ -265,6 +286,7 @@ function transactionToRow(tx: Transaction): Record<string, unknown> {
     verifiedAt: tx.verifiedAt ?? null,
     deliveredAt: tx.deliveredAt ?? null,
     escrowId: tx.escrowId ?? null,
+    snapshotId: tx.snapshotId ?? null,
     timestamp: tx.timestamp,
   };
 }
@@ -680,6 +702,30 @@ export async function getUnpaidTransactions(): Promise<Transaction[]> {
     .from(transactionsSqlite)
     .where(eq(transactionsSqlite.sellerPaid, 0));
   return result.map(rowToTransaction);
+}
+
+/**
+ * Snapshot ids referenced by a completed purchase (#600).
+ *
+ * These are the rows compaction must never delete: they are the only record of
+ * what a buyer actually received, and a dispute has to be resolvable against
+ * them long after the retention window would otherwise have dropped them.
+ */
+export async function getPurchasedSnapshotIds(datasetId?: string): Promise<Set<string>> {
+  const conditions = [
+    eq(transactionsSqlite.status, 'completed'),
+    sql`${transactionsSqlite.snapshotId} IS NOT NULL`,
+  ];
+  if (datasetId) conditions.push(eq(transactionsSqlite.datasetId, datasetId));
+  const result = await db
+    .select({ snapshotId: transactionsSqlite.snapshotId })
+    .from(transactionsSqlite)
+    .where(and(...conditions));
+  return new Set(
+    result
+      .map((row: { snapshotId: string | null }) => row.snapshotId)
+      .filter((id: string | null): id is string => typeof id === 'string' && id.length > 0),
+  );
 }
 
 export async function getTransactionsWithFailedSellerNotification(): Promise<Transaction[]> {
