@@ -79,7 +79,9 @@ impl World {
     pub fn new(default_fee_bps: u32) -> Self {
         let world = Self::without_treasury(default_fee_bps);
         let treasury = Address::generate(&world.env);
-        world.client.set_treasury(&world.admin, &treasury);
+        world.client.schedule_set_treasury(&world.admin, &treasury);
+        world.advance_ledgers(world.get_timelock_delay());
+        world.client.execute_set_treasury();
         World { treasury, ..world }
     }
 
@@ -131,6 +133,12 @@ impl World {
             admin: self.token.balance(&self.admin),
             contract: self.token.balance(&self.contract),
         }
+    }
+
+        /// The timelock delay, in ledgers, between proposing a sensitive action and
+    /// executing it.
+    pub fn get_timelock_delay(&self) -> u32 {
+        self.client.get_timelock_delay()
     }
 
     /// Whatever address actually receives the platform cut in this world.
