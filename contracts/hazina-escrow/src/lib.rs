@@ -1407,6 +1407,14 @@ mod tests {
         let env = Env::default();
         env.mock_all_auths();
         env.ledger().set_timestamp(1_000);
+        // Raise the test ledger's TTL bounds so a `fuzz_tests` timelock flow,
+        // which advances the ledger by `DEFAULT_TIMELOCK_DELAY_LEDGERS`
+        // (25_920), does not archive the contract instance (default persistent
+        // TTL is only 4_096 ledgers). Without this the very next call after the
+        // jump panics with `Storage, InternalError`.
+        const TEST_ENTRY_TTL: u32 = 1_000_000;
+        env.ledger().set_min_persistent_entry_ttl(TEST_ENTRY_TTL);
+        env.ledger().set_max_entry_ttl(TEST_ENTRY_TTL);
 
         let admin = Address::generate(&env);
         let buyer = Address::generate(&env);
@@ -2349,19 +2357,21 @@ mod fuzz_tests {
 
     #[test]
     fn test_emergency_withdraw_requires_pause() {
-        let (env, client, admin, _buyer, seller, usdc) = setup();
+        let (env, client, admin, _buyer, _seller, usdc) = setup();
         let token_client = TokenClient::new(&env, &usdc);
         StellarAssetClient::new(&env, &usdc).mint(&client.address, &1_000_000);
 
         // Scheduling fails when not paused.
-        let result = client.try_schedule_emergency_withdraw(&admin, &usdc, &seller, &100_000);
+        let result = client.try_schedule_emergency_withdraw(&admin, &usdc, &admin, &100_000);
         assert!(result.is_err());
 
         client.pause(&admin);
-        client.schedule_emergency_withdraw(&admin, &usdc, &seller, &100_000);
+        // The treasury is unset in this world, so the only valid recipient of
+        // an emergency sweep is the admin (the `unwrap_or(admin)` fallback).
+        client.schedule_emergency_withdraw(&admin, &usdc, &admin, &100_000);
         env.ledger().set_sequence_number(env.ledger().sequence() + client.get_timelock_delay());
         client.execute_emergency_withdraw();
-        assert_eq!(token_client.balance(&seller), 100_000);
+        assert_eq!(token_client.balance(&admin), 100_000);
     }
 
     #[test]

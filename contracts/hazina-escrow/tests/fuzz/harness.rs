@@ -31,10 +31,24 @@ pub const BUYER_FLOAT: i128 = 64 * DEFAULT_MAX_ESCROW_AMOUNT;
 /// are worth committing for the example tests; a property test builds one `Env`
 /// per case, so leaving capture on would dump thousands of near-identical JSON
 /// files into `test_snapshots/` on every run.
+///
+/// The TTL bounds are also raised from the SDK defaults. The default test
+/// ledger gives contract-instance storage a live-until of only
+/// `min_persistent_entry_ttl` (4_096) ledgers past the current sequence.
+/// Timelock flows in the invariant suite advance the ledger by the full
+/// `DEFAULT_TIMELOCK_DELAY_LEDGERS` (25_920) — and a single case can do so more
+/// than once (e.g. treasury setup then an admin hand-over) — which would
+/// otherwise archive the instance and make the next call panic with `Storage,
+/// InternalError`. Raising both TTL bounds keeps instance data written during
+/// `initialize` alive across the jump. In production the contract extends TTLs
+/// itself; this is purely a test-harness accommodation.
 pub fn bare_env() -> Env {
     let env = Env::new_with_config(EnvTestConfig {
         capture_snapshot_at_drop: false,
     });
+    const TEST_ENTRY_TTL: u32 = 1_000_000;
+    env.ledger().set_min_persistent_entry_ttl(TEST_ENTRY_TTL);
+    env.ledger().set_max_entry_ttl(TEST_ENTRY_TTL);
     env.mock_all_auths();
     env
 }
