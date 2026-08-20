@@ -10,12 +10,12 @@
  */
 import { mapApiError } from './errors.js';
 import {
-  PaginatedDatasetsSchema,
+  SearchResponseSchema,
   GetDatasetResponseSchema,
   QuotePayloadSchema,
   QueryResultSchema,
   type DatasetDetail,
-  type PaginatedDatasets,
+  type SearchResponse,
   type QuotePayload,
   type QueryResult,
 } from './types.js';
@@ -32,7 +32,7 @@ export interface HazinaApiClientLike {
     category?: string;
     maxPrice?: number;
     limit?: number;
-  }): Promise<PaginatedDatasets>;
+  }): Promise<SearchResponse>;
   getDataset(id: string): Promise<DatasetDetail>;
   initiateQuery(id: string): Promise<QuotePayload>;
   verifyPayment(id: string, txHash: string, buyerQuestion?: string): Promise<QueryResult>;
@@ -58,22 +58,28 @@ export class HazinaApiClient implements HazinaApiClientLike {
     return headers;
   }
 
+  /**
+   * Hybrid (keyword + embedding) search — GET /api/search. Always asks for
+   * match explanations: for an agent that can't browse, "matched because…"
+   * is what makes a result set usable and trustworthy (#611).
+   */
   async searchDatasets(params: {
     query?: string;
     category?: string;
     maxPrice?: number;
     limit?: number;
-  }): Promise<PaginatedDatasets> {
+  }): Promise<SearchResponse> {
     const qs = new URLSearchParams();
-    if (params.query) qs.set('search', params.query);
+    if (params.query) qs.set('q', params.query);
     if (params.category) qs.set('category', params.category);
     if (params.maxPrice !== undefined) qs.set('maxPrice', String(params.maxPrice));
     qs.set('limit', String(params.limit ?? 20));
+    qs.set('explain', 'true');
 
-    const res = await fetch(`${this.config.apiUrl}/api/v1/datasets?${qs.toString()}`);
+    const res = await fetch(`${this.config.apiUrl}/api/v1/search?${qs.toString()}`);
     const body = await readJson(res);
     if (!res.ok) throw mapApiError(res.status, body, 'search_datasets');
-    return PaginatedDatasetsSchema.parse(body);
+    return SearchResponseSchema.parse(body);
   }
 
   async getDataset(id: string): Promise<DatasetDetail> {

@@ -316,6 +316,37 @@ export const PaginatedDatasetsSchema = z.object({
 });
 export type PaginatedDatasets = z.infer<typeof PaginatedDatasetsSchema>;
 
+/** One ranked hit from GET /api/v1/search — see backend/src/search/search.service.ts SearchResultItem. */
+export const SearchResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  type: z.string(),
+  category: z.string().optional(),
+  pricePerQuery: z.number(),
+  paymentToken: z.string().optional(),
+  queriesServed: z.number(),
+  live: z.boolean().optional(),
+  lastRefreshedAt: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  score: z.number(),
+  /** Only present when the request passed explain=true. */
+  matchedBecause: z.string().optional(),
+});
+export type SearchResultItem = z.infer<typeof SearchResultSchema>;
+
+/** Response body of GET /api/v1/search — hybrid keyword+embedding dataset search. */
+export const SearchResponseSchema = z.object({
+  query: z.string(),
+  results: z.array(SearchResultSchema),
+  total: z.number(),
+  page: z.number(),
+  limit: z.number(),
+  mode: z.union([z.literal('hybrid'), z.literal('keyword-only')]),
+  reranked: z.boolean(),
+});
+export type SearchResponse = z.infer<typeof SearchResponseSchema>;
+
 export const QueryResultSchema = z.object({
   success: z.boolean(),
   demo: z.boolean().optional(),
@@ -464,6 +495,29 @@ export const api = {
     const query = searchParams.toString();
     const url = `${getApiBaseUrl()}/datasets${query ? `?${query}` : ''}`;
     return request<unknown>(url).then(r => parseApiResponse(PaginatedDatasetsSchema, r));
+  },
+
+  /** Hybrid keyword+embedding dataset search — GET /api/v1/search (#semantic-dataset-discovery). */
+  search: (params: {
+    q: string;
+    category?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    page?: number;
+    limit?: number;
+    explain?: boolean;
+  }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.append('q', params.q);
+    if (params.category) searchParams.append('category', params.category);
+    if (params.minPrice !== undefined) searchParams.append('minPrice', params.minPrice.toString());
+    if (params.maxPrice !== undefined) searchParams.append('maxPrice', params.maxPrice.toString());
+    if (params.page) searchParams.append('page', params.page.toString());
+    if (params.limit) searchParams.append('limit', params.limit.toString());
+    if (params.explain) searchParams.append('explain', 'true');
+    const query = searchParams.toString();
+    const url = `${getApiBaseUrl()}/search${query ? `?${query}` : ''}`;
+    return request<unknown>(url).then(r => parseApiResponse(SearchResponseSchema, r));
   },
 
   getStats: () =>

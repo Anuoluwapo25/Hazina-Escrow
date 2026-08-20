@@ -233,6 +233,13 @@ export const fr: EnglishMessages = {
     resultsCount: '{count} datasets trouvés',
     noResultsTitle: 'Aucun dataset trouvé',
     noResultsBody: "Essayez d'ajuster vos filtres",
+    search: {
+      noResultsTitle: 'Aucun résultat pour votre recherche',
+      noResultsBody:
+        'Essayez de la reformuler — la recherche sémantique cherche le sens, pas seulement les mots exacts.',
+      filtersUnavailable:
+        "Les filtres de type, en direct uniquement, requêtes min. et tri ne s'appliquent pas pendant une recherche.",
+    },
     live: {
       badge: 'EN DIRECT',
       updated: 'Mis à jour {time}',

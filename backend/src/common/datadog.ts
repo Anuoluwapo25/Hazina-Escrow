@@ -320,6 +320,27 @@ export const domainMetrics = {
       service: tags.service,
     });
   },
+
+  // ============= SEARCH METRICS =============
+  /**
+   * Track GET /api/search queries.
+   * @param tags.mode - 'hybrid' when the embedding model was available, 'keyword-only' when degraded
+   * @param tags.reranked - whether the optional LLM rerank ran
+   * @param tags.resultCount - number of results returned after filtering/pagination
+   */
+  searchQueried(tags: {
+    mode: 'hybrid' | 'keyword-only';
+    reranked: boolean;
+    resultCount: number;
+    durationMs: number;
+  }) {
+    incrementMetric('search.queried', 1, {
+      mode: tags.mode,
+      reranked: tags.reranked,
+      result_count: tags.resultCount,
+      duration_ms: tags.durationMs,
+    });
+  },
 };
 
 export function initializeDatadog(): void {

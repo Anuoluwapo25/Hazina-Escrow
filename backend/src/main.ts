@@ -25,6 +25,7 @@ import http from 'http';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { datasetsRouter } from './datasets/datasets.router';
+import { searchRouter } from './search/search.router';
 import {
   paymentsRouter,
   startDeliveryRetryWorker,
@@ -304,6 +305,7 @@ const v1Router = express.Router();
 
 v1Router.use('/datasets', datasetsRouter);
 v1Router.use('/datasets', snapshotsRouter);
+v1Router.use('/', searchRouter);
 v1Router.use('/agent', requireApiKey, agentRouter);
 v1Router.use('/webhooks', webhooksRouter);
 v1Router.use('/payments', requireApiKey, paymentsRouter);
@@ -337,6 +339,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 // Routes
 app.use('/api/datasets', datasetsRouter);
 app.use('/api/datasets', snapshotsRouter);
+app.use('/api', searchRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
 app.use('/api', claimableRouter);

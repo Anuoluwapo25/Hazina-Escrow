@@ -3,6 +3,7 @@ import { getAllDatasets, updateDataset, type Dataset } from '../common/storage';
 import { getProviderById, getProviderByType } from './registry';
 import { logger } from '../lib/logger';
 import { recordDatasetSnapshot } from '../snapshots/snapshots.service';
+import { indexDatasetInBackground } from '../search/indexer';
 import type { ProviderSnapshot } from './provider.types';
 
 export interface RefreshResult {
@@ -57,12 +58,18 @@ export async function refreshDataset(
   try {
     const snapshot = await provider.refresh();
     const data = snapshotToData(snapshot);
-    await updateDataset(dataset.id, {
+    const updated = await updateDataset(dataset.id, {
       data,
       provider: provider.id,
       live: true,
       lastRefreshedAt: snapshot.fetchedAt,
     });
+
+    // Re-index for search. The stable-document hash (see search/document.ts)
+    // means this is a no-op embed call on most refreshes — only a genuine
+    // change in name/description/field-shape triggers a re-embed, not the
+    // fresh sample values a live feed produces every cycle.
+    if (updated) indexDatasetInBackground(updated);
 
     const recorded = await recordDatasetSnapshot(dataset.id, data, {
       at: snapshot.fetchedAt,

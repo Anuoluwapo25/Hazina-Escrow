@@ -232,6 +232,123 @@ describe('api request throttling', () => {
   });
 });
 
+describe('api.search', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'));
+    __resetRequestThrottleForTests();
+  });
+
+  afterEach(() => {
+    __resetRequestThrottleForTests();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  function searchResponse(overrides: Record<string, unknown> = {}) {
+    return createFetchResponse({
+      success: true,
+      query: 'whale',
+      results: [],
+      total: 0,
+      page: 1,
+      limit: 20,
+      mode: 'hybrid',
+      reranked: false,
+      ...overrides,
+    });
+  }
+
+  it('builds the query string with q and omits unset optional params', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(searchResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.search({ q: 'large holder activity' });
+
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) throw new Error('fetchMock was not called');
+    const url = new URL(String(firstCall[0]), 'http://localhost');
+    expect(url.pathname).toContain('/search');
+    expect(url.searchParams.get('q')).toBe('large holder activity');
+    expect(url.searchParams.has('category')).toBe(false);
+    expect(url.searchParams.has('minPrice')).toBe(false);
+    expect(url.searchParams.has('explain')).toBe(false);
+  });
+
+  it('includes category/minPrice/maxPrice/page/limit/explain when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(searchResponse());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.search({
+      q: 'whale',
+      category: 'on-chain',
+      minPrice: 1,
+      maxPrice: 5,
+      page: 2,
+      limit: 12,
+      explain: true,
+    });
+
+    const firstCall = fetchMock.mock.calls[0];
+    if (!firstCall) throw new Error('fetchMock was not called');
+    const url = new URL(String(firstCall[0]), 'http://localhost');
+    expect(url.searchParams.get('category')).toBe('on-chain');
+    expect(url.searchParams.get('minPrice')).toBe('1');
+    expect(url.searchParams.get('maxPrice')).toBe('5');
+    expect(url.searchParams.get('page')).toBe('2');
+    expect(url.searchParams.get('limit')).toBe('12');
+    expect(url.searchParams.get('explain')).toBe('true');
+  });
+
+  it('parses a result including matchedBecause and score', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      searchResponse({
+        results: [
+          {
+            id: 'ds-whale',
+            name: 'Whale Wallet Movements',
+            description: 'Tracks large transfers',
+            type: 'whale-wallets',
+            pricePerQuery: 1,
+            queriesServed: 5,
+            score: 0.82,
+            matchedBecause: 'Semantically related to "large holder activity"',
+          },
+        ],
+        total: 1,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.search({ q: 'large holder activity', explain: true });
+    expect(result.total).toBe(1);
+    expect(result.mode).toBe('hybrid');
+    expect(result.results[0]).toMatchObject({
+      id: 'ds-whale',
+      score: 0.82,
+      matchedBecause: 'Semantically related to "large holder activity"',
+    });
+  });
+
+  it('throws ApiValidationError when the response has an unexpected shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        query: 'whale',
+        results: [{ id: 'ds-1' /* missing required fields */ }],
+        total: 1,
+        page: 1,
+        limit: 20,
+        mode: 'hybrid',
+        reranked: false,
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.search({ q: 'whale' })).rejects.toThrow('Unexpected API shape:');
+  });
+});
+
 describe('api response validation', () => {
   beforeEach(() => {
     vi.useFakeTimers();
