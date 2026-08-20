@@ -23,7 +23,11 @@ export interface LockResult {
  *   3. sign it in Freighter
  *   4. relay the signed transaction and return the on-chain escrow id
  */
-export async function lockFundsInEscrow(datasetId: string, amount?: number, quote?: any): Promise<LockResult> {
+export async function lockFundsInEscrow(
+  datasetId: string,
+  amount?: number,
+  quote?: Record<string, unknown>,
+): Promise<LockResult> {
   const buyer = await connectFreighter();
 
   const built = await api.buildEscrowLock(buyer, datasetId, amount, quote);
