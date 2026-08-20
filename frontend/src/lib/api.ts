@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getEnv } from './env';
+import { getSellerToken } from './sellerAuth';
 
 const REQUEST_THROTTLE_MS = 250;
 
@@ -210,13 +211,7 @@ export interface ReceiptVerification {
   merkleProofValid?: boolean;
   anchorVerified?: boolean;
   anchorTxHash?: string;
-  status:
-    | 'NOT_ANCHORED_YET'
-    | 'ANCHORING'
-    | 'ANCHORED'
-    | 'ANCHOR_FAILED'
-    | 'VERIFIED'
-    | 'MISMATCH';
+  status: 'NOT_ANCHORED_YET' | 'ANCHORING' | 'ANCHORED' | 'ANCHOR_FAILED' | 'VERIFIED' | 'MISMATCH';
   error?: string;
 }
 
@@ -420,15 +415,25 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
   return { ...headers, ...(extra as Record<string, string>) };
 }
 
+/**
+ * Bearer headers for seller-scoped endpoints. Prefers the in-memory SEP-10
+ * seller JWT when the seller has signed in; falls back to the shared API key
+ * (legacy deployments) when it has not.
+ */
+function sellerAuthHeaders(): HeadersInit {
+  const token = getSellerToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function fetchWithTimeout(url: string, options?: RequestOptions): Promise<Response> {
   const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...init } = options ?? {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
+      ...init,
       signal: controller.signal,
       headers: authHeaders(init.headers),
-      ...init,
     });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -567,6 +572,7 @@ export const api = {
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(
       `${getApiBaseUrl()}/analytics/seller/${encodeURIComponent(wallet)}`,
+      { headers: sellerAuthHeaders() },
     ).then(r => ({
       revenueSeries: r.revenueSeries,
       queryVolumeSeries: r.queryVolumeSeries,
@@ -578,9 +584,9 @@ export const api = {
     const url = datasetId
       ? `${getApiBaseUrl()}/datasets/${datasetId}/transactions`
       : `${getApiBaseUrl()}/datasets/transactions`;
-    return request<{ success: boolean; transactions: unknown }>(url).then(r =>
-      parseApiResponse(z.array(TransactionSchema), r.transactions),
-    );
+    return request<{ success: boolean; transactions: unknown }>(url, {
+      headers: sellerAuthHeaders(),
+    }).then(r => parseApiResponse(z.array(TransactionSchema), r.transactions));
   },
 
   initiateQuery: (id: string) =>
@@ -694,7 +700,7 @@ export const api = {
   }) =>
     request<{ success: boolean; dataset: DatasetMeta }>(`${getApiBaseUrl()}/datasets`, {
       method: 'POST',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
       body: JSON.stringify(payload),
     }).then(r => r.dataset),
 
@@ -710,14 +716,14 @@ export const api = {
   ) =>
     request<{ success: boolean; dataset: DatasetMeta }>(`${getApiBaseUrl()}/datasets/${id}`, {
       method: 'PATCH',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
       body: JSON.stringify(payload),
     }).then(r => r.dataset),
 
   deleteDataset: (id: string) =>
     request<{ success: boolean; message: string }>(`${getApiBaseUrl()}/datasets/${id}`, {
       method: 'DELETE',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
     }),
 
   // ── Claimable balance payout fallback (#589) ─────────────────────────────
@@ -726,6 +732,7 @@ export const api = {
   getSellerClaimables: (wallet: string) =>
     request<{ success: boolean; claimables: ClaimableBalanceItem[] }>(
       `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claimables`,
+      { headers: sellerAuthHeaders() },
     ).then(r => r.claimables),
 
   /** Sponsor-signed (not seller-signed) claim XDR — the seller's wallet must still sign it. */
@@ -734,6 +741,7 @@ export const api = {
       `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claim-tx`,
       {
         method: 'POST',
+        headers: sellerAuthHeaders(),
         body: JSON.stringify({ balanceId }),
       },
     ),
