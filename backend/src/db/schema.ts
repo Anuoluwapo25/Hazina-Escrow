@@ -219,6 +219,30 @@ export const receipts = pgTable(
   }),
 );
 
+/**
+ * SEP-10 challenge nonces.
+ *
+ * A challenge transaction is single-use: it must be redeemed exactly once before
+ * it expires, and the redeeming account must be the one the challenge was
+ * issued to. `redeemedAt` turns the redemption into an atomic conditional
+ * update (UPDATE ... WHERE redeemed_at IS NULL AND expires_at > now), which is
+ * what makes replay attacks structurally unreachable regardless of concurrency.
+ */
+export const sep10Nonces = pgTable(
+  'sep10_nonces',
+  {
+    nonce: text('nonce').primaryKey(),
+    clientAccount: text('client_account').notNull(),
+    homeDomain: text('home_domain').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    redeemedAt: integer('redeemed_at'),
+  },
+  table => ({
+    expiresAtIdx: index('sep10_nonces_expires_at_idx').on(table.expiresAt),
+  }),
+);
+
 // ── SQLite tables (used when DATABASE_URL is not postgres) ───────────────────
 
 export const datasetsSqlite = sqliteTable(
@@ -414,5 +438,21 @@ export const receiptsSqlite = sqliteTable(
     txHashIdx: sqliteIndex('receipts_tx_hash_idx').on(table.txHash),
     receiptHashIdx: sqliteIndex('receipts_receipt_hash_idx').on(table.receiptHash),
     anchorStatusIdx: sqliteIndex('receipts_anchor_status_idx').on(table.anchorStatus),
+  }),
+);
+
+/** SQLite mirror of {@link sep10Nonces}. */
+export const sep10NoncesSqlite = sqliteTable(
+  'sep10_nonces',
+  {
+    nonce: sqliteText('nonce').primaryKey(),
+    clientAccount: sqliteText('client_account').notNull(),
+    homeDomain: sqliteText('home_domain').notNull(),
+    expiresAt: sqliteInteger('expires_at').notNull(),
+    createdAt: sqliteInteger('created_at').notNull(),
+    redeemedAt: sqliteInteger('redeemed_at'),
+  },
+  table => ({
+    expiresAtIdx: sqliteIndex('sep10_nonces_expires_at_idx').on(table.expiresAt),
   }),
 );
