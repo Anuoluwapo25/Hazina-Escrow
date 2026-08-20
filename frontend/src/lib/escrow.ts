@@ -45,7 +45,9 @@ export async function confirmDelivery(escrowId: number): Promise<string> {
 
 /**
  * Buyer raises a dispute on-chain. Signs raise_dispute() with their own wallet.
- * `evidenceHash` is an optional 32-byte hex string hashing off-chain evidence.
+ * `evidenceHash` is an optional 32-byte hex string hashing off-chain evidence;
+ * when omitted the backend anchors the dispute to the delivery receipt's
+ * receipt hash (the verifiable commitment) for this escrow's transaction.
  */
 export async function raiseDispute(escrowId: number, evidenceHash?: string): Promise<string> {
   const buyer = await connectFreighter();
