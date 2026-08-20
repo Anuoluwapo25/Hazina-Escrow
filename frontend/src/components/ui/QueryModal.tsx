@@ -59,6 +59,38 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
   const [quote, setQuote] = useState<any>(null);
   const [isQuoting, setIsQuoting] = useState(false);
 
+  const [buyerAddress, setBuyerAddress] = useState<string | null>(null);
+  const [balances, setBalances] = useState<Record<string, string>>({});
+
+  const fetchBalances = async (address: string) => {
+    try {
+      const res = await fetch(`https://horizon-testnet.stellar.org/accounts/${address}`);
+      const data = await res.json();
+      if (data.balances) {
+        const newBalances: Record<string, string> = {};
+        data.balances.forEach((b: any) => {
+          if (b.asset_type === 'native') newBalances['XLM'] = b.balance;
+          else newBalances[b.asset_code] = b.balance;
+        });
+        setBalances(newBalances);
+      }
+    } catch (e) {
+      console.error('Failed to fetch balances', e);
+    }
+  };
+
+  const handleConnectWallet = async () => {
+    try {
+      const { connectFreighter } = await import('../../lib/stellarWallets');
+      const address = await connectFreighter();
+      setBuyerAddress(address);
+      fetchBalances(address);
+    } catch (e) {
+      console.error(e);
+      toastError('Wallet connection failed', (e as Error).message);
+    }
+  };
+
   const verifyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -367,18 +399,23 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                 <p className="text-sm text-foreground-muted font-body mb-4">
                   {t('queryModal.payment.headline')}
                 </p>
-                <div className="flex justify-center items-center gap-2 mb-2">
-                  <label className="text-xs text-muted-2">Pay with:</label>
-                  <select 
-                    value={sourceAsset} 
-                    onChange={e => setSourceAsset(e.target.value)}
-                    className="bg-void/60 border border-border/60 rounded px-2 py-1 text-sm text-gold outline-none"
-                  >
-                    <option value="USDC">USDC</option>
-                    <option value="XLM">XLM</option>
-                    <option value="EURC">EURC</option>
-                    <option value="AQUA">AQUA</option>
-                  </select>
+                <div className="flex flex-col items-center justify-center gap-2 mb-2">
+                  <div className="flex justify-center items-center gap-2">
+                    <label className="text-xs text-muted-2">Pay with:</label>
+                    <select 
+                      value={sourceAsset} 
+                      onChange={e => setSourceAsset(e.target.value)}
+                      className="bg-void/60 border border-border/60 rounded px-2 py-1 text-sm text-gold outline-none"
+                    >
+                      <option value="USDC">USDC {balances['USDC'] ? `(${parseFloat(balances['USDC']).toFixed(2)} avail)` : ''}</option>
+                      <option value="XLM">XLM {balances['XLM'] ? `(${parseFloat(balances['XLM']).toFixed(2)} avail)` : ''}</option>
+                      <option value="EURC">EURC {balances['EURC'] ? `(${parseFloat(balances['EURC']).toFixed(2)} avail)` : ''}</option>
+                      <option value="AQUA">AQUA {balances['AQUA'] ? `(${parseFloat(balances['AQUA']).toFixed(2)} avail)` : ''}</option>
+                    </select>
+                  </div>
+                  {!buyerAddress && (
+                    <button onClick={handleConnectWallet} className="text-[10px] text-gold hover:underline mt-1">Connect wallet to see balances</button>
+                  )}
                 </div>
                 {isQuoting && (
                   <p className="text-xs text-gold flex items-center justify-center gap-1 mt-2"><Loader2 className="w-3 h-3 animate-spin"/> Fetching quote...</p>

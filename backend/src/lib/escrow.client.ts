@@ -211,16 +211,15 @@ export async function buildLockTx(params: {
     const fullPath = [sourceAddr, ...pathAddresses, destAddr].filter(Boolean);
 
     const swapArgs = [
-      addressToScVal(routerId), // Wait, swap_tokens_for_exact_tokens doesn't take router address as arg, but Soroban contract call doesn't need it. 
-      i128ToScVal(toStroops(parseFloat(quote.destination.amount))), // amount_out
-      i128ToScVal(toStroops(parseFloat(quote.source.maxAmount))), // amount_in_max
+      i128ToScVal(toStroops(parseFloat(quote.source.maxAmount))), // amount_in
+      i128ToScVal(toStroops(parseFloat(quote.destination.amount))), // amount_out_min
       arrayToScVal(fullPath.map(p => addressToScVal(p))), // path
       addressToScVal(buyer), // to
       u64ToScVal(Math.floor(Date.now() / 1000) + 300) // deadline
     ];
     
-    // We'll use swap_tokens_for_exact_tokens to get the exact USDC amount needed for lock.
-    txBuilder.addOperation(router.call('swap_tokens_for_exact_tokens', swapArgs[1], swapArgs[2], swapArgs[3], swapArgs[4], swapArgs[5]));
+    // We'll use swap_exact_tokens_for_tokens to provide the exact amount_in and expect at least amount_out_min.
+    txBuilder.addOperation(router.call('swap_exact_tokens_for_tokens', ...swapArgs));
   }
 
   const tx = txBuilder

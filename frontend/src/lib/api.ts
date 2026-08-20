@@ -478,12 +478,12 @@ export const api = {
   // ── Non-custodial escrow (#547/#548) ─────────────────────────────────────
 
   /** Ask the backend to assemble an unsigned lock() transaction for the buyer. */
-  buildEscrowLock: (buyer: string, datasetId: string, amount?: number) =>
+  buildEscrowLock: (buyer: string, datasetId: string, amount?: number, quote?: any) =>
     request<{ success: boolean; xdr: string; contractId: string; amount: number }>(
       `${getApiBaseUrl()}/payments/escrow/lock/build`,
       {
         method: 'POST',
-        body: JSON.stringify({ buyer, datasetId, amount }),
+        body: JSON.stringify({ buyer, datasetId, amount, quote }),
       },
     ),
 
