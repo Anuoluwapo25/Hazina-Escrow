@@ -44,6 +44,7 @@ import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
 import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
+import { authRouter } from './auth/sep10.router';
 import { readStore } from './common/storage';
 import { BackupScheduler } from './common/backup.scheduler';
 import { backupRouter, setBackupScheduler } from './common/backup.router';
@@ -324,6 +325,9 @@ v1Router.use('/', sentinelRouter);
 // Receipt verification is public — a delivery receipt is a commitment anyone
 // holding the id can check, and the endpoint exposes no payload bytes.
 v1Router.use('/receipts', receiptsRouter);
+// SEP-10 "Sign in with Stellar" — challenge issuance and signed-challenge
+// verification. Self-guards with 503 when SEP-10 is not enabled.
+v1Router.use('/auth', authRouter);
 
 app.use('/api/v1', v1Router);
 
@@ -352,6 +356,7 @@ app.use('/api/analytics', analyticsRouter);
 app.use('/api', backupRouter);
 app.use('/api', sentinelRouter);
 app.use('/api/receipts', receiptsRouter);
+app.use('/api/auth', authRouter);
 
 // Global error handling middleware — Issue #283 (standard error shape)
 app.use(
