@@ -31,6 +31,9 @@ export interface Dataset {
   /** Human-facing grouping used for marketplace category tabs. */
   category?: string;
   pricePerQuery: number;
+  /** Currency the seller priced in: 'USDC' means pricePerQuery is in USDC (no conversion),
+   *  'USD' means pricePerQuery is in USD and must be converted via Reflector at checkout. */
+  priceCurrency?: 'USDC' | 'USD';
   sellerWallet: string;
   paymentToken?: string;
   notificationEmail?: string;
@@ -123,6 +126,7 @@ function rowToDataset(row: any): Dataset {
     type: row.type,
     category: row.category ?? undefined,
     pricePerQuery: Number(row.pricePerQuery),
+    priceCurrency: (row.priceCurrency as 'USDC' | 'USD') ?? 'USDC',
     sellerWallet: row.sellerWallet,
     paymentToken: row.paymentToken ?? undefined,
     notificationEmail: row.notificationEmail ?? undefined,
@@ -148,6 +152,7 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     type: dataset.type,
     category: dataset.category ?? 'other',
     pricePerQuery: String(dataset.pricePerQuery),
+    priceCurrency: dataset.priceCurrency ?? 'USDC',
     paymentToken: dataset.paymentToken ?? 'USDC',
     sellerWallet: dataset.sellerWallet,
     notificationEmail: dataset.notificationEmail ?? null,

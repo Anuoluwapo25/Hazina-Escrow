@@ -31,6 +31,8 @@ const defaultDatasets: DatasetResponse = {
       description: 'A sample dataset',
       type: 'whale-wallets',
       pricePerQuery: 0.05,
+      priceCurrency: 'USDC',
+      paymentToken: 'USDC',
       sellerWallet: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       queriesServed: 10,
       totalEarned: 0.5,

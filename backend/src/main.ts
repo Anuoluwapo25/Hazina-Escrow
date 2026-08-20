@@ -51,6 +51,7 @@ import { initializeWebSocketServer } from './websocket/ws-server';
 import { startDataRefreshWorker, stopDataRefreshWorker } from './providers/refresh.scheduler';
 import { HORIZON_URL } from './lib/stellar.config';
 import { createCorsOptions } from './common/cors';
+import { oracleRouter } from './providers/oracle.router';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -283,6 +284,7 @@ process.on('uncaughtException', (err: Error) => {
 const v1Router = express.Router();
 
 v1Router.use('/datasets', datasetsRouter);
+v1Router.use('/oracle', oracleRouter);
 v1Router.use('/agent', requireApiKey, agentRouter);
 v1Router.use('/webhooks', webhooksRouter);
 v1Router.use('/payments', requireApiKey, paymentsRouter);
@@ -307,6 +309,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
 // Routes
 app.use('/api/datasets', datasetsRouter);
+app.use('/api/oracle', oracleRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
 app.use('/api/agent', agentRouter);

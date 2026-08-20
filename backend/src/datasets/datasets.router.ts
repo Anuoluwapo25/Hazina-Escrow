@@ -81,6 +81,7 @@ const createDatasetSchema = z.object({
   description: makeSanitizedTextField('description', 2000),
   type: makeSanitizedTextField('type', 100),
   pricePerQuery: z.coerce.number().finite().positive(),
+  priceCurrency: z.enum(['USDC', 'USD']).optional(),
   paymentToken: z.enum(['USDC', 'EURC', 'XLM']).optional(),
   sellerWallet: z
     .string()
@@ -740,6 +741,7 @@ datasetsRouter.post(
       description,
       type,
       pricePerQuery,
+      priceCurrency,
       paymentToken,
       sellerWallet,
       notificationEmail,
@@ -753,6 +755,7 @@ datasetsRouter.post(
       description,
       type,
       pricePerQuery,
+      priceCurrency,
       paymentToken,
       sellerWallet,
       notificationEmail,
@@ -778,6 +781,7 @@ datasetsRouter.post(
       datasetName: dataset.name,
       type: dataset.type,
       pricePerQuery: dataset.pricePerQuery,
+      priceCurrency: dataset.priceCurrency ?? 'USDC',
     }).catch(() => {});
 
     const { data: _d, notificationEmail: _notificationEmail, ...meta } = dataset;
@@ -789,6 +793,7 @@ const updateDatasetSchema = z.object({
   name: makeSanitizedTextField('name', 200).optional(),
   description: makeSanitizedTextField('description', 2000).optional(),
   pricePerQuery: z.coerce.number().finite().positive().optional(),
+  priceCurrency: z.enum(['USDC', 'USD']).optional(),
   paymentToken: z.enum(['USDC', 'EURC', 'XLM']).optional(),
   notificationEmail: z.preprocess(
     value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
@@ -858,6 +863,7 @@ datasetsRouter.patch(
     if (body.description !== undefined) updates.description = body.description;
     if (body.notificationEmail !== undefined) updates.notificationEmail = body.notificationEmail;
     if (body.paymentToken !== undefined) updates.paymentToken = body.paymentToken;
+    if (body.priceCurrency !== undefined) updates.priceCurrency = body.priceCurrency;
 
     if (body.pricePerQuery !== undefined && body.pricePerQuery !== dataset.pricePerQuery) {
       updates.pricePerQuery = body.pricePerQuery;

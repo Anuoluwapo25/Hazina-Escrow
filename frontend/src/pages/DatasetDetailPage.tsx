@@ -11,6 +11,8 @@ import {
   Radio,
   ShoppingCart,
   Star,
+  Loader2,
+  Info,
 } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, Tooltip, YAxis } from 'recharts';
 import clsx from 'clsx';
@@ -66,6 +68,26 @@ export default function DatasetDetailPage() {
     enabled: Boolean(datasetId),
     // live feeds refresh server-side; keep the sample reasonably fresh
     refetchInterval: dataset?.live ? 60_000 : false,
+  });
+
+  const listedCurrency = dataset?.priceCurrency ?? 'USDC';
+  const settleAsset = dataset?.paymentToken ?? 'USDC';
+  const needsOracle = !(listedCurrency === 'USDC' && settleAsset === 'USDC');
+
+  const {
+    data: quote,
+    isFetching: quoteLoading,
+    isError: quoteError,
+  } = useQuery({
+    queryKey: ['oracle-convert', datasetId, dataset?.pricePerQuery, listedCurrency, settleAsset],
+    queryFn: () =>
+      api.oracleConvert({
+        priceUsd: dataset!.pricePerQuery,
+        paymentAsset: settleAsset as 'XLM' | 'USDC' | 'EURC' | 'USD',
+      }),
+    enabled: needsOracle && Boolean(dataset),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
 
   const previewJson = useMemo(() => JSON.stringify(dataset?.preview ?? {}, null, 2), [dataset]);
@@ -157,7 +179,7 @@ export default function DatasetDetailPage() {
                 />
                 <Metric
                   icon={DollarSign}
-                  label="Per query"
+                  label={`Per query · ${listedCurrency}`}
                   value={`$${formatUSDC(dataset.pricePerQuery, locale)}`}
                 />
               </div>
@@ -281,12 +303,53 @@ export default function DatasetDetailPage() {
                 {truncateAddress(dataset.sellerWallet)}
               </p>
               <p className="text-sm text-muted mb-2">Buyer rating</p>
-              <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="flex items-center justify-between gap-3 mb-5">
                 <Stars value={ratings.score} />
                 <span className="text-sm text-foreground-muted">
                   {ratings.score.toFixed(1)} ({ratings.count})
                 </span>
               </div>
+
+              {needsOracle && (
+                <div className="mb-5 rounded-lg border border-border/60 bg-void/40 p-3.5 space-y-2">
+                  <p className="text-xs uppercase tracking-wider text-muted-2 font-body">
+                    Settlement estimate · {settleAsset}
+                  </p>
+                  {quoteLoading && !quote ? (
+                    <p className="flex items-center gap-1.5 text-sm text-foreground-muted">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Fetching rate…
+                    </p>
+                  ) : quoteError || !quote ? (
+                    <p className="flex items-start gap-1.5 text-xs text-red-400">
+                      <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                      Oracle rate unavailable. Exact price determined at checkout.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-lg font-display font-semibold text-foreground break-words">
+                        &asymp; {formatUSDC(quote.amountOut, locale)} {settleAsset}
+                      </p>
+                      <a
+                        href={`https://stellar.expert/explorer/public/contract/${quote.price.sourceContract}`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="flex items-start gap-1.5 text-[11px] text-muted-2 hover:text-foreground-muted leading-snug"
+                      >
+                        <Info className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                        <span>
+                          Rate from Reflector ({quote.price.resolvedVia}) · {quote.price.ageSeconds}
+                          s old
+                          <span className="underline underline-offset-2 decoration-dotted">
+                            {' '}
+                            · view contract
+                          </span>
+                        </span>
+                      </a>
+                    </>
+                  )}
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={() => setShowQueryModal(true)}

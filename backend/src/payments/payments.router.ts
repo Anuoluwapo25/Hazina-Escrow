@@ -30,6 +30,11 @@ import { isEscrowContractConfigured, getEscrowContractId } from '../lib/stellar.
 import { releaseEscrow } from '../lib/escrow.client';
 import { PLATFORM_FEE_BPS } from '../common/constants';
 import {
+  convertDatasetPrice,
+  OracleUnavailableError,
+  OracleAssetCode,
+} from '../providers/reflector.provider';
+import {
   deliverVerifiedPayment,
   markDeliveryFailure,
   processPayment,
@@ -42,6 +47,69 @@ export const paymentsRouter = Router();
 
 // Start the payout retry sweep scheduler
 scheduleRetrySweep(1_000);
+
+interface ResolvedPrice {
+  amountPayment: number;
+  amountPaymentFixed: string;
+  decimalsPayment: number;
+  expiresAt: number;
+  oracle?: {
+    base: string;
+    quote: string;
+    price: number;
+    priceRaw: string;
+    decimals: number;
+    timestamp: number;
+    ageSeconds: number;
+    sourceContract: string;
+    resolvedVia: string;
+  };
+}
+
+async function resolveDatasetPrice(dataset: {
+  pricePerQuery: number;
+  priceCurrency?: 'USDC' | 'USD';
+  paymentToken?: string;
+}): Promise<ResolvedPrice> {
+  const priceCurrency = dataset.priceCurrency ?? 'USDC';
+  const paymentAsset = (dataset.paymentToken ?? 'USDC') as OracleAssetCode;
+  const TOKEN_DECIMALS = 7;
+  const priceFixed = BigInt(Math.round(dataset.pricePerQuery * 10 ** TOKEN_DECIMALS));
+
+  if (priceCurrency === 'USDC' && (paymentAsset === 'USDC' || paymentAsset === 'USD')) {
+    return {
+      amountPayment: dataset.pricePerQuery,
+      amountPaymentFixed: priceFixed.toString(),
+      decimalsPayment: TOKEN_DECIMALS,
+      expiresAt: Math.floor(Date.now() / 1000) + 300,
+    };
+  }
+
+  const conversion = await convertDatasetPrice({
+    priceUsd: priceFixed,
+    usdDecimals: TOKEN_DECIMALS,
+    paymentAsset,
+    paymentDecimals: TOKEN_DECIMALS,
+  });
+  const displayAmount = Number(conversion.amountOut) / 10 ** TOKEN_DECIMALS;
+  return {
+    amountPayment: displayAmount,
+    amountPaymentFixed: conversion.amountOut.toString(),
+    decimalsPayment: TOKEN_DECIMALS,
+    expiresAt: conversion.expiresAt,
+    oracle: {
+      base: conversion.price.base,
+      quote: conversion.price.quote,
+      price: Number(conversion.price.price) / 10 ** conversion.price.decimals,
+      priceRaw: conversion.price.price.toString(),
+      decimals: conversion.price.decimals,
+      timestamp: conversion.price.timestamp,
+      ageSeconds: conversion.price.ageSeconds,
+      sourceContract: conversion.price.sourceContract,
+      resolvedVia: conversion.price.resolvedVia,
+    },
+  };
+}
 
 const verifySchema = z.object({
   txHash: z.string().min(1),
@@ -177,11 +245,24 @@ const verifyDemoSchema = z.object({
 
 // POST /api/query/:id — initiate query, returns 402 Payment Required
 paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
-  // Route requires :id, so Express guarantees this is present when matched.
   const id = req.params.id as string;
 
   const dataset = await getDataset(id);
   if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+
+  let resolved: ResolvedPrice;
+  try {
+    resolved = await resolveDatasetPrice(dataset);
+  } catch (err) {
+    if (err instanceof OracleUnavailableError) {
+      return res.status(503).json({
+        error: `Cannot quote: oracle unavailable`,
+        oracleError: err.message,
+        reason: err.reason,
+      });
+    }
+    throw err;
+  }
 
   const timestamp = Date.now();
   const memo = `haz-${id.slice(0, 8)}-${timestamp}`;
@@ -192,24 +273,18 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
   await addTransaction({
     id: transactionId,
     datasetId: dataset.id,
-    // tx_hash is NOT NULL UNIQUE; the real hash isn't known until verification,
-    // so use a placeholder unique to this transaction rather than ''  which
-    // would collide across concurrent pending transactions.
     txHash: `pending-${transactionId}`,
     memo,
-    amount: dataset.pricePerQuery,
+    amount: resolved.amountPayment,
     paymentToken: tokenCode,
     status: 'pending',
     deliveryStatus: 'pending',
     timestamp: new Date().toISOString(),
   });
 
-  // x402 Payment Required response
   const escrowEnabled = isEscrowContractConfigured();
+  const expiresIn = Math.max(60, resolved.expiresAt - Math.floor(Date.now() / 1000));
 
-  // Non-custodial path: the buyer locks funds into the contract from their own
-  // wallet. We advertise the contract address + the build-lock endpoint instead
-  // of a plain payment address, so funds are never routed through a Hazina key.
   if (escrowEnabled) {
     return res.status(402).json({
       error: 'Payment Required',
@@ -219,31 +294,34 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
         id: dataset.id,
         name: dataset.name,
         type: dataset.type,
+        priceCurrency: dataset.priceCurrency ?? 'USDC',
+        priceListed: dataset.pricePerQuery,
       },
       payment: {
         mode: 'escrow',
         escrowContractId: getEscrowContractId(),
-        amount: dataset.pricePerQuery,
+        amount: resolved.amountPayment,
+        amountFixed: resolved.amountPaymentFixed,
+        decimals: resolved.decimalsPayment,
         currency: tokenCode,
         network: 'Stellar Testnet',
         platformFeeBps: PLATFORM_FEE_BPS,
         memo,
-        expiresIn: 300,
-        // Buyer flow: build → sign with own wallet → submit → verify
+        expiresIn,
+        expiresAt: resolved.expiresAt,
+        oracle: resolved.oracle ?? null,
         buildLockUrl: `/api/v1/payments/escrow/lock/build`,
         submitLockUrl: `/api/v1/payments/escrow/lock/submit`,
         instructions: [
           `1. Connect your Stellar wallet (Freighter)`,
           `2. Request the lock transaction from ${`/api/v1/payments/escrow/lock/build`} for this dataset`,
-          `3. Sign it in your wallet — your ${dataset.pricePerQuery} ${tokenCode} is locked in the escrow contract, not a Hazina wallet`,
+          `3. Sign it in your wallet — your ${resolved.amountPayment} ${tokenCode} is locked in the escrow contract, not a Hazina wallet`,
           `4. Submit the signed transaction; the returned escrow id proves your funds are held on-chain`,
         ],
       },
     });
   }
 
-  // Legacy/demo custodial path: buyer pays a plain wallet the backend controls.
-  // Retained only when no escrow contract is configured (labelled as such).
   return res.status(402).json({
     error: 'Payment Required',
     x402: true,
@@ -252,19 +330,25 @@ paymentsRouter.post('/query/:id', async (req: Request, res: Response) => {
       id: dataset.id,
       name: dataset.name,
       type: dataset.type,
+      priceCurrency: dataset.priceCurrency ?? 'USDC',
+      priceListed: dataset.pricePerQuery,
     },
     payment: {
       mode: 'custodial-demo',
       paymentAddress: process.env.ESCROW_WALLET || dataset.sellerWallet,
-      amount: dataset.pricePerQuery,
+      amount: resolved.amountPayment,
+      amountFixed: resolved.amountPaymentFixed,
+      decimals: resolved.decimalsPayment,
       currency: tokenCode,
       network: 'Stellar Testnet',
       memo,
-      expiresIn: 300, // 5 minutes
+      expiresIn,
+      expiresAt: resolved.expiresAt,
+      oracle: resolved.oracle ?? null,
       instructions: [
         `NOTE: demo mode — funds route through a Hazina-controlled wallet. Set ESCROW_CONTRACT_ID for non-custodial escrow.`,
         `1. Open your Stellar wallet (Lobstr, StellarX, or testnet faucet)`,
-        `2. Send exactly ${dataset.pricePerQuery} ${tokenCode} to the address above`,
+        `2. Send exactly ${resolved.amountPayment} ${tokenCode} to the address above`,
         `3. Include memo: ${memo}`,
         `4. Submit the transaction hash below to receive your data`,
       ],
