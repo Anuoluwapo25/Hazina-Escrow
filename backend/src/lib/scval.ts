@@ -36,6 +36,10 @@ export function boolToScVal(value: boolean): StellarSdk.xdr.ScVal {
   return StellarSdk.nativeToScVal(value, { type: 'bool' });
 }
 
+export function arrayToScVal(values: StellarSdk.xdr.ScVal[]): StellarSdk.xdr.ScVal {
+  return StellarSdk.xdr.ScVal.scvVec(values);
+}
+
 /** Decode any ScVal back into a plain JS value. */
 export function scValToNative<T = unknown>(scVal: StellarSdk.xdr.ScVal): T {
   return StellarSdk.scValToNative(scVal) as T;

@@ -173,8 +173,8 @@ proptest! {
         prop_assert!(world.client.try_set_default_fee(&outsider, &new_fee).is_err());
         prop_assert!(world.client.try_set_dataset_fee(&outsider, &dataset, &new_fee).is_err());
         prop_assert!(world.client.try_clear_dataset_fee(&outsider, &dataset).is_err());
-        prop_assert!(world.client.try_set_treasury(&outsider, &outsider).is_err());
-        prop_assert!(world.client.try_transfer_admin(&outsider, &outsider).is_err());
+        prop_assert!(world.client.try_schedule_set_treasury(&outsider, &outsider).is_err());
+        prop_assert!(world.client.try_schedule_admin_change(&outsider, &outsider).is_err());
         prop_assert!(world.client.try_set_arbitrator(&outsider, &outsider).is_err());
         prop_assert!(world.client.try_set_whitelist_enforced(&outsider, &true).is_err());
         prop_assert!(world.client.try_set_address_blacklisted(&outsider, &world.buyer, &true).is_err());
@@ -185,8 +185,11 @@ proptest! {
         prop_assert_eq!(world.client.get_default_fee(), 500);
         prop_assert_eq!(world.balances(), before);
 
-        // The real admin still works, and can hand the role over exactly once.
-        world.client.transfer_admin(&world.admin, &outsider);
+        // The real admin still works, and can hand the role over via the
+        // timelocked two-step: schedule → wait → accept.
+        world.client.schedule_admin_change(&world.admin, &outsider);
+        world.advance_ledgers(world.get_timelock_delay());
+        world.client.accept_admin(&outsider);
         prop_assert!(world.client.try_set_default_fee(&world.admin, &new_fee).is_err());
         world.client.set_default_fee(&outsider, &new_fee);
         prop_assert_eq!(world.client.get_default_fee(), new_fee);
@@ -218,15 +221,20 @@ proptest! {
         prop_assert_eq!(world.client.get_escrow_count(), 1);
         prop_assert_eq!(world.client.get_default_fee(), fee_bps);
 
-        // `emergency_withdraw` is the one write that *requires* the paused state.
-        world.client.emergency_withdraw(
-            &world.admin, &world.token_address(), &world.treasury, &amount);
+        // I23 — emergency_withdraw requires the paused state AND the timelock.
+        // Propose the sweep while paused; advance past the delay; then execute.
+        world.client.schedule_emergency_withdraw(
+            &world.admin, &world.token_address(), &world.treasury, &amount,
+        );
+        world.advance_ledgers(world.get_timelock_delay());
+        // The timelock has now elapsed and the contract is still paused, so execute succeeds.
+        world.client.execute_emergency_withdraw();
         prop_assert_eq!(world.balances().contract, 0);
 
         world.client.unpause(&world.admin);
         prop_assert!(!world.client.is_paused());
-        prop_assert!(world.client.try_emergency_withdraw(
-            &world.admin, &world.token_address(), &world.treasury, &1i128).is_err());
+        // After unpausing, no further emergency withdraw is possible.
+        prop_assert!(world.client.try_execute_emergency_withdraw().is_err());
     }
 
     /// A2 — `claim_expired` is reachable while paused. Pinned, not endorsed:

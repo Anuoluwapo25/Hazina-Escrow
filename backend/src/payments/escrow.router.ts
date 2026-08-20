@@ -39,6 +39,8 @@ import {
 } from '../lib/escrow.client';
 import { getDataset, getTransactionByEscrowId } from '../common/storage';
 import { getReceiptByTxHash } from '../receipts/receipt.service';
+import { getDataset } from '../common/storage';
+import { verifyQuoteSignature, Quote } from './quote.service';
 
 export const escrowRouter = Router();
 
@@ -62,6 +64,16 @@ const lockBuildSchema = z.object({
     .int()
     .positive()
     .max(30 * 24 * 60 * 60)
+    .optional(),
+  quote: z
+    .object({
+      destination: z.object({ asset: z.string(), amount: z.string() }),
+      source: z.object({ asset: z.string(), maxAmount: z.string() }),
+      path: z.array(z.string()),
+      slippageBps: z.number(),
+      expiresAt: z.string(),
+      signature: z.string(),
+    })
     .optional(),
 });
 
@@ -128,6 +140,13 @@ escrowRouter.post(
       });
     }
 
+    if (req.body.quote) {
+      const isValid = verifyQuoteSignature(req.body.quote as Quote);
+      if (!isValid) {
+        return res.status(400).json({ error: 'Invalid or expired quote' });
+      }
+    }
+
     try {
       const { xdr, contractId } = await buildLockTx({
         buyer,
@@ -136,6 +155,7 @@ escrowRouter.post(
         datasetId: dataset.id,
         tokenCode: dataset.paymentToken || 'USDC',
         expirySeconds,
+        quote: req.body.quote as Quote,
       });
       return res.json({ success: true, xdr, contractId, amount: lockAmount });
     } catch (err) {
