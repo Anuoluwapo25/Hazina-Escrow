@@ -19,6 +19,7 @@ import clsx from 'clsx';
 import { api, DatasetDetail, DatasetPreview } from '../lib/api';
 import { formatTimeAgo, formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
 import QueryModal from '../components/ui/QueryModal';
+import DatasetHistory from '../components/ui/DatasetHistory';
 import { Skeleton } from '../components/ui/SkeletonLoader';
 import { useI18n } from '../i18n';
 
@@ -274,6 +275,8 @@ export default function DatasetDetailPage() {
                 <code>{previewJson}</code>
               </pre>
             </section>
+
+            <DatasetHistory datasetId={datasetId} />
 
             <section className="glass-card p-6 md:p-8">
               <h2 className="font-display text-2xl font-semibold text-foreground mb-4">

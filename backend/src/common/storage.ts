@@ -1,10 +1,14 @@
 import db from '../db/client';
-import { eq, sql, and } from 'drizzle-orm';
+import { eq, sql, and, lte } from 'drizzle-orm';
+import type { SnapshotRetentionPolicy } from '../snapshots/snapshots.types';
 import {
   datasetsSqlite,
   transactionsSqlite,
   webhooksSqlite,
   payoutFailuresSqlite,
+  claimableBalancesSqlite,
+  sentinelCursorSqlite,
+  sentinelAlertsSqlite,
 } from '../db/schema';
 
 const pendingTxHashes = new Set<string>();
@@ -53,6 +57,8 @@ export interface Dataset {
   tags?: string[];
   /** Soft-delete / visibility flag; defaults to true. */
   active?: boolean;
+  /** Per-dataset snapshot retention overrides; platform defaults when unset. */
+  snapshotPolicy?: Partial<SnapshotRetentionPolicy>;
 }
 export interface Transaction {
   id: string;
@@ -63,7 +69,13 @@ export interface Transaction {
   amount: number;
   paymentToken?: string;
   status?:
-    'pending' | 'verifying' | 'verified' | 'completed' | 'failed' | 'refunded' | 'delivery_failed';
+    | 'pending'
+    | 'verifying'
+    | 'verified'
+    | 'completed'
+    | 'failed'
+    | 'refunded'
+    | 'delivery_failed';
   deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
   sellerPaid?: boolean;
   sellerAmount?: number;
@@ -79,10 +91,19 @@ export interface Transaction {
   deliveredAt?: string;
   /** On-chain escrow id (from the contract's lock()); undefined for demo/legacy txns. */
   escrowId?: number;
+  /** Claimable balance id, set when the seller payout for this tx settled into a claimable balance instead of a direct payment. */
+  balanceId?: string;
+  /** Snapshot the buyer was served — what a dispute is reconstructed from (#600). */
+  snapshotId?: string;
   timestamp: string;
 }
 export type WebhookEvent =
-  'payment.received' | 'payment.forwarded' | 'dataset.queried' | 'dataset.created' | 'ping';
+  | 'payment.received'
+  | 'payment.forwarded'
+  | 'payout.claimable'
+  | 'dataset.queried'
+  | 'dataset.created'
+  | 'ping';
 export interface WebhookSubscription {
   id: string;
   sellerWallet: string;
@@ -92,7 +113,11 @@ export interface WebhookSubscription {
   active: boolean;
   createdAt: string;
 }
-export type PayoutFailureStatus = 'pending_retry' | 'manual_review_needed' | 'paid';
+export type PayoutFailureStatus =
+  | 'pending_retry'
+  | 'manual_review_needed'
+  | 'paid'
+  | 'settled_as_claimable';
 export interface PayoutFailure {
   id: string;
   datasetId: string;
@@ -108,11 +133,77 @@ export interface PayoutFailure {
   createdAt: string;
   updatedAt: string;
 }
+export type ClaimableBalanceStatus = 'pending' | 'claimed' | 'reclaimed';
+export interface ClaimableBalance {
+  id: string;
+  /** On-chain claimable balance id (Horizon's `balance_id`). */
+  balanceId: string;
+  datasetId: string;
+  sellerWallet: string;
+  buyerTxHash: string;
+  amount: number;
+  paymentToken?: string;
+  status: ClaimableBalanceStatus;
+  /** Hash of the createClaimableBalance transaction. */
+  creationTxHash: string;
+  /** ISO timestamp after which Hazina's treasury claimant predicate becomes claimable. */
+  reclaimableAt: string;
+  claimedTxHash?: string;
+  claimedAt?: string;
+  reclaimedTxHash?: string;
+  reclaimedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 export interface Store {
   datasets: Dataset[];
   transactions: Transaction[];
   webhooks: WebhookSubscription[];
   payoutFailures: PayoutFailure[];
+  claimableBalances: ClaimableBalance[];
+}
+
+// ── Sentinel (contract monitoring) ──────────────────────────────────────────
+// Not part of Store/readStore/writeStore: this is regenerable operational
+// state, not business data — a point-in-time restore of datasets/transactions
+// must not rewind the monitoring cursor or resurrect resolved alerts.
+
+export interface SentinelCursor {
+  id: string;
+  /** Soroban RPC event paging token; null before the first successful page. */
+  cursor: string | null;
+  lastLedger: number;
+  /** True once the genesis→cursor state rebuild has completed at least once. */
+  backfillComplete: boolean;
+  /** sha256 of the contract's current WASM, used to detect `upgrade()` (which emits no event). */
+  lastWasmHash: string | null;
+  /** Last time ingestion observed forward ledger progress — powers the stalled-stream check. */
+  lastProgressAt: string;
+  updatedAt: string;
+}
+
+export type SentinelAlertSeverity = 'critical' | 'high' | 'medium';
+export type SentinelAlertStatus = 'open' | 'resolved';
+export interface SentinelAlert {
+  id: string;
+  /** Stable dedupe key: `${invariant}:${escrowId ?? 'global'}`. */
+  dedupeKey: string;
+  invariant: string;
+  severity: SentinelAlertSeverity;
+  status: SentinelAlertStatus;
+  escrowId?: number;
+  txHash?: string;
+  ledger?: number;
+  message: string;
+  details?: Record<string, unknown>;
+  /** How many times this exact (invariant, escrow) has re-fired since it was first seen. */
+  count: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** Last time this alert was actually dispatched to Sentry/Datadog/webhook/email (suppression window). */
+  lastNotifiedAt?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 // ── Row ↔ domain converters ──────────────────────────────────────────────────
@@ -141,6 +232,9 @@ function rowToDataset(row: any): Dataset {
     lastRefreshedAt: row.lastRefreshedAt ?? undefined,
     tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
     active: row.active === null || row.active === undefined ? undefined : Boolean(row.active),
+    snapshotPolicy: row.snapshotPolicy
+      ? (JSON.parse(row.snapshotPolicy) as Partial<SnapshotRetentionPolicy>)
+      : undefined,
   };
 }
 
@@ -167,6 +261,8 @@ function datasetToRow(dataset: Dataset): Record<string, unknown> {
     lastRefreshedAt: dataset.lastRefreshedAt ?? null,
     tags: dataset.tags !== undefined ? JSON.stringify(dataset.tags) : null,
     active: dataset.active ? 1 : 0,
+    snapshotPolicy:
+      dataset.snapshotPolicy !== undefined ? JSON.stringify(dataset.snapshotPolicy) : null,
   };
 }
 
@@ -197,6 +293,8 @@ function rowToTransaction(row: any): Transaction {
     deliveredAt: row.deliveredAt ?? undefined,
     escrowId:
       row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
+    balanceId: row.balanceId ?? undefined,
+    snapshotId: row.snapshotId ?? undefined,
     timestamp: row.timestamp,
   };
 }
@@ -225,6 +323,8 @@ function transactionToRow(tx: Transaction): Record<string, unknown> {
     verifiedAt: tx.verifiedAt ?? null,
     deliveredAt: tx.deliveredAt ?? null,
     escrowId: tx.escrowId ?? null,
+    balanceId: tx.balanceId ?? null,
+    snapshotId: tx.snapshotId ?? null,
     timestamp: tx.timestamp,
   };
 }
@@ -292,6 +392,118 @@ function payoutFailureToRow(pf: PayoutFailure): Record<string, unknown> {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToClaimableBalance(row: any): ClaimableBalance {
+  return {
+    id: row.id,
+    balanceId: row.balanceId,
+    datasetId: row.datasetId,
+    sellerWallet: row.sellerWallet,
+    buyerTxHash: row.buyerTxHash,
+    amount: Number(row.amount),
+    paymentToken: row.paymentToken ?? undefined,
+    status: row.status as ClaimableBalanceStatus,
+    creationTxHash: row.creationTxHash,
+    reclaimableAt: row.reclaimableAt,
+    claimedTxHash: row.claimedTxHash ?? undefined,
+    claimedAt: row.claimedAt ?? undefined,
+    reclaimedTxHash: row.reclaimedTxHash ?? undefined,
+    reclaimedAt: row.reclaimedAt ?? undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function claimableBalanceToRow(cb: ClaimableBalance): Record<string, unknown> {
+  return {
+    id: cb.id,
+    balanceId: cb.balanceId,
+    datasetId: cb.datasetId,
+    sellerWallet: cb.sellerWallet,
+    buyerTxHash: cb.buyerTxHash,
+    amount: String(cb.amount),
+    paymentToken: cb.paymentToken ?? 'USDC',
+    status: cb.status,
+    creationTxHash: cb.creationTxHash,
+    reclaimableAt: cb.reclaimableAt,
+    claimedTxHash: cb.claimedTxHash ?? null,
+    claimedAt: cb.claimedAt ?? null,
+    reclaimedTxHash: cb.reclaimedTxHash ?? null,
+    reclaimedAt: cb.reclaimedAt ?? null,
+    createdAt: cb.createdAt,
+    updatedAt: cb.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToSentinelCursor(row: any): SentinelCursor {
+  return {
+    id: row.id,
+    cursor: row.cursor ?? null,
+    lastLedger: Number(row.lastLedger ?? 0),
+    backfillComplete: Boolean(row.backfillComplete),
+    lastWasmHash: row.lastWasmHash ?? null,
+    lastProgressAt: row.lastProgressAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function sentinelCursorToRow(c: SentinelCursor): Record<string, unknown> {
+  return {
+    id: c.id,
+    cursor: c.cursor,
+    lastLedger: c.lastLedger,
+    backfillComplete: c.backfillComplete ? 1 : 0,
+    lastWasmHash: c.lastWasmHash,
+    lastProgressAt: c.lastProgressAt,
+    updatedAt: c.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToSentinelAlert(row: any): SentinelAlert {
+  return {
+    id: row.id,
+    dedupeKey: row.dedupeKey,
+    invariant: row.invariant,
+    severity: row.severity as SentinelAlertSeverity,
+    status: row.status as SentinelAlertStatus,
+    escrowId:
+      row.escrowId === null || row.escrowId === undefined ? undefined : Number(row.escrowId),
+    txHash: row.txHash ?? undefined,
+    ledger: row.ledger === null || row.ledger === undefined ? undefined : Number(row.ledger),
+    message: row.message,
+    details: row.details ? JSON.parse(row.details) : undefined,
+    count: Number(row.count ?? 1),
+    firstSeenAt: row.firstSeenAt,
+    lastSeenAt: row.lastSeenAt,
+    lastNotifiedAt: row.lastNotifiedAt ?? undefined,
+    resolvedAt: row.resolvedAt ?? undefined,
+    resolvedBy: row.resolvedBy ?? undefined,
+  };
+}
+
+function sentinelAlertToRow(a: SentinelAlert): Record<string, unknown> {
+  return {
+    id: a.id,
+    dedupeKey: a.dedupeKey,
+    invariant: a.invariant,
+    severity: a.severity,
+    status: a.status,
+    escrowId: a.escrowId ?? null,
+    txHash: a.txHash ?? null,
+    ledger: a.ledger ?? null,
+    message: a.message,
+    details: a.details !== undefined ? JSON.stringify(a.details) : null,
+    count: a.count,
+    firstSeenAt: a.firstSeenAt,
+    lastSeenAt: a.lastSeenAt,
+    lastNotifiedAt: a.lastNotifiedAt ?? null,
+    resolvedAt: a.resolvedAt ?? null,
+    resolvedBy: a.resolvedBy ?? null,
+  };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function invalidateCache(): void {
@@ -299,17 +511,19 @@ export function invalidateCache(): void {
 }
 
 export async function readStore(): Promise<Store> {
-  const [datasets, transactions, webhooks, payoutFailures] = await Promise.all([
+  const [datasets, transactions, webhooks, payoutFailures, claimableBalances] = await Promise.all([
     db.select().from(datasetsSqlite),
     db.select().from(transactionsSqlite),
     db.select().from(webhooksSqlite),
     db.select().from(payoutFailuresSqlite),
+    db.select().from(claimableBalancesSqlite),
   ]);
   return {
     datasets: datasets.map(rowToDataset),
     transactions: transactions.map(rowToTransaction),
     webhooks: webhooks.map(rowToWebhook),
     payoutFailures: payoutFailures.map(rowToPayoutFailure),
+    claimableBalances: claimableBalances.map(rowToClaimableBalance),
   };
 }
 
@@ -318,6 +532,7 @@ export async function writeStore(store: Store): Promise<void> {
   await db.delete(transactionsSqlite);
   await db.delete(webhooksSqlite);
   await db.delete(payoutFailuresSqlite);
+  await db.delete(claimableBalancesSqlite);
   for (const dataset of store.datasets) {
     await db.insert(datasetsSqlite).values(datasetToRow(dataset));
   }
@@ -329,6 +544,9 @@ export async function writeStore(store: Store): Promise<void> {
   }
   for (const pf of store.payoutFailures) {
     await db.insert(payoutFailuresSqlite).values(payoutFailureToRow(pf));
+  }
+  for (const cb of store.claimableBalances) {
+    await db.insert(claimableBalancesSqlite).values(claimableBalanceToRow(cb));
   }
 }
 
@@ -565,12 +783,92 @@ export async function getPendingPayoutFailures(nowIso: string): Promise<PayoutFa
   return pending.filter(pf => new Date(pf.nextRetryAt).getTime() <= now);
 }
 
+export async function addClaimableBalance(cb: ClaimableBalance): Promise<void> {
+  await db.insert(claimableBalancesSqlite).values(claimableBalanceToRow(cb));
+}
+
+export async function getClaimableBalanceByBalanceId(
+  balanceId: string,
+): Promise<ClaimableBalance | undefined> {
+  const result = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(eq(claimableBalancesSqlite.balanceId, balanceId))
+    .limit(1);
+  return result[0] ? rowToClaimableBalance(result[0]) : undefined;
+}
+
+export async function getClaimableBalancesForSeller(
+  sellerWallet: string,
+): Promise<ClaimableBalance[]> {
+  const result = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(eq(claimableBalancesSqlite.sellerWallet, sellerWallet));
+  return result.map(rowToClaimableBalance);
+}
+
+export async function getReclaimableBalances(nowIso: string): Promise<ClaimableBalance[]> {
+  const result = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(
+      and(
+        eq(claimableBalancesSqlite.status, 'pending'),
+        lte(claimableBalancesSqlite.reclaimableAt, nowIso),
+      ),
+    );
+  return result.map(rowToClaimableBalance);
+}
+
+export async function updateClaimableBalance(
+  id: string,
+  updates: Partial<ClaimableBalance>,
+): Promise<ClaimableBalance | null> {
+  const existing = await db
+    .select()
+    .from(claimableBalancesSqlite)
+    .where(eq(claimableBalancesSqlite.id, id))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToClaimableBalance(existing[0]), ...updates };
+  await db
+    .update(claimableBalancesSqlite)
+    .set(claimableBalanceToRow(merged))
+    .where(eq(claimableBalancesSqlite.id, id));
+  return merged;
+}
+
 export async function getUnpaidTransactions(): Promise<Transaction[]> {
   const result = await db
     .select()
     .from(transactionsSqlite)
     .where(eq(transactionsSqlite.sellerPaid, 0));
   return result.map(rowToTransaction);
+}
+
+/**
+ * Snapshot ids referenced by a completed purchase (#600).
+ *
+ * These are the rows compaction must never delete: they are the only record of
+ * what a buyer actually received, and a dispute has to be resolvable against
+ * them long after the retention window would otherwise have dropped them.
+ */
+export async function getPurchasedSnapshotIds(datasetId?: string): Promise<Set<string>> {
+  const conditions = [
+    eq(transactionsSqlite.status, 'completed'),
+    sql`${transactionsSqlite.snapshotId} IS NOT NULL`,
+  ];
+  if (datasetId) conditions.push(eq(transactionsSqlite.datasetId, datasetId));
+  const result = await db
+    .select({ snapshotId: transactionsSqlite.snapshotId })
+    .from(transactionsSqlite)
+    .where(and(...conditions));
+  return new Set(
+    result
+      .map((row: { snapshotId: string | null }) => row.snapshotId)
+      .filter((id: string | null): id is string => typeof id === 'string' && id.length > 0),
+  );
 }
 
 export async function getTransactionsWithFailedSellerNotification(): Promise<Transaction[]> {
@@ -585,4 +883,99 @@ export async function getTransactionsWithFailedSellerNotification(): Promise<Tra
       ),
     );
   return result.map(rowToTransaction);
+}
+
+export async function getTransactionByEscrowId(escrowId: number): Promise<Transaction | undefined> {
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.escrowId, escrowId))
+    .limit(1);
+  return result[0] ? rowToTransaction(result[0]) : undefined;
+}
+
+// ── Sentinel ─────────────────────────────────────────────────────────────────
+
+const SENTINEL_CURSOR_ID = 'escrow-contract';
+
+export async function getSentinelCursor(): Promise<SentinelCursor | undefined> {
+  const result = await db
+    .select()
+    .from(sentinelCursorSqlite)
+    .where(eq(sentinelCursorSqlite.id, SENTINEL_CURSOR_ID))
+    .limit(1);
+  return result[0] ? rowToSentinelCursor(result[0]) : undefined;
+}
+
+export async function saveSentinelCursor(
+  updates: Partial<Omit<SentinelCursor, 'id'>>,
+): Promise<SentinelCursor> {
+  const nowIso = new Date().toISOString();
+  const existing = await getSentinelCursor();
+  const merged: SentinelCursor = {
+    id: SENTINEL_CURSOR_ID,
+    cursor: existing?.cursor ?? null,
+    lastLedger: existing?.lastLedger ?? 0,
+    backfillComplete: existing?.backfillComplete ?? false,
+    lastWasmHash: existing?.lastWasmHash ?? null,
+    lastProgressAt: existing?.lastProgressAt ?? nowIso,
+    ...existing,
+    ...updates,
+    updatedAt: nowIso,
+  };
+  if (existing) {
+    await db
+      .update(sentinelCursorSqlite)
+      .set(sentinelCursorToRow(merged))
+      .where(eq(sentinelCursorSqlite.id, SENTINEL_CURSOR_ID));
+  } else {
+    await db.insert(sentinelCursorSqlite).values(sentinelCursorToRow(merged));
+  }
+  return merged;
+}
+
+export async function addSentinelAlert(alert: SentinelAlert): Promise<void> {
+  await db.insert(sentinelAlertsSqlite).values(sentinelAlertToRow(alert));
+}
+
+export async function getSentinelAlertByDedupeKey(
+  dedupeKey: string,
+): Promise<SentinelAlert | undefined> {
+  const result = await db
+    .select()
+    .from(sentinelAlertsSqlite)
+    .where(eq(sentinelAlertsSqlite.dedupeKey, dedupeKey))
+    .limit(1);
+  return result[0] ? rowToSentinelAlert(result[0]) : undefined;
+}
+
+export async function updateSentinelAlert(
+  id: string,
+  updates: Partial<SentinelAlert>,
+): Promise<SentinelAlert | null> {
+  const existing = await db
+    .select()
+    .from(sentinelAlertsSqlite)
+    .where(eq(sentinelAlertsSqlite.id, id))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToSentinelAlert(existing[0]), ...updates };
+  await db
+    .update(sentinelAlertsSqlite)
+    .set(sentinelAlertToRow(merged))
+    .where(eq(sentinelAlertsSqlite.id, id));
+  return merged;
+}
+
+export async function getOpenSentinelAlerts(): Promise<SentinelAlert[]> {
+  const result = await db
+    .select()
+    .from(sentinelAlertsSqlite)
+    .where(eq(sentinelAlertsSqlite.status, 'open'));
+  return result.map(rowToSentinelAlert);
+}
+
+export async function getAllSentinelAlerts(): Promise<SentinelAlert[]> {
+  const result = await db.select().from(sentinelAlertsSqlite);
+  return result.map(rowToSentinelAlert);
 }

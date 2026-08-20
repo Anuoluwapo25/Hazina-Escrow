@@ -50,6 +50,7 @@ export const webhooksRouter = Router();
 const VALID_EVENTS: WebhookEvent[] = [
   'payment.received',
   'payment.forwarded',
+  'payout.claimable',
   'dataset.queried',
   'dataset.created',
   'ping',
@@ -225,7 +226,7 @@ webhooksRouter.post('/payment', async (req: Request, res: Response) => {
  *                 type: array
  *                 items:
  *                   type: string
- *                   enum: [payment.received, payment.forwarded, dataset.queried, dataset.created, ping]
+ *                   enum: [payment.received, payment.forwarded, payout.claimable, dataset.queried, dataset.created, ping]
  *     responses:
  *       201:
  *         description: Webhook created

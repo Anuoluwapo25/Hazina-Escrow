@@ -17,6 +17,10 @@ export interface EnvConfig {
   usdcIssuer: string;
   /** Stellar network: 'testnet' or 'public' */
   stellarNetwork: string;
+  /** Soroban RPC endpoint used by the passkey smart-wallet client */
+  sorobanRpcUrl: string;
+  /** Hex WASM hash of the deployed smart-wallet contract (empty = passkey checkout hidden) */
+  passkeyWalletWasmHash: string;
 }
 
 const REQUIRED_ENV_VARS = ['VITE_API_URL', 'VITE_API_KEY'] as const;
@@ -64,6 +68,12 @@ export function validateEnv(): EnvConfig {
       parseInt(String(import.meta.env.VITE_MAX_CONCURRENT_REQUESTS ?? '8'), 10) || 8,
     usdcIssuer: String(import.meta.env.VITE_USDC_ISSUER ?? '').trim(),
     stellarNetwork: String(import.meta.env.VITE_STELLAR_NETWORK ?? 'testnet').trim(),
+    sorobanRpcUrl:
+      String(import.meta.env.VITE_SOROBAN_RPC_URL ?? '').trim() ||
+      (String(import.meta.env.VITE_STELLAR_NETWORK ?? 'testnet').trim() === 'public'
+        ? 'https://soroban.stellar.org'
+        : 'https://soroban-testnet.stellar.org'),
+    passkeyWalletWasmHash: String(import.meta.env.VITE_PASSKEY_WALLET_WASM_HASH ?? '').trim(),
   };
 }
 

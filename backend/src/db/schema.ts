@@ -32,6 +32,7 @@ export const datasets = pgTable(
     live: boolean('live').notNull().default(false),
     lastRefreshedAt: text('last_refreshed_at'),
     tags: text('tags'),
+    snapshotPolicy: text('snapshot_policy'),
   },
   table => ({
     typeIdx: index('datasets_type_idx').on(table.type),
@@ -64,6 +65,8 @@ export const transactions = pgTable('transactions', {
   verifiedAt: text('verified_at'),
   deliveredAt: text('delivered_at'),
   escrowId: integer('escrow_id'),
+  balanceId: text('balance_id'),
+  snapshotId: text('snapshot_id'),
   timestamp: text('timestamp').notNull(),
 });
 
@@ -96,6 +99,89 @@ export const payoutFailures = pgTable('payout_failures', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const claimableBalances = pgTable('claimable_balances', {
+  id: text('id').primaryKey(),
+  balanceId: text('balance_id').notNull().unique(),
+  datasetId: text('dataset_id').notNull(),
+  sellerWallet: text('seller_wallet').notNull(),
+  buyerTxHash: text('buyer_tx_hash').notNull(),
+  amount: numeric('amount').notNull(),
+  paymentToken: text('payment_token').notNull().default('USDC'),
+  status: text('status').notNull(),
+  creationTxHash: text('creation_tx_hash').notNull(),
+  reclaimableAt: text('reclaimable_at').notNull(),
+  claimedTxHash: text('claimed_tx_hash'),
+  claimedAt: text('claimed_at'),
+  reclaimedTxHash: text('reclaimed_tx_hash'),
+  reclaimedAt: text('reclaimed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/**
+ * Immutable, content-addressed history of every dataset payload (#600).
+ *
+ * A snapshot owns a half-open validity interval `[valid_from, valid_to)`; the
+ * single row with `valid_to IS NULL` is the payload that is live right now. Two
+ * consecutive refreshes that produce the same `content_hash` never create a
+ * second row — the existing one records another observation instead.
+ */
+export const datasetSnapshots = pgTable(
+  'dataset_snapshots',
+  {
+    id: text('id').primaryKey(),
+    datasetId: text('dataset_id').notNull(),
+    contentHash: text('content_hash').notNull(),
+    payload: text('payload').notNull(),
+    encoding: text('encoding').notNull().default('gzip+base64'),
+    validFrom: text('valid_from').notNull(),
+    validTo: text('valid_to'),
+    byteSize: integer('byte_size').notNull(),
+    rawByteSize: integer('raw_byte_size').notNull(),
+    observations: integer('observations').notNull().default(1),
+    lastObservedAt: text('last_observed_at').notNull(),
+    providerRunId: text('provider_run_id'),
+    createdAt: text('created_at').notNull(),
+  },
+  table => ({
+    datasetValidFromIdx: index('dataset_snapshots_dataset_valid_from_idx').on(
+      table.datasetId,
+      table.validFrom,
+    ),
+    contentHashIdx: index('dataset_snapshots_content_hash_idx').on(table.contentHash),
+    currentIdx: index('dataset_snapshots_current_idx').on(table.datasetId, table.validTo),
+  }),
+);
+
+export const sentinelCursor = pgTable('sentinel_cursor', {
+  id: text('id').primaryKey(),
+  cursor: text('cursor'),
+  lastLedger: integer('last_ledger').notNull().default(0),
+  backfillComplete: boolean('backfill_complete').notNull().default(false),
+  lastWasmHash: text('last_wasm_hash'),
+  lastProgressAt: text('last_progress_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const sentinelAlerts = pgTable('sentinel_alerts', {
+  id: text('id').primaryKey(),
+  dedupeKey: text('dedupe_key').notNull().unique(),
+  invariant: text('invariant').notNull(),
+  severity: text('severity').notNull(),
+  status: text('status').notNull(),
+  escrowId: integer('escrow_id'),
+  txHash: text('tx_hash'),
+  ledger: integer('ledger'),
+  message: text('message').notNull(),
+  details: text('details'),
+  count: integer('count').notNull().default(1),
+  firstSeenAt: text('first_seen_at').notNull(),
+  lastSeenAt: text('last_seen_at').notNull(),
+  lastNotifiedAt: text('last_notified_at'),
+  resolvedAt: text('resolved_at'),
+  resolvedBy: text('resolved_by'),
+});
+
 // ── SQLite tables (used when DATABASE_URL is not postgres) ───────────────────
 
 export const datasetsSqlite = sqliteTable(
@@ -121,6 +207,7 @@ export const datasetsSqlite = sqliteTable(
     live: sqliteInteger('live').notNull().default(0),
     lastRefreshedAt: sqliteText('last_refreshed_at'),
     tags: sqliteText('tags'),
+    snapshotPolicy: sqliteText('snapshot_policy'),
   },
   table => ({
     typeIdx: sqliteIndex('datasets_type_idx').on(table.type),
@@ -153,6 +240,8 @@ export const transactionsSqlite = sqliteTable('transactions', {
   verifiedAt: sqliteText('verified_at'),
   deliveredAt: sqliteText('delivered_at'),
   escrowId: sqliteInteger('escrow_id'),
+  balanceId: sqliteText('balance_id'),
+  snapshotId: sqliteText('snapshot_id'),
   timestamp: sqliteText('timestamp').notNull(),
 });
 
@@ -180,4 +269,80 @@ export const payoutFailuresSqlite = sqliteTable('payout_failures', {
   lastError: sqliteText('last_error').notNull(),
   createdAt: sqliteText('created_at').notNull(),
   updatedAt: sqliteText('updated_at').notNull(),
+});
+
+export const claimableBalancesSqlite = sqliteTable('claimable_balances', {
+  id: sqliteText('id').primaryKey(),
+  balanceId: sqliteText('balance_id').notNull().unique(),
+  datasetId: sqliteText('dataset_id').notNull(),
+  sellerWallet: sqliteText('seller_wallet').notNull(),
+  buyerTxHash: sqliteText('buyer_tx_hash').notNull(),
+  amount: sqliteText('amount').notNull(),
+  paymentToken: sqliteText('payment_token').notNull().default('USDC'),
+  status: sqliteText('status').notNull(),
+  creationTxHash: sqliteText('creation_tx_hash').notNull(),
+  reclaimableAt: sqliteText('reclaimable_at').notNull(),
+  claimedTxHash: sqliteText('claimed_tx_hash'),
+  claimedAt: sqliteText('claimed_at'),
+  reclaimedTxHash: sqliteText('reclaimed_tx_hash'),
+  reclaimedAt: sqliteText('reclaimed_at'),
+  createdAt: sqliteText('created_at').notNull(),
+  updatedAt: sqliteText('updated_at').notNull(),
+});
+
+/** SQLite mirror of {@link datasetSnapshots}. */
+export const datasetSnapshotsSqlite = sqliteTable(
+  'dataset_snapshots',
+  {
+    id: sqliteText('id').primaryKey(),
+    datasetId: sqliteText('dataset_id').notNull(),
+    contentHash: sqliteText('content_hash').notNull(),
+    payload: sqliteText('payload').notNull(),
+    encoding: sqliteText('encoding').notNull().default('gzip+base64'),
+    validFrom: sqliteText('valid_from').notNull(),
+    validTo: sqliteText('valid_to'),
+    byteSize: sqliteInteger('byte_size').notNull(),
+    rawByteSize: sqliteInteger('raw_byte_size').notNull(),
+    observations: sqliteInteger('observations').notNull().default(1),
+    lastObservedAt: sqliteText('last_observed_at').notNull(),
+    providerRunId: sqliteText('provider_run_id'),
+    createdAt: sqliteText('created_at').notNull(),
+  },
+  table => ({
+    datasetValidFromIdx: sqliteIndex('dataset_snapshots_dataset_valid_from_idx').on(
+      table.datasetId,
+      table.validFrom,
+    ),
+    contentHashIdx: sqliteIndex('dataset_snapshots_content_hash_idx').on(table.contentHash),
+    currentIdx: sqliteIndex('dataset_snapshots_current_idx').on(table.datasetId, table.validTo),
+  }),
+);
+
+export const sentinelCursorSqlite = sqliteTable('sentinel_cursor', {
+  id: sqliteText('id').primaryKey(),
+  cursor: sqliteText('cursor'),
+  lastLedger: sqliteInteger('last_ledger').notNull().default(0),
+  backfillComplete: sqliteInteger('backfill_complete').notNull().default(0),
+  lastWasmHash: sqliteText('last_wasm_hash'),
+  lastProgressAt: sqliteText('last_progress_at').notNull(),
+  updatedAt: sqliteText('updated_at').notNull(),
+});
+
+export const sentinelAlertsSqlite = sqliteTable('sentinel_alerts', {
+  id: sqliteText('id').primaryKey(),
+  dedupeKey: sqliteText('dedupe_key').notNull().unique(),
+  invariant: sqliteText('invariant').notNull(),
+  severity: sqliteText('severity').notNull(),
+  status: sqliteText('status').notNull(),
+  escrowId: sqliteInteger('escrow_id'),
+  txHash: sqliteText('tx_hash'),
+  ledger: sqliteInteger('ledger'),
+  message: sqliteText('message').notNull(),
+  details: sqliteText('details'),
+  count: sqliteInteger('count').notNull().default(1),
+  firstSeenAt: sqliteText('first_seen_at').notNull(),
+  lastSeenAt: sqliteText('last_seen_at').notNull(),
+  lastNotifiedAt: sqliteText('last_notified_at'),
+  resolvedAt: sqliteText('resolved_at'),
+  resolvedBy: sqliteText('resolved_by'),
 });

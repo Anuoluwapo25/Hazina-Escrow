@@ -18,6 +18,7 @@ import {
 import { requireSellerJwt, requireSellerMutationAuth } from '../common/auth.middleware';
 import { domainMetrics } from '../common/datadog';
 import { notifySeller } from '../webhooks/webhook.service';
+import { recordDatasetSnapshot } from '../snapshots/snapshots.service';
 
 const MAX_DATA_KB = 500;
 const MAX_DATA_BYTES = MAX_DATA_KB * 1024;
@@ -768,6 +769,10 @@ datasetsRouter.post(
     };
 
     await addDataset(dataset);
+
+    // Open the dataset's history at creation, so its back catalogue starts with
+    // the payload it launched with rather than with its first refresh (#600).
+    await recordDatasetSnapshot(dataset.id, dataset.data, { at: now, providerRunId: 'create' });
 
     // Track dataset creation
     domainMetrics.datasetCreated({

@@ -15,6 +15,7 @@ import {
   addTransaction,
   addWebhook,
   addPayoutFailure,
+  addClaimableBalance,
   writeStore,
   type Store,
 } from '../common/storage';
@@ -34,14 +35,22 @@ async function migrate(): Promise<void> {
   const transactions = Array.isArray(store.transactions) ? store.transactions : [];
   const webhooks = Array.isArray(store.webhooks) ? store.webhooks : [];
   const payoutFailures = Array.isArray(store.payoutFailures) ? store.payoutFailures : [];
+  const claimableBalances = Array.isArray(store.claimableBalances) ? store.claimableBalances : [];
 
   console.log(
     `Migrating: ${datasets.length} datasets, ${transactions.length} transactions, ` +
-      `${webhooks.length} webhooks, ${payoutFailures.length} payout failures`,
+      `${webhooks.length} webhooks, ${payoutFailures.length} payout failures, ` +
+      `${claimableBalances.length} claimable balances`,
   );
 
   // Clear existing data then bulk-insert to avoid partial duplicates on re-run.
-  await writeStore({ datasets: [], transactions: [], webhooks: [], payoutFailures: [] });
+  await writeStore({
+    datasets: [],
+    transactions: [],
+    webhooks: [],
+    payoutFailures: [],
+    claimableBalances: [],
+  });
 
   for (const dataset of datasets) {
     await addDataset(dataset);
@@ -62,6 +71,13 @@ async function migrate(): Promise<void> {
     await addPayoutFailure(pf);
   }
   if (payoutFailures.length > 0) console.log(`  ${payoutFailures.length} payout failures`);
+
+  for (const cb of claimableBalances) {
+    await addClaimableBalance(cb);
+  }
+  if (claimableBalances.length > 0) {
+    console.log(`  ${claimableBalances.length} claimable balances`);
+  }
 
   console.log('Migration complete.');
 }

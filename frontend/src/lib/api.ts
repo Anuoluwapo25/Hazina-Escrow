@@ -163,11 +163,44 @@ export interface AgentInfo {
   };
 }
 
+export interface ClaimableBalanceItem {
+  balanceId: string;
+  amount: string;
+  assetCode: string;
+  createdAt: string | null;
+  reclaimableAt: string | null;
+  datasetId?: string;
+  status: string;
+}
+
+export interface ReclaimableBalance {
+  id: string;
+  balanceId: string;
+  sellerWallet: string;
+  amount: number;
+  paymentToken?: string;
+  reclaimableAt: string;
+  createdAt: string;
+}
+
 export interface SellerAnalytics {
   revenueSeries: { date: string; usdc: number }[];
   queryVolumeSeries: { date: string; count: number }[];
   datasetBreakdown: { id: string; name: string; earned: number; queries: number }[];
   topBuyers: { wallet: string; count: number }[];
+}
+
+/** Sentinel's public transparency endpoint — see docs/MONITORING.md. */
+export interface SolvencyReport {
+  tokens: {
+    token: string;
+    onChainBalance: string;
+    openLiability: string;
+    delta: string;
+  }[];
+  openEscrowCount: number;
+  lastCheckedLedger: number;
+  checkedAt: string;
 }
 
 export const DatasetMetaSchema = z.object({
@@ -230,6 +263,32 @@ export const DatasetPreviewSchema = z.object({
   lastRefreshedAt: z.string().nullish(),
 });
 export type DatasetPreview = z.infer<typeof DatasetPreviewSchema>;
+
+/** One immutable version of a dataset payload (#600). Metadata only — no payload. */
+export const SnapshotMetaSchema = z.object({
+  id: z.string(),
+  datasetId: z.string(),
+  contentHash: z.string(),
+  validFrom: z.string(),
+  validTo: z.string().nullable(),
+  byteSize: z.number(),
+  rawByteSize: z.number(),
+  observations: z.number(),
+  lastObservedAt: z.string(),
+  providerRunId: z.string().nullish(),
+  createdAt: z.string(),
+});
+
+export const DatasetHistorySchema = z.object({
+  datasetId: z.string(),
+  total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+  snapshots: z.array(SnapshotMetaSchema).catch([]),
+  changeFrequency: z.array(z.object({ date: z.string(), changes: z.number() })).catch([]),
+});
+export type SnapshotMeta = z.infer<typeof SnapshotMetaSchema>;
+export type DatasetHistory = z.infer<typeof DatasetHistorySchema>;
 
 export const TransactionSchema = z.object({
   id: z.string(),
@@ -423,6 +482,16 @@ export const api = {
     request<{ success: boolean; preview: unknown }>(
       `${getApiBaseUrl()}/datasets/${id}/preview`,
     ).then(r => parseApiResponse(DatasetPreviewSchema, r.preview)),
+
+  getDatasetHistory: (id: string, params?: { limit?: number; days?: number }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.append('limit', params.limit.toString());
+    if (params?.days) searchParams.append('days', params.days.toString());
+    const query = searchParams.toString();
+    return request<unknown>(
+      `${getApiBaseUrl()}/datasets/${id}/history${query ? `?${query}` : ''}`,
+    ).then(r => parseApiResponse(DatasetHistorySchema, r));
+  },
 
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(
@@ -651,6 +720,51 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(params),
     }),
+
+  // ── Claimable balance payout fallback (#589) ─────────────────────────────
+
+  /** Pending claimable balances for a seller wallet, merged with our dataset context. */
+  getSellerClaimables: (wallet: string) =>
+    request<{ success: boolean; claimables: ClaimableBalanceItem[] }>(
+      `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claimables`,
+    ).then(r => r.claimables),
+
+  /** Sponsor-signed (not seller-signed) claim XDR — the seller's wallet must still sign it. */
+  buildClaimTx: (wallet: string, balanceId: string) =>
+    request<{ success: boolean; xdr: string }>(
+      `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claim-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ balanceId }),
+      },
+    ),
+
+  /** Admin: balances past the treasury reclaim cutoff. */
+  adminGetReclaimableBalances: (adminKey: string) =>
+    request<{ success: boolean; reclaimable: ReclaimableBalance[] }>(
+      `${getApiBaseUrl()}/admin/claimables/reclaimable`,
+      { headers: { Authorization: `Bearer ${adminKey}` } },
+    ).then(r => r.reclaimable),
+
+  /** Admin: sweep expired balances back to the treasury. */
+  adminSweepClaimables: (adminKey: string) =>
+    request<{ success: boolean; swept: string[]; failed: string[] }>(
+      `${getApiBaseUrl()}/admin/claimables/sweep`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminKey}` },
+      },
+    ),
+  // ── Sentinel (#599) ───────────────────────────────────────────────────────
+
+  /** Public: total locked on-chain vs. open escrow liability, per token. */
+  getSolvency: () =>
+    request<{ success: boolean } & SolvencyReport>(`${getApiBaseUrl()}/solvency`).then(r => ({
+      tokens: r.tokens,
+      openEscrowCount: r.openEscrowCount,
+      lastCheckedLedger: r.lastCheckedLedger,
+      checkedAt: r.checkedAt,
+    })),
 };
 
 export function __resetRequestThrottleForTests() {

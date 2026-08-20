@@ -1,0 +1,39 @@
+{
+  "name": "@hazina/mcp-server",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for the Hazina data marketplace — search, quote, and buy datasets from any MCP-compatible AI agent.",
+  "type": "module",
+  "bin": {
+    "hazina-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src",
+    "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint src --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "@stellar/stellar-sdk": "^13.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

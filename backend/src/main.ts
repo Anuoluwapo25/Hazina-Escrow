@@ -33,6 +33,12 @@ import {
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
+import { claimableRouter } from './payments/claimable.router';
+import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
+import { wellKnownRouter } from './wellknown/x402.router';
+import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
+import { sentinelRouter } from './sentinel/router';
+import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
 import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
@@ -45,10 +51,17 @@ import { sanitizeBody } from './common/sanitize';
 import {
   createAgentRateLimitMiddleware,
   createGlobalRateLimitMiddleware,
+  createPasskeyRateLimitMiddleware,
   createPaymentsRateLimitMiddleware,
 } from './common/rateLimit';
 import { initializeWebSocketServer } from './websocket/ws-server';
 import { startDataRefreshWorker, stopDataRefreshWorker } from './providers/refresh.scheduler';
+import { snapshotsRouter } from './snapshots/snapshots.router';
+import { backfillSnapshots } from './snapshots/snapshots.service';
+import {
+  startSnapshotCompactionWorker,
+  stopSnapshotCompactionWorker,
+} from './snapshots/snapshots.compaction';
 import { HORIZON_URL } from './lib/stellar.config';
 import { createCorsOptions } from './common/cors';
 import { oracleRouter } from './providers/oracle.router';
@@ -126,6 +139,7 @@ app.use(sanitizeBody);
 const globalLimiter = createGlobalRateLimitMiddleware();
 const paymentsLimiter = createPaymentsRateLimitMiddleware();
 const agentLimiter = createAgentRateLimitMiddleware();
+const passkeyLimiter = createPasskeyRateLimitMiddleware();
 Sentry.setupExpressErrorHandler(app);
 
 // Rate limiting — global + per-route limits for sensitive endpoints
@@ -134,6 +148,8 @@ Sentry.setupExpressErrorHandler(app);
 app.use(globalLimiter);
 app.use('/api/v1/payments', paymentsLimiter);
 app.use('/api/v1/agent', agentLimiter);
+app.use('/api/v1/wallet/passkey', passkeyLimiter);
+app.use('/api/wallet/passkey', passkeyLimiter);
 Sentry.setupExpressErrorHandler(app);
 
 // Initialize backup scheduler
@@ -280,10 +296,15 @@ process.on('uncaughtException', (err: Error) => {
   });
 });
 
+// RFC 8615 well-known URIs are always root-relative, never under /api — mount
+// before the versioned API namespace and the /api legacy-redirect middleware.
+app.use(wellKnownRouter);
+
 // Routes under versioned API namespace.
 const v1Router = express.Router();
 
 v1Router.use('/datasets', datasetsRouter);
+v1Router.use('/datasets', snapshotsRouter);
 v1Router.use('/oracle', oracleRouter);
 v1Router.use('/agent', requireApiKey, agentRouter);
 v1Router.use('/webhooks', webhooksRouter);
@@ -291,7 +312,15 @@ v1Router.use('/payments', requireApiKey, paymentsRouter);
 // Escrow routes are buyer-facing (build/submit/read need no API key); the
 // admin release/refund/resolve endpoints self-protect with requireAdminKey.
 v1Router.use('/payments', escrowRouter);
+// Passkey wallet routes are buyer-facing and self-guard with a 503 when
+// LAUNCHTUBE_JWT is unset; the passkeyLimiter above caps their fee-budget exposure.
+v1Router.use('/', passkeyWalletRouter);
 v1Router.use('/backups', backupRouter);
+// Claimable-balance routes self-protect per-route (requireSellerReadAuth /
+// requireAdminKey) since the seller-facing endpoints are scoped by wallet.
+v1Router.use('/', claimableRouter);
+// Sentinel self-protects per-route: /solvency is public, /sentinel/alerts* need requireAdminKey.
+v1Router.use('/', sentinelRouter);
 
 app.use('/api/v1', v1Router);
 
@@ -309,13 +338,17 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
 // Routes
 app.use('/api/datasets', datasetsRouter);
+app.use('/api/datasets', snapshotsRouter);
 app.use('/api/oracle', oracleRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
+app.use('/api', claimableRouter);
+app.use('/api', passkeyWalletRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api', backupRouter);
+app.use('/api', sentinelRouter);
 
 // Global error handling middleware — Issue #283 (standard error shape)
 app.use(
@@ -352,6 +385,20 @@ app.use(
 startDeliveryRetryWorker();
 startSellerNotificationRetryWorker();
 startDataRefreshWorker();
+void startSentinelIfEnabled();
+startSnapshotCompactionWorker();
+startClaimableSweepWorker();
+
+// Give every pre-existing dataset a first snapshot so history starts now rather
+// than at its next refresh (#600). Idempotent, so a restart is free; skipped in
+// tests, which seed their own timelines.
+if (process.env.SNAPSHOT_BACKFILL_ON_START !== 'false' && process.env.NODE_ENV !== 'test') {
+  backfillSnapshots().catch(err =>
+    logger.error(
+      `[Snapshots] Backfill failed: ${err instanceof Error ? err.message : String(err)}`,
+    ),
+  );
+}
 
 // Create HTTP server and attach Express app
 const server = http.createServer(app);
@@ -390,6 +437,8 @@ process.on('SIGTERM', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
+  stopSentinel();
+  stopSnapshotCompactionWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -401,6 +450,9 @@ process.on('SIGINT', () => {
   logger.info('[Server] Shutting down gracefully...');
   stopDeliveryRetryWorker();
   stopDataRefreshWorker();
+  stopClaimableSweepWorker();
+  stopSentinel();
+  stopSnapshotCompactionWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');

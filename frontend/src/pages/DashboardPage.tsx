@@ -23,9 +23,17 @@ import {
   Loader2,
   Pencil,
   Trash2,
+  Wallet,
 } from 'lucide-react';
 
-import { api, DatasetMeta, PaginatedDatasets, SellerAnalytics, Transaction } from '../lib/api';
+import {
+  api,
+  ClaimableBalanceItem,
+  DatasetMeta,
+  PaginatedDatasets,
+  SellerAnalytics,
+  Transaction,
+} from '../lib/api';
 
 import { useCountUp } from '../hooks/useCountUp';
 import { formatTimeAgo, formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
@@ -247,6 +255,17 @@ export default function DashboardPage() {
       .getSellerAnalytics(selectedWallet)
       .then(setAnalytics)
       .catch(() => setAnalytics(null));
+  }, [selectedWallet]);
+
+  // Payout escape hatch (#589): surface any earnings settled into a
+  // claimable balance because we couldn&apos;t pay this wallet directly.
+  const [claimables, setClaimables] = useState<ClaimableBalanceItem[]>([]);
+  useEffect(() => {
+    if (!selectedWallet) return;
+    api
+      .getSellerClaimables(selectedWallet)
+      .then(setClaimables)
+      .catch(() => setClaimables([]));
   }, [selectedWallet]);
 
   const exportCsv = () => {
@@ -494,6 +513,22 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
+        )}
+
+        {claimables.length > 0 && (
+          <Link
+            to={`/claim?seller=${encodeURIComponent(selectedWallet)}`}
+            className="flex items-center justify-between gap-3 mb-6 rounded-xl border border-gold/30 bg-gold/10 px-4 py-3 hover:bg-gold/15 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <Wallet className="w-4 h-4 text-gold shrink-0" />
+              <p className="text-sm font-body text-foreground">
+                {claimables.length} payout{claimables.length === 1 ? '' : 's'} waiting for you to
+                claim — we couldn&apos;t send it directly to this wallet.
+              </p>
+            </div>
+            <span className="text-xs font-body font-semibold text-gold shrink-0">Claim now →</span>
+          </Link>
         )}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">

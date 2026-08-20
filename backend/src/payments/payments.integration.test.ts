@@ -37,6 +37,11 @@ vi.mock('../agent/agent.wallet', () => ({
   getAgentPublicKey: vi.fn(() => 'mock-agent-wallet'),
 }));
 
+vi.mock('./trustline.service', () => ({
+  checkDestinationReady: vi.fn(() => Promise.resolve({ ready: true })),
+  classifyDestinationFailure: vi.fn(() => null),
+}));
+
 import { runResearchAgentDemo } from '../agent/agent.service';
 import { generateDataSummary } from '../ai/claude.service';
 import { verifyStellarPayment, StellarTimeoutError } from './stellar.service';
@@ -65,6 +70,7 @@ const BASE_STORE: Store = {
   transactions: [],
   webhooks: [],
   payoutFailures: [],
+  claimableBalances: [],
 };
 
 function makeApp(): Express {
@@ -140,7 +146,13 @@ describeSocket('payments and agent integration routes', () => {
     vi.restoreAllMocks();
     delete process.env.ESCROW_WALLET;
     delete process.env.ADMIN_API_KEY;
-    await writeStore({ datasets: [], transactions: [], webhooks: [], payoutFailures: [] });
+    await writeStore({
+      datasets: [],
+      transactions: [],
+      webhooks: [],
+      payoutFailures: [],
+      claimableBalances: [],
+    });
   });
 
   it('POST /api/v1/payments/query/:id returns 404 for unknown dataset', async () => {

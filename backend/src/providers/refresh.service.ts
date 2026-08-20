@@ -1,6 +1,8 @@
+import { randomUUID } from 'crypto';
 import { getAllDatasets, updateDataset, type Dataset } from '../common/storage';
 import { getProviderById, getProviderByType } from './registry';
 import { logger } from '../lib/logger';
+import { recordDatasetSnapshot } from '../snapshots/snapshots.service';
 import type { ProviderSnapshot } from './provider.types';
 
 export interface RefreshResult {
@@ -8,6 +10,10 @@ export interface RefreshResult {
   provider: string;
   live: boolean;
   ok: boolean;
+  /** True when the refresh changed the payload and opened a new snapshot (#600). */
+  snapshotCreated?: boolean;
+  /** Content address of the payload now live. */
+  contentHash?: string;
 }
 
 /** Resolve the provider for a dataset by explicit id, else by type. */
@@ -33,21 +39,44 @@ function snapshotToData(snapshot: ProviderSnapshot): Record<string, unknown> {
   };
 }
 
-/** Refresh a single live dataset. Never throws — returns ok:false on error. */
-export async function refreshDataset(dataset: Dataset): Promise<RefreshResult> {
+/**
+ * Refresh a single live dataset. Never throws — returns ok:false on error.
+ *
+ * The refresh writes the new payload to the dataset row *and* appends it to the
+ * dataset's immutable history (#600). An unchanged payload costs no new row —
+ * `recordDatasetSnapshot` extends the live one instead.
+ */
+export async function refreshDataset(
+  dataset: Dataset,
+  providerRunId?: string,
+): Promise<RefreshResult> {
   const provider = resolveProvider(dataset);
   if (!provider) {
     return { datasetId: dataset.id, provider: 'none', live: false, ok: false };
   }
   try {
     const snapshot = await provider.refresh();
+    const data = snapshotToData(snapshot);
     await updateDataset(dataset.id, {
-      data: snapshotToData(snapshot),
+      data,
       provider: provider.id,
       live: true,
       lastRefreshedAt: snapshot.fetchedAt,
     });
-    return { datasetId: dataset.id, provider: provider.id, live: snapshot.live, ok: true };
+
+    const recorded = await recordDatasetSnapshot(dataset.id, data, {
+      at: snapshot.fetchedAt,
+      providerRunId,
+    });
+
+    return {
+      datasetId: dataset.id,
+      provider: provider.id,
+      live: snapshot.live,
+      ok: true,
+      snapshotCreated: recorded.created,
+      contentHash: recorded.snapshot.contentHash,
+    };
   } catch (err) {
     logger.error(
       `[refresh] dataset ${dataset.id} via ${provider.id} failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -61,10 +90,14 @@ export async function refreshAllLiveDatasets(): Promise<RefreshResult[]> {
   const datasets = await getAllDatasets();
   const live = datasets.filter(d => d.live);
   if (live.length === 0) return [];
-  const results = await Promise.all(live.map(refreshDataset));
+  // One id per sweep, stamped on every snapshot it writes, so a suspect row can
+  // be traced back to the refresh run that produced it.
+  const providerRunId = `run-${randomUUID()}`;
+  const results = await Promise.all(live.map(dataset => refreshDataset(dataset, providerRunId)));
   const liveCount = results.filter(r => r.live).length;
+  const changed = results.filter(r => r.snapshotCreated).length;
   logger.info(
-    `[refresh] refreshed ${results.length} live datasets (${liveCount} from real sources, ${results.length - liveCount} fallback)`,
+    `[refresh] refreshed ${results.length} live datasets (${liveCount} from real sources, ${results.length - liveCount} fallback); ${changed} produced a new snapshot`,
   );
   return results;
 }

@@ -41,7 +41,16 @@ import { getDataset } from '../common/storage';
 
 export const escrowRouter = Router();
 
-const STELLAR_ADDRESS = z.string().regex(/^G[A-Z2-7]{55}$/, 'Invalid Stellar address');
+// `buyer` may be a classic G… account (Freighter/Albedo) or a C… Soroban
+// contract address (a passkey smart wallet, #587) — the contract's `Address`
+// type (see lib.rs) already authorizes either uniformly via require_auth(),
+// so the only place this needed loosening was this HTTP-boundary validator.
+const STELLAR_ADDRESS = z
+  .string()
+  .regex(
+    /^[GC][A-Z2-7]{55}$/,
+    'Invalid Stellar address — expected a G… account or a C… contract address',
+  );
 
 const lockBuildSchema = z.object({
   buyer: STELLAR_ADDRESS,

@@ -63,7 +63,10 @@ export interface DatasetQueryEvent {
 
 // Union of all server events
 export type ServerEvent =
-  TransactionUpdateEvent | PaymentReceivedEvent | PaymentForwardedEvent | DatasetQueryEvent;
+  | TransactionUpdateEvent
+  | PaymentReceivedEvent
+  | PaymentForwardedEvent
+  | DatasetQueryEvent;
 
 // Client messages (for reference, not used in frontend hook)
 export interface SubscribeMessage {

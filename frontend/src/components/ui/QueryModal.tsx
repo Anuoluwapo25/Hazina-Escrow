@@ -65,6 +65,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
   const [useDemoMode, setUseDemoMode] = useState(false);
   const [verifyStage, setVerifyStage] = useState(0);
   const [walletStatus, setWalletStatus] = useState('');
+  const [passkeyWalletAddress, setPasskeyWalletAddress] = useState<string | null>(null);
 
   const [ratingScore, setRatingScore] = useState(0);
   const [ratingComment, setRatingComment] = useState('');
@@ -94,6 +95,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
       setPaymentInfo(null);
       setVerifyStage(0);
       setWalletStatus('');
+      setPasskeyWalletAddress(null);
       setUseDemoMode(false);
       setRatingScore(0);
       setRatingComment('');
@@ -429,6 +431,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                       payment={paymentInfo}
                       onTxHash={handleWalletTxHash}
                       onStatusChange={setWalletStatus}
+                      onPasskeyWallet={setPasskeyWalletAddress}
                     />
                     {walletStatus && (
                       <p
@@ -436,6 +439,12 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                         aria-live="polite"
                       >
                         {walletStatus}
+                      </p>
+                    )}
+                    {passkeyWalletAddress && (
+                      <p className="text-xs text-amber-400 font-body mt-2" aria-live="polite">
+                        Passkey wallet connected — paste the transaction hash below once passkey
+                        payment submission ships (see docs/PASSKEY_WALLETS.md).
                       </p>
                     )}
                   </div>

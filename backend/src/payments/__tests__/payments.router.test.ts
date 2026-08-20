@@ -28,6 +28,11 @@ vi.mock('../../webhooks/webhook.service', () => ({
   notifySeller: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock('../trustline.service', () => ({
+  checkDestinationReady: vi.fn(() => Promise.resolve({ ready: true })),
+  classifyDestinationFailure: vi.fn(() => null),
+}));
+
 vi.mock('../../common/datadog', () => ({
   domainMetrics: {
     paymentVerified: vi.fn(),
