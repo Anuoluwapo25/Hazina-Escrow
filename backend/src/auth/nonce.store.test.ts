@@ -2,8 +2,13 @@ import Database from 'better-sqlite3';
 import { drizzle as drizzleSqlite } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import path from 'path';
-import { describe, expect, it } from 'vitest';
-import { createSep10NonceStore } from './nonce.store';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  createSep10NonceStore,
+  sep10NonceStore,
+  startSep10NonceSweeper,
+  stopSep10NonceSweeper,
+} from './nonce.store';
 import { sep10NoncesSqlite } from '../db/schema';
 
 /**
@@ -138,5 +143,30 @@ describe('sep10 nonce store', () => {
     const store = createTestStore();
     expect(await store.redeemNonce(NONCE, CLIENT, DOMAIN, NOW)).toBe(false);
     expect(await store.isNonceValid(NONCE, CLIENT, DOMAIN, NOW)).toBe(false);
+  });
+});
+
+describe('sep10 nonce sweeper', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    stopSep10NonceSweeper();
+  });
+
+  it('fires sweepExpiredNonces on its interval and is idempotent', async () => {
+    vi.useFakeTimers();
+    const sweep = vi.spyOn(sep10NonceStore, 'sweepExpiredNonces').mockResolvedValue(undefined);
+
+    startSep10NonceSweeper(60_000);
+    startSep10NonceSweeper(60_000); // second call must not double the interval
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // One immediate run at startup plus one interval run.
+    expect(sweep).toHaveBeenCalledTimes(2);
+    expect(sweep).toHaveBeenCalledWith(expect.any(Number));
+
+    stopSep10NonceSweeper();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(sweep).toHaveBeenCalledTimes(2);
   });
 });

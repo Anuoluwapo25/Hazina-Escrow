@@ -11,6 +11,9 @@ dotenv.config();
 // (rather than inside the uncaughtException handler's scope further down)
 // so a bad value crashes startup instead of being swallowed and logged.
 validateEscrowConfig();
+// Fail fast on a misconfigured AUTH_MODE: SEP-10 enabled without its secrets
+// (or with an invalid WEB_AUTH_DOMAIN) would 500 the first sign-in instead.
+validateSep10Config();
 
 initializeDatadog();
 initializeSentry();
@@ -46,6 +49,8 @@ import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
 import { authRouter } from './auth/sep10.router';
+import { startSep10NonceSweeper, stopSep10NonceSweeper } from './auth/nonce.store';
+import { validateSep10Config } from './auth/sep10.config';
 import { readStore } from './common/storage';
 import { BackupScheduler } from './common/backup.scheduler';
 import { backupRouter, setBackupScheduler } from './common/backup.router';
@@ -399,6 +404,7 @@ void startSentinelIfEnabled();
 startSnapshotCompactionWorker();
 startClaimableSweepWorker();
 startAnchorWorker();
+startSep10NonceSweeper();
 
 // Give every pre-existing dataset a first snapshot so history starts now rather
 // than at its next refresh (#600). Idempotent, so a restart is free; skipped in
@@ -451,6 +457,7 @@ process.on('SIGTERM', () => {
   stopSentinel();
   stopSnapshotCompactionWorker();
   stopAnchorWorker();
+  stopSep10NonceSweeper();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -466,6 +473,7 @@ process.on('SIGINT', () => {
   stopSentinel();
   stopSnapshotCompactionWorker();
   stopAnchorWorker();
+  stopSep10NonceSweeper();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');

@@ -15,6 +15,33 @@
 import { and, count, eq, gt, isNull, lt } from 'drizzle-orm';
 import db from '../db/client';
 import { sep10NoncesSqlite } from '../db/schema';
+import { logger } from '../lib/logger';
+
+// ── Background nonce sweeper ────────────────────────────────────────────────
+
+let nonceSweeper: NodeJS.Timeout | null = null;
+
+/** Periodically deletes expired challenge nonces. Call once at startup. */
+export function startSep10NonceSweeper(intervalMs = 60 * 60_000): void {
+  if (nonceSweeper) return;
+
+  const run = () => {
+    void sep10NonceStore.sweepExpiredNonces(Math.floor(Date.now() / 1000)).catch(err => {
+      logger.error(
+        `[Sep10Nonce] Sweep run failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  };
+
+  run();
+  nonceSweeper = setInterval(run, intervalMs);
+}
+
+export function stopSep10NonceSweeper(): void {
+  if (!nonceSweeper) return;
+  clearInterval(nonceSweeper);
+  nonceSweeper = null;
+}
 
 export interface Sep10NonceStore {
   createNonce(input: {
