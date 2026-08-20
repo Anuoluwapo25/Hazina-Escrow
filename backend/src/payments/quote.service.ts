@@ -70,12 +70,10 @@ export async function checkPriceSanity(sourceAssetCode: string, destTokenCode: s
   return true;
 }
 
-const STROOPS_PER_UNIT = 10_000_000n;
-
 /** Parses a decimal string to a stroops BigInt securely avoiding floating point precision loss. */
 export function parseToStroops(valueStr: string): bigint {
   const parts = valueStr.split('.');
-  let integerPart = parts[0] || '0';
+  const integerPart = parts[0] || '0';
   let fractionalPart = parts[1] || '';
   
   if (fractionalPart.length > 7) fractionalPart = fractionalPart.slice(0, 7);
@@ -113,7 +111,7 @@ export async function getQuote(datasetId: string, sourceAssetCode: string): Prom
     ? new StellarSdk.Asset(destToken.code, destToken.issuer) 
     : StellarSdk.Asset.native();
 
-  const sourceAssetObj = sourceToken.issuer 
+  const sourceAssetObj = ('issuer' in sourceToken && sourceToken.issuer)
     ? new StellarSdk.Asset(sourceToken.code, sourceToken.issuer)
     : (sourceAssetCode === 'XLM' ? StellarSdk.Asset.native() : null);
 
@@ -150,6 +148,9 @@ export async function getQuote(datasetId: string, sourceAssetCode: string): Prom
 
   // Pick the best path (Horizon sorts by cheapest source amount)
   const bestPath = pathsResponse.records[0];
+  if (!bestPath) {
+    throw new Error('No path found to convert the requested asset');
+  }
   const sourceAmountStroops = parseToStroops(bestPath.source_amount);
   
   // Calculate implied price (source per dest) for sanity check
@@ -170,7 +171,7 @@ export async function getQuote(datasetId: string, sourceAssetCode: string): Prom
       amount: formatFromStroops(destAmountStroops) 
     },
     source: { 
-      asset: sourceToken.issuer ? `${sourceToken.code}:${sourceToken.issuer}` : 'native', 
+      asset: ('issuer' in sourceToken && sourceToken.issuer) ? `${sourceToken.code}:${sourceToken.issuer}` : 'native', 
       maxAmount: maxAmountStr 
     },
     path: bestPath.path.map(a => a.asset_type === 'native' ? 'native' : `${a.asset_code}:${a.asset_issuer}`),

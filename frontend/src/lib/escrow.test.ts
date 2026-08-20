@@ -53,7 +53,7 @@ describe('escrow (buyer-side)', () => {
 
     const result = await lockFundsInEscrow('ds-1', 1);
 
-    expect(api.buildEscrowLock).toHaveBeenCalledWith(BUYER, 'ds-1', 1);
+    expect(api.buildEscrowLock).toHaveBeenCalledWith(BUYER, 'ds-1', 1, undefined);
     expect(freighterSignTransaction).toHaveBeenCalledWith('unsigned-xdr', expect.any(Object));
     expect(api.submitEscrowLock).toHaveBeenCalledWith('signed-xdr');
     expect(result).toEqual({ escrowId: 42, txHash: 'lock-hash', buyer: BUYER });

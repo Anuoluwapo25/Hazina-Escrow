@@ -200,15 +200,18 @@ export async function buildLockTx(params: {
     
     // Convert path to addresses (Assuming SACs are used)
     const pathAddresses = quote.path.map(p => {
-      if (p === 'native') return getTokenSacAddress('XLM')!;
-      const code = p.split(':')[0];
-      return getTokenSacAddress(code) || p.split(':')[1];
+      if (p === 'native') return getTokenSacAddress('XLM') as string;
+      const code = p.split(':')[0] || '';
+      return getTokenSacAddress(code) || (p.split(':')[1] as string);
     });
     // Add source and dest
-    const sourceAddr = quote.source.asset === 'native' ? getTokenSacAddress('XLM')! : getTokenSacAddress(quote.source.asset.split(':')[0]) || quote.source.asset.split(':')[1];
-    const destAddr = quote.destination.asset === 'native' ? getTokenSacAddress('XLM')! : getTokenSacAddress(quote.destination.asset.split(':')[0]) || quote.destination.asset.split(':')[1];
+    const sourceCode = quote.source.asset.split(':')[0] || '';
+    const sourceAddr = quote.source.asset === 'native' ? (getTokenSacAddress('XLM') as string) : getTokenSacAddress(sourceCode) || (quote.source.asset.split(':')[1] as string);
     
-    const fullPath = [sourceAddr, ...pathAddresses, destAddr].filter(Boolean);
+    const destCode = quote.destination.asset.split(':')[0] || '';
+    const destAddr = quote.destination.asset === 'native' ? (getTokenSacAddress('XLM') as string) : getTokenSacAddress(destCode) || (quote.destination.asset.split(':')[1] as string);
+    
+    const fullPath = [sourceAddr, ...pathAddresses, destAddr].filter(Boolean) as string[];
 
     const swapArgs = [
       i128ToScVal(toStroops(parseFloat(quote.source.maxAmount))), // amount_in

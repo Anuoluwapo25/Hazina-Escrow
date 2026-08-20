@@ -38,7 +38,7 @@ import {
   buildRaiseDisputeTx,
 } from '../lib/escrow.client';
 import { getDataset } from '../common/storage';
-import { verifyQuoteSignature } from './quote.service';
+import { verifyQuoteSignature, Quote } from './quote.service';
 
 export const escrowRouter = Router();
 
@@ -137,7 +137,7 @@ escrowRouter.post(
     }
 
     if (req.body.quote) {
-      const isValid = verifyQuoteSignature(req.body.quote as any);
+      const isValid = verifyQuoteSignature(req.body.quote as Quote);
       if (!isValid) {
         return res.status(400).json({ error: 'Invalid or expired quote' });
       }
@@ -151,7 +151,7 @@ escrowRouter.post(
         datasetId: dataset.id,
         tokenCode: dataset.paymentToken || 'USDC',
         expirySeconds,
-        quote: req.body.quote as any,
+        quote: req.body.quote as Quote,
       });
       return res.json({ success: true, xdr, contractId, amount: lockAmount });
     } catch (err) {
