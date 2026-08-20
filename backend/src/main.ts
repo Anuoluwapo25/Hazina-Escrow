@@ -36,6 +36,7 @@ import { escrowRouter } from './payments/escrow.router';
 import { claimableRouter } from './payments/claimable.router';
 import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
 import { startAnchorWorker, stopAnchorWorker } from './receipts/anchor.service';
+import { receiptsRouter } from './receipts/receipts.router';
 import { wellKnownRouter } from './wellknown/x402.router';
 import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
 import { sentinelRouter } from './sentinel/router';
@@ -320,6 +321,9 @@ v1Router.use('/backups', backupRouter);
 v1Router.use('/', claimableRouter);
 // Sentinel self-protects per-route: /solvency is public, /sentinel/alerts* need requireAdminKey.
 v1Router.use('/', sentinelRouter);
+// Receipt verification is public — a delivery receipt is a commitment anyone
+// holding the id can check, and the endpoint exposes no payload bytes.
+v1Router.use('/receipts', receiptsRouter);
 
 app.use('/api/v1', v1Router);
 
@@ -347,6 +351,7 @@ app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api', backupRouter);
 app.use('/api', sentinelRouter);
+app.use('/api/receipts', receiptsRouter);
 
 // Global error handling middleware — Issue #283 (standard error shape)
 app.use(

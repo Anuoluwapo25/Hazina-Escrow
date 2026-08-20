@@ -271,3 +271,106 @@ describe('api response validation', () => {
     await expect(api.getDatasets()).rejects.toThrow('Unexpected API shape:');
   });
 });
+
+describe('api.getReceipt', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'));
+    __resetRequestThrottleForTests();
+  });
+
+  afterEach(() => {
+    __resetRequestThrottleForTests();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('fetches and parses a receipt with merkle proof and verification', async () => {
+    const receipt = {
+      id: 'rcpt_123',
+      datasetId: 'ds-test-1',
+      buyer: `G${'A'.repeat(55)}`,
+      seller: `G${'B'.repeat(55)}`,
+      amount: 1,
+      paymentToken: 'USDC',
+      txHash: 'tx-abc',
+      leafHash: '11'.repeat(32),
+      receiptHash: '22'.repeat(32),
+      anchorMode: 'direct',
+      anchorStatus: 'ANCHORED',
+      anchorTxHash: 'tx-anchor',
+      deliveredAt: '2026-01-01T00:00:00.000Z',
+      anchoredAt: '2026-01-01T00:01:00.000Z',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+    const merkleProof = {
+      leafIndex: 0,
+      leafHash: '11'.repeat(32),
+      siblings: [null, '33'.repeat(32)],
+      root: '44'.repeat(32),
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        receipt,
+        merkleProof,
+        verification: {
+          valid: true,
+          receiptHashMatches: true,
+          merkleProofValid: true,
+          anchorVerified: true,
+          anchorTxHash: 'tx-anchor',
+          status: 'ANCHORED',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getReceipt('rcpt_123');
+
+    expect(String(fetchMock.mock.calls[0]?.[0] || '')).toContain(
+      '/api/v1/receipts/rcpt_123',
+    );
+    expect(result.receipt.id).toBe('rcpt_123');
+    expect(result.merkleProof?.root).toBe('44'.repeat(32));
+    expect(result.verification.valid).toBe(true);
+  });
+
+  it('omits the merkle proof when the receipt is not anchored', async () => {
+    const receipt = {
+      id: 'rcpt_pending',
+      datasetId: 'ds-test-1',
+      buyer: `G${'A'.repeat(55)}`,
+      seller: `G${'B'.repeat(55)}`,
+      amount: 1,
+      paymentToken: 'USDC',
+      txHash: 'tx-pending',
+      leafHash: '11'.repeat(32),
+      receiptHash: '22'.repeat(32),
+      anchorMode: 'direct',
+      anchorStatus: 'NOT_ANCHORED_YET',
+      deliveredAt: '2026-01-01T00:00:00.000Z',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        receipt,
+        verification: {
+          valid: true,
+          receiptHashMatches: true,
+          anchorVerified: false,
+          status: 'NOT_ANCHORED_YET',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getReceipt('rcpt_pending');
+
+    expect(result.merkleProof).toBeUndefined();
+    expect(result.verification.anchorVerified).toBe(false);
+  });
+});
