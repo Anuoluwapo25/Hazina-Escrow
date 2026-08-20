@@ -63,14 +63,16 @@ const lockBuildSchema = z.object({
     .positive()
     .max(30 * 24 * 60 * 60)
     .optional(),
-  quote: z.object({
-    destination: z.object({ asset: z.string(), amount: z.string() }),
-    source: z.object({ asset: z.string(), maxAmount: z.string() }),
-    path: z.array(z.string()),
-    slippageBps: z.number(),
-    expiresAt: z.string(),
-    signature: z.string()
-  }).optional(),
+  quote: z
+    .object({
+      destination: z.object({ asset: z.string(), amount: z.string() }),
+      source: z.object({ asset: z.string(), maxAmount: z.string() }),
+      path: z.array(z.string()),
+      slippageBps: z.number(),
+      expiresAt: z.string(),
+      signature: z.string(),
+    })
+    .optional(),
 });
 
 const lockSubmitSchema = z.object({

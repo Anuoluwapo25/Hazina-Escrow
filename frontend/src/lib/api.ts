@@ -461,7 +461,9 @@ export const api = {
     ),
 
   getQuote: (id: string, sourceAsset: string) =>
-    request<any>(`${getApiBaseUrl()}/query/${id}/quote?sourceAsset=${encodeURIComponent(sourceAsset)}`),
+    request<any>(
+      `${getApiBaseUrl()}/query/${id}/quote?sourceAsset=${encodeURIComponent(sourceAsset)}`,
+    ),
 
   verifyPayment: (id: string, txHash: string, buyerQuestion?: string) =>
     request<unknown>(`${getApiBaseUrl()}/verify/${id}`, {

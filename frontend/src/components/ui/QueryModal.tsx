@@ -146,14 +146,17 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
   useEffect(() => {
     if (step === 'payment' && sourceAsset !== 'USDC') {
       setIsQuoting(true);
-      api.getQuote(dataset.id, sourceAsset).then(q => {
-        setQuote(q);
-        setIsQuoting(false);
-      }).catch(err => {
-        setIsQuoting(false);
-        setQuote(null);
-        toastError('Quote failed', err.message);
-      });
+      api
+        .getQuote(dataset.id, sourceAsset)
+        .then(q => {
+          setQuote(q);
+          setIsQuoting(false);
+        })
+        .catch(err => {
+          setIsQuoting(false);
+          setQuote(null);
+          toastError('Quote failed', err.message);
+        });
     } else {
       setQuote(null);
     }
@@ -402,7 +405,8 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
             <div>
               <div className="text-center mb-5 p-5 glass-card">
                 <p className="text-4xl font-display font-bold text-gold mb-1">
-                  {quote ? quote.source.maxAmount : formatUSDC(dataset.pricePerQuery, locale)} {sourceAsset === 'native' ? 'XLM' : sourceAsset}
+                  {quote ? quote.source.maxAmount : formatUSDC(dataset.pricePerQuery, locale)}{' '}
+                  {sourceAsset === 'native' ? 'XLM' : sourceAsset}
                 </p>
                 <p className="text-sm text-foreground-muted font-body mb-4">
                   {t('queryModal.payment.headline')}
@@ -410,8 +414,8 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                 <div className="flex flex-col items-center justify-center gap-2 mb-2">
                   <div className="flex justify-center items-center gap-2">
                     <label className="text-xs text-muted-2">Pay with:</label>
-                    <select 
-                      value={sourceAsset} 
+                    <select
+                      value={sourceAsset}
                       onChange={e => setSourceAsset(e.target.value)}
                       className="bg-void/60 border border-border/60 rounded px-2 py-1 text-sm text-gold outline-none"
                     >

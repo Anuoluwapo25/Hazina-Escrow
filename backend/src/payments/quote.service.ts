@@ -34,18 +34,18 @@ function signQuote(quote: Omit<Quote, 'signature'>): string {
 export function verifyQuoteSignature(quote: Quote): boolean {
   if (!quote.signature) return false;
   if (Date.now() > new Date(quote.expiresAt).getTime()) return false;
-  
+
   const expectedSignature = signQuote({
     destination: quote.destination,
     source: quote.source,
     path: quote.path,
     slippageBps: quote.slippageBps,
-    expiresAt: quote.expiresAt
+    expiresAt: quote.expiresAt,
   });
-  
+
   return crypto.timingSafeEqual(
     Buffer.from(quote.signature, 'hex'),
-    Buffer.from(expectedSignature, 'hex')
+    Buffer.from(expectedSignature, 'hex'),
   );
 }
 
@@ -54,18 +54,23 @@ export function verifyQuoteSignature(quote: Quote): boolean {
  * XLM reference ~0.10 USD
  * EURC reference ~1.10 USD
  */
-export async function checkPriceSanity(sourceAssetCode: string, destTokenCode: string, impliedPrice: number): Promise<boolean> {
+export async function checkPriceSanity(
+  sourceAssetCode: string,
+  destTokenCode: string,
+  impliedPrice: number,
+): Promise<boolean> {
   let expectedRate = 1.0; // 1:1 default
 
   if (destTokenCode === 'USDC' || destTokenCode === 'EURC') {
-    if (sourceAssetCode === 'XLM') expectedRate = 10.0; // 10 XLM per USDC roughly
+    if (sourceAssetCode === 'XLM')
+      expectedRate = 10.0; // 10 XLM per USDC roughly
     else if (sourceAssetCode === 'EURC') expectedRate = 0.9;
     else if (sourceAssetCode === 'USDC') expectedRate = 1.1; // EURC vs USDC
   }
 
   const deviation = Math.abs(impliedPrice - expectedRate) / expectedRate;
   // Reject if deviated by more than 20%
-  if (deviation > 0.20) return false;
+  if (deviation > 0.2) return false;
 
   return true;
 }
@@ -75,10 +80,10 @@ export function parseToStroops(valueStr: string): bigint {
   const parts = valueStr.split('.');
   const integerPart = parts[0] || '0';
   let fractionalPart = parts[1] || '';
-  
+
   if (fractionalPart.length > 7) fractionalPart = fractionalPart.slice(0, 7);
   else while (fractionalPart.length < 7) fractionalPart += '0';
-  
+
   return BigInt(integerPart + fractionalPart);
 }
 
@@ -107,13 +112,16 @@ export async function getQuote(datasetId: string, sourceAssetCode: string): Prom
 
   const sourceToken = getTokenByCode(sourceAssetCode) || { code: sourceAssetCode };
 
-  const destAsset = destToken.issuer 
-    ? new StellarSdk.Asset(destToken.code, destToken.issuer) 
+  const destAsset = destToken.issuer
+    ? new StellarSdk.Asset(destToken.code, destToken.issuer)
     : StellarSdk.Asset.native();
 
-  const sourceAssetObj = ('issuer' in sourceToken && sourceToken.issuer)
-    ? new StellarSdk.Asset(sourceToken.code, sourceToken.issuer)
-    : (sourceAssetCode === 'XLM' ? StellarSdk.Asset.native() : null);
+  const sourceAssetObj =
+    'issuer' in sourceToken && sourceToken.issuer
+      ? new StellarSdk.Asset(sourceToken.code, sourceToken.issuer)
+      : sourceAssetCode === 'XLM'
+        ? StellarSdk.Asset.native()
+        : null;
 
   if (!sourceAssetObj) {
     throw new Error('Invalid source asset');
@@ -129,18 +137,16 @@ export async function getQuote(datasetId: string, sourceAssetCode: string): Prom
       source: { asset: sourceAssetCode, maxAmount: formatFromStroops(destAmountStroops) },
       path: [],
       slippageBps: 0,
-      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
     };
     return { ...quote, signature: signQuote(quote) };
   }
 
   // Horizon strict-receive path lookup
   // We want to receive exactly destAmountStr of destAsset
-  const pathsResponse = await server.strictReceivePaths(
-    [sourceAssetObj],
-    destAsset,
-    destAmountStr
-  ).call();
+  const pathsResponse = await server
+    .strictReceivePaths([sourceAssetObj], destAsset, destAmountStr)
+    .call();
 
   if (!pathsResponse.records || pathsResponse.records.length === 0) {
     throw new Error('No path found to convert the requested asset');
@@ -152,12 +158,14 @@ export async function getQuote(datasetId: string, sourceAssetCode: string): Prom
     throw new Error('No path found to convert the requested asset');
   }
   const sourceAmountStroops = parseToStroops(bestPath.source_amount);
-  
+
   // Calculate implied price (source per dest) for sanity check
   const impliedPrice = Number(sourceAmountStroops) / Number(destAmountStroops);
   const isSane = await checkPriceSanity(sourceAssetCode, destTokenCode, impliedPrice);
   if (!isSane) {
-    throw new Error(`Implied price deviates too much from reference (thin orderbook). Implied rate: ${impliedPrice}`);
+    throw new Error(
+      `Implied price deviates too much from reference (thin orderbook). Implied rate: ${impliedPrice}`,
+    );
   }
 
   // Add 1% slippage buffer (100 bps)
@@ -166,17 +174,22 @@ export async function getQuote(datasetId: string, sourceAssetCode: string): Prom
   const maxAmountStr = formatFromStroops(maxAmountStroops);
 
   const quote: Omit<Quote, 'signature'> = {
-    destination: { 
-      asset: destToken.issuer ? `${destToken.code}:${destToken.issuer}` : 'native', 
-      amount: formatFromStroops(destAmountStroops) 
+    destination: {
+      asset: destToken.issuer ? `${destToken.code}:${destToken.issuer}` : 'native',
+      amount: formatFromStroops(destAmountStroops),
     },
-    source: { 
-      asset: ('issuer' in sourceToken && sourceToken.issuer) ? `${sourceToken.code}:${sourceToken.issuer}` : 'native', 
-      maxAmount: maxAmountStr 
+    source: {
+      asset:
+        'issuer' in sourceToken && sourceToken.issuer
+          ? `${sourceToken.code}:${sourceToken.issuer}`
+          : 'native',
+      maxAmount: maxAmountStr,
     },
-    path: bestPath.path.map(a => a.asset_type === 'native' ? 'native' : `${a.asset_code}:${a.asset_issuer}`),
+    path: bestPath.path.map(a =>
+      a.asset_type === 'native' ? 'native' : `${a.asset_code}:${a.asset_issuer}`,
+    ),
     slippageBps: Number(slippageBps),
-    expiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
+    expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
   };
 
   return { ...quote, signature: signQuote(quote) };
