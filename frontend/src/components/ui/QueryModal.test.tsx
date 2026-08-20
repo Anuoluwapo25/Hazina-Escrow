@@ -11,6 +11,7 @@ vi.mock('../../lib/api', () => ({
     initiateQuery: vi.fn(),
     demoQuery: vi.fn(),
     verifyPayment: vi.fn(),
+    getQuote: vi.fn(),
   },
 }));
 

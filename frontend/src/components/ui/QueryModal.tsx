@@ -20,6 +20,7 @@ import WalletConnectButton from './WalletConnectButton';
 import clsx from 'clsx';
 import { getCatalog, useI18n } from '../../i18n';
 import { isDemoModeEnabled } from '../../lib/env';
+import { connectFreighter } from '../../lib/stellarWallets';
 
 type Step = 'details' | 'payment' | 'verifying' | 'result' | 'error';
 
@@ -55,6 +56,49 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
 
+  interface QuotePreview {
+    source: { asset: string; maxAmount: string };
+    destination: { asset: string; amount: string };
+    path: string[];
+    slippageBps: number;
+    signature?: string;
+    expiresAt?: string;
+  }
+  const [sourceAsset, setSourceAsset] = useState('USDC');
+  const [quote, setQuote] = useState<QuotePreview | null>(null);
+  const [isQuoting, setIsQuoting] = useState(false);
+
+  const [buyerAddress, setBuyerAddress] = useState<string | null>(null);
+  const [balances, setBalances] = useState<Record<string, string>>({});
+
+  const fetchBalances = async (address: string) => {
+    try {
+      const res = await fetch(`https://horizon-testnet.stellar.org/accounts/${address}`);
+      const data = await res.json();
+      if (data.balances) {
+        const newBalances: Record<string, string> = {};
+        data.balances.forEach((b: { asset_type: string; balance: string; asset_code?: string }) => {
+          if (b.asset_type === 'native') newBalances['XLM'] = b.balance;
+          else if (b.asset_code) newBalances[b.asset_code] = b.balance;
+        });
+        setBalances(newBalances);
+      }
+    } catch (e) {
+      console.error('Failed to fetch balances', e);
+    }
+  };
+
+  const handleConnectWallet = async () => {
+    try {
+      const address = await connectFreighter();
+      setBuyerAddress(address);
+      fetchBalances(address);
+    } catch (e) {
+      console.error(e);
+      toastError('Wallet connection failed', (e as Error).message);
+    }
+  };
+
   const verifyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -84,6 +128,9 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
       setRatingComment('');
       setRatingSubmitted(false);
       setIsSubmittingRating(false);
+      setSourceAsset('USDC');
+      setQuote(null);
+      setIsQuoting(false);
     }
   }, [isOpen]);
 
@@ -95,6 +142,25 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
       });
     }
   }, [isOpen, step, paymentInfo, dataset.id]);
+
+  useEffect(() => {
+    if (step === 'payment' && sourceAsset !== 'USDC') {
+      setIsQuoting(true);
+      api
+        .getQuote(dataset.id, sourceAsset)
+        .then(q => {
+          setQuote(q);
+          setIsQuoting(false);
+        })
+        .catch(err => {
+          setIsQuoting(false);
+          setQuote(null);
+          toastError('Quote failed', err.message);
+        });
+    } else {
+      setQuote(null);
+    }
+  }, [step, sourceAsset, dataset.id]);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -339,11 +405,86 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
             <div>
               <div className="text-center mb-5 p-5 glass-card">
                 <p className="text-4xl font-display font-bold text-gold mb-1">
-                  ${formatUSDC(dataset.pricePerQuery, locale)}
+                  {quote ? quote.source.maxAmount : formatUSDC(dataset.pricePerQuery, locale)}{' '}
+                  {sourceAsset === 'native' ? 'XLM' : sourceAsset}
                 </p>
-                <p className="text-sm text-foreground-muted font-body">
+                <p className="text-sm text-foreground-muted font-body mb-4">
                   {t('queryModal.payment.headline')}
                 </p>
+                <div className="flex flex-col items-center justify-center gap-2 mb-2">
+                  <div className="flex justify-center items-center gap-2">
+                    <label className="text-xs text-muted-2">Pay with:</label>
+                    <select
+                      value={sourceAsset}
+                      onChange={e => setSourceAsset(e.target.value)}
+                      className="bg-void/60 border border-border/60 rounded px-2 py-1 text-sm text-gold outline-none"
+                    >
+                      <option value="USDC">
+                        USDC{' '}
+                        {balances['USDC']
+                          ? `(${parseFloat(balances['USDC']).toFixed(2)} avail)`
+                          : ''}
+                      </option>
+                      <option value="XLM">
+                        XLM{' '}
+                        {balances['XLM'] ? `(${parseFloat(balances['XLM']).toFixed(2)} avail)` : ''}
+                      </option>
+                      <option value="EURC">
+                        EURC{' '}
+                        {balances['EURC']
+                          ? `(${parseFloat(balances['EURC']).toFixed(2)} avail)`
+                          : ''}
+                      </option>
+                      <option value="AQUA">
+                        AQUA{' '}
+                        {balances['AQUA']
+                          ? `(${parseFloat(balances['AQUA']).toFixed(2)} avail)`
+                          : ''}
+                      </option>
+                    </select>
+                  </div>
+                  {!buyerAddress && (
+                    <button
+                      onClick={handleConnectWallet}
+                      className="text-[10px] text-gold hover:underline mt-1"
+                    >
+                      Connect wallet to see balances
+                    </button>
+                  )}
+                </div>
+                {isQuoting && (
+                  <p className="text-xs text-gold flex items-center justify-center gap-1 mt-2">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Fetching quote...
+                  </p>
+                )}
+                {quote && (
+                  <div className="mt-4 p-3 bg-gold/10 border border-gold/20 rounded-xl text-left">
+                    <p className="text-xs text-gold font-medium mb-1">Asset Conversion Quote</p>
+                    <p className="text-xs text-foreground-muted">
+                      You pay at most{' '}
+                      <span className="font-bold text-foreground">
+                        {quote.source.maxAmount} {sourceAsset}
+                      </span>
+                    </p>
+                    <p className="text-xs text-muted-2 mt-1">
+                      Includes {quote.slippageBps / 100}% slippage buffer. Seller receives exactly{' '}
+                      {quote.destination.amount} {quote.destination.asset.split(':')[0]}
+                    </p>
+
+                    {paymentInfo && (
+                      <div className="mt-4 flex flex-col items-center border-t border-gold/10 pt-4 pb-2">
+                        <p className="text-xs mb-3 text-gold font-medium">
+                          Scan with Stellar Wallet (SEP-7)
+                        </p>
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`web+stellar:pay?destination=${paymentInfo.paymentAddress}&amount=${quote.source.maxAmount}&asset_code=${sourceAsset}&memo=${paymentInfo.memo}&memo_type=MEMO_TEXT`)}`}
+                          alt="QR Code"
+                          className="w-32 h-32 rounded bg-white p-1"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {paymentInfo ? (
