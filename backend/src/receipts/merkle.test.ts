@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'crypto';
-import { buildMerkleTree, generateInclusionProof, verifyProof, computeMerkleRoot, generateAllProofs } from './merkle';
+import {
+  buildMerkleTree,
+  generateInclusionProof,
+  verifyProof,
+  computeMerkleRoot,
+  generateAllProofs,
+} from './merkle';
 
 function createLeaf(value: number): string {
   return Buffer.alloc(32, value).toString('hex');
@@ -11,7 +17,7 @@ describe('merkle.ts', () => {
     it('builds tree with 1 leaf', () => {
       const leaves = [createLeaf(0xaa)];
       const tree = buildMerkleTree(leaves);
-      expect(tree.root).toBe(leaves[0]!);
+      expect(tree.root).toBe(leaves[0]);
       expect(tree.leaves).toEqual(leaves);
       expect(tree.levels.length).toBe(1);
     });
@@ -19,11 +25,11 @@ describe('merkle.ts', () => {
     it('builds tree with 2 leaves', () => {
       const leaves = [createLeaf(0xaa), createLeaf(0xbb)];
       const tree = buildMerkleTree(leaves);
-      expect(tree.root).not.toBe(leaves[0]!);
-      expect(tree.root).not.toBe(leaves[1]!);
+      expect(tree.root).not.toBe(leaves[0]);
+      expect(tree.root).not.toBe(leaves[1]);
       expect(tree.levels.length).toBe(2);
       expect(tree.levels[0]).toEqual(leaves);
-      expect(tree.levels[1]!.length).toBe(1);
+      expect(tree.levels[1]?.length).toBe(1);
     });
 
     it('builds tree with 3 leaves', () => {
@@ -31,15 +37,15 @@ describe('merkle.ts', () => {
       const tree = buildMerkleTree(leaves);
       expect(tree.levels.length).toBe(3); // 3 -> 2 -> 1
       expect(tree.levels[0]).toEqual(leaves);
-      expect(tree.levels[1]!.length).toBe(2); // pair + promoted
-      expect(tree.levels[2]!.length).toBe(1);
+      expect(tree.levels[1]?.length).toBe(2); // pair + promoted
+      expect(tree.levels[2]?.length).toBe(1);
     });
 
     it('builds tree with 4 leaves', () => {
       const leaves = [createLeaf(0xaa), createLeaf(0xbb), createLeaf(0xcc), createLeaf(0xdd)];
       const tree = buildMerkleTree(leaves);
       expect(tree.levels.length).toBe(3); // 4 -> 2 -> 1
-      expect(tree.levels[1]!.length).toBe(2);
+      expect(tree.levels[1]?.length).toBe(2);
     });
 
     it('builds tree with 7 leaves', () => {
@@ -47,10 +53,10 @@ describe('merkle.ts', () => {
       const tree = buildMerkleTree(leaves);
       // 7 -> 4 (3 pairs + 1 promoted) -> 2 -> 1
       expect(tree.levels.length).toBe(4);
-      expect(tree.levels[0]!.length).toBe(7);
-      expect(tree.levels[1]!.length).toBe(4);
-      expect(tree.levels[2]!.length).toBe(2);
-      expect(tree.levels[3]!.length).toBe(1);
+      expect(tree.levels[0]?.length).toBe(7);
+      expect(tree.levels[1]?.length).toBe(4);
+      expect(tree.levels[2]?.length).toBe(2);
+      expect(tree.levels[3]?.length).toBe(1);
     });
 
     it('builds tree with 8 leaves', () => {
@@ -58,9 +64,9 @@ describe('merkle.ts', () => {
       const tree = buildMerkleTree(leaves);
       // 8 -> 4 -> 2 -> 1
       expect(tree.levels.length).toBe(4);
-      expect(tree.levels[1]!.length).toBe(4);
-      expect(tree.levels[2]!.length).toBe(2);
-      expect(tree.levels[3]!.length).toBe(1);
+      expect(tree.levels[1]?.length).toBe(4);
+      expect(tree.levels[2]?.length).toBe(2);
+      expect(tree.levels[3]?.length).toBe(1);
     });
 
     it('throws on empty leaves', () => {
@@ -119,7 +125,7 @@ describe('merkle.ts', () => {
       // Level 1: sibling is hash of leaf 0 + leaf 1
       expect(proof.siblings.length).toBe(2);
       expect(proof.siblings[0]).toBeNull();
-      expect(proof.siblings[1]).toBe(tree.levels[1]![0]); // hash of leaf 0 + leaf 1
+      expect(proof.siblings[1]).toBe(tree.levels[1]?.[0]); // hash of leaf 0 + leaf 1
     });
 
     it('throws on out of bounds index', () => {
@@ -202,8 +208,12 @@ describe('merkle.ts', () => {
 
     it('computes correct root for 2 leaves', () => {
       const leaves = [createLeaf(0xaa), createLeaf(0xbb)];
+      const left = leaves[0] as string;
+      const right = leaves[1] as string;
       const root = computeMerkleRoot(leaves);
-      const expected = createHash('sha256').update(Buffer.concat([Buffer.from(leaves[0]!, 'hex'), Buffer.from(leaves[1]!, 'hex')])).digest('hex');
+      const expected = createHash('sha256')
+        .update(Buffer.concat([Buffer.from(left, 'hex'), Buffer.from(right, 'hex')]))
+        .digest('hex');
       expect(root).toBe(expected);
     });
 
@@ -219,9 +229,9 @@ describe('merkle.ts', () => {
       const tree = buildMerkleTree(leaves);
       const proofs = generateAllProofs(tree);
       expect(proofs.length).toBe(3);
-      expect(proofs[0]!.leafIndex).toBe(0);
-      expect(proofs[1]!.leafIndex).toBe(1);
-      expect(proofs[2]!.leafIndex).toBe(2);
+      expect(proofs[0]?.leafIndex).toBe(0);
+      expect(proofs[1]?.leafIndex).toBe(1);
+      expect(proofs[2]?.leafIndex).toBe(2);
     });
 
     it('all generated proofs verify', () => {

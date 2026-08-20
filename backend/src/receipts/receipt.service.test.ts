@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'crypto';
-import { computeLeafHash, computeReceiptHash, computeReceiptHashHex, serializeReceiptPreimage, storeReceipt, getReceipt, getReceiptByTxHash, updateReceiptAnchor, markReceiptAnchored, markReceiptAnchoring, markReceiptAnchorFailed, buildMerkleProof, verifyMerkleProof, verifyReceipt } from './receipt.service';
+import {
+  computeLeafHash,
+  computeReceiptHash,
+  computeReceiptHashHex,
+  serializeReceiptPreimage,
+  storeReceipt,
+  getReceipt,
+  getReceiptByTxHash,
+  updateReceiptAnchor,
+  markReceiptAnchored,
+  markReceiptAnchoring,
+  markReceiptAnchorFailed,
+  buildMerkleProof,
+  verifyMerkleProof,
+  verifyReceipt,
+} from './receipt.service';
 
 const testDatasetPayload = {
   data: [
@@ -36,7 +51,6 @@ function createTestReceiptInput(txHash: string) {
 }
 
 describe('receipt.service', () => {
-
   describe('computeLeafHash', () => {
     it('returns 32-byte Buffer', () => {
       const leaf = computeLeafHash(testDatasetPayload);
@@ -59,7 +73,9 @@ describe('receipt.service', () => {
     it('is independent of key order in payload', () => {
       const payload1 = { b: 1, a: 2 };
       const payload2 = { a: 2, b: 1 };
-      expect(computeLeafHash(payload1).toString('hex')).toBe(computeLeafHash(payload2).toString('hex'));
+      expect(computeLeafHash(payload1).toString('hex')).toBe(
+        computeLeafHash(payload2).toString('hex'),
+      );
     });
   });
 
@@ -183,11 +199,17 @@ describe('receipt.service', () => {
     it('depends on all receipt fields', () => {
       const baseInput = createTestReceiptInput('test-tx-hash-hex-3');
       const baseHash = computeReceiptHashHex(baseInput);
-      const diffPayload = computeReceiptHashHex({ ...baseInput, datasetPayload: { ...testDatasetPayload, extra: 'field' } });
+      const diffPayload = computeReceiptHashHex({
+        ...baseInput,
+        datasetPayload: { ...testDatasetPayload, extra: 'field' },
+      });
       const diffAmount = computeReceiptHashHex({ ...baseInput, amount: 11.5 });
       const diffBuyer = computeReceiptHashHex({ ...baseInput, buyer: 'GBUYER999...' });
       const diffSeller = computeReceiptHashHex({ ...baseInput, seller: 'GSELLER999...' });
-      const diffDeliveredAt = computeReceiptHashHex({ ...baseInput, deliveredAt: '2026-08-20T13:00:00.000Z' });
+      const diffDeliveredAt = computeReceiptHashHex({
+        ...baseInput,
+        deliveredAt: '2026-08-20T13:00:00.000Z',
+      });
       const diffDatasetId = computeReceiptHashHex({ ...baseInput, datasetId: 'different-dataset' });
 
       expect(diffPayload).not.toBe(baseHash);
@@ -211,8 +233,8 @@ describe('receipt.service', () => {
 
       const retrieved = await getReceipt(receipt.id);
       expect(retrieved).toBeDefined();
-      expect(retrieved!.id).toBe(receipt.id);
-      expect(retrieved!.receiptHash).toBe(receipt.receiptHash);
+      expect(retrieved?.id).toBe(receipt.id);
+      expect(retrieved?.receiptHash).toBe(receipt.receiptHash);
     });
 
     it('stores receipt with correct leaf and receipt hash', async () => {
@@ -233,7 +255,7 @@ describe('receipt.service', () => {
       const receipt = await storeReceipt(input);
       const retrieved = await getReceiptByTxHash(receipt.txHash);
       expect(retrieved).toBeDefined();
-      expect(retrieved!.id).toBe(receipt.id);
+      expect(retrieved?.id).toBe(receipt.id);
     });
 
     it('enforces unique txHash and receiptHash', async () => {
@@ -256,11 +278,11 @@ describe('receipt.service', () => {
         anchoredAt: '2026-08-20T12:05:00.000Z',
       });
       expect(updated).not.toBeNull();
-      expect(updated!.anchorStatus).toBe('ANCHORED');
-      expect(updated!.anchorTxHash).toBe('anchor-tx-123');
-      expect(updated!.merkleRoot).toBe('merkle-root-hex');
-      expect(updated!.merkleIndex).toBe(0);
-      expect(updated!.merkleProof).toEqual(['proof1', 'proof2']);
+      expect(updated?.anchorStatus).toBe('ANCHORED');
+      expect(updated?.anchorTxHash).toBe('anchor-tx-123');
+      expect(updated?.merkleRoot).toBe('merkle-root-hex');
+      expect(updated?.merkleIndex).toBe(0);
+      expect(updated?.merkleProof).toEqual(['proof1', 'proof2']);
     });
 
     it('returns null for non-existent receipt', async () => {
@@ -274,23 +296,23 @@ describe('receipt.service', () => {
       const input = createTestReceiptInput('test-tx-hash-anchor-2');
       const receipt = await storeReceipt(input);
       const updated = await markReceiptAnchored(receipt.id, 'anchor-tx-456');
-      expect(updated!.anchorStatus).toBe('ANCHORED');
-      expect(updated!.anchorTxHash).toBe('anchor-tx-456');
-      expect(updated!.anchoredAt).toBeDefined();
+      expect(updated?.anchorStatus).toBe('ANCHORED');
+      expect(updated?.anchorTxHash).toBe('anchor-tx-456');
+      expect(updated?.anchoredAt).toBeDefined();
     });
 
     it('marks receipt as anchoring', async () => {
       const input = createTestReceiptInput('test-tx-hash-anchor-3');
       const receipt = await storeReceipt(input);
       const updated = await markReceiptAnchoring(receipt.id);
-      expect(updated!.anchorStatus).toBe('ANCHORING');
+      expect(updated?.anchorStatus).toBe('ANCHORING');
     });
 
     it('marks receipt as anchor failed', async () => {
       const input = createTestReceiptInput('test-tx-hash-anchor-4');
       const receipt = await storeReceipt(input);
       const updated = await markReceiptAnchorFailed(receipt.id);
-      expect(updated!.anchorStatus).toBe('ANCHOR_FAILED');
+      expect(updated?.anchorStatus).toBe('ANCHOR_FAILED');
     });
   });
 
@@ -298,13 +320,17 @@ describe('receipt.service', () => {
     it('builds proof from receipt', async () => {
       const input = createTestReceiptInput('test-tx-hash-merkle-1');
       const receipt = await storeReceipt(input);
-      const anchored = await markReceiptAnchored(receipt.id, 'anchor-tx', 'root-hex', 0, ['sibling1', 'sibling2']);
-      const proof = buildMerkleProof(anchored!);
+      const anchored = await markReceiptAnchored(receipt.id, 'anchor-tx', 'root-hex', 0, [
+        'sibling1',
+        'sibling2',
+      ]);
+      expect(anchored).not.toBeNull();
+      const proof = buildMerkleProof(anchored as import('./types').Receipt);
       expect(proof).toBeDefined();
-      expect(proof!.leafIndex).toBe(0);
-      expect(proof!.leafHash).toBe(receipt.leafHash);
-      expect(proof!.siblings).toEqual(['sibling1', 'sibling2']);
-      expect(proof!.root).toBe('root-hex');
+      expect(proof?.leafIndex).toBe(0);
+      expect(proof?.leafHash).toBe(receipt.leafHash);
+      expect(proof?.siblings).toEqual(['sibling1', 'sibling2']);
+      expect(proof?.root).toBe('root-hex');
     });
 
     it('returns undefined for receipt without merkle data', async () => {
@@ -319,7 +345,10 @@ describe('receipt.service', () => {
       const leaf0 = Buffer.alloc(32, 0xaa);
       const leaf1 = Buffer.alloc(32, 0xbb);
       const combined = Buffer.concat([leaf0, leaf1]);
-      const actualRoot = Buffer.from(createHash('sha256').update(combined).digest().toString('hex'), 'hex');
+      const actualRoot = Buffer.from(
+        createHash('sha256').update(combined).digest().toString('hex'),
+        'hex',
+      );
 
       const proof = {
         leafIndex: 0,
@@ -335,7 +364,10 @@ describe('receipt.service', () => {
       const leaf1 = Buffer.alloc(32, 0xbb);
       const wrongSibling = Buffer.alloc(32, 0xcc);
       const combined = Buffer.concat([leaf0, leaf1]);
-      const root = Buffer.from(createHash('sha256').update(combined).digest().toString('hex'), 'hex');
+      const root = Buffer.from(
+        createHash('sha256').update(combined).digest().toString('hex'),
+        'hex',
+      );
 
       const proof = {
         leafIndex: 0,
@@ -411,7 +443,9 @@ describe('receipt.service', () => {
       const combined = Buffer.concat([leaf, correctSibling]);
       const correctRoot = createHash('sha256').update(combined).digest().toString('hex');
 
-      await markReceiptAnchored(receipt.id, 'anchor-tx', correctRoot, 0, [correctSibling.toString('hex')]);
+      await markReceiptAnchored(receipt.id, 'anchor-tx', correctRoot, 0, [
+        correctSibling.toString('hex'),
+      ]);
 
       // Now tamper with the stored merkle proof (wrong sibling, same root)
       await updateReceiptAnchor(receipt.id, {

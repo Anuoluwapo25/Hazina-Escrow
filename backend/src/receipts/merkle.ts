@@ -21,7 +21,9 @@ export interface InclusionProof {
  * Compute SHA-256 hash of concatenated buffers.
  */
 function hashPair(left: Buffer, right: Buffer): Buffer {
-  return createHash('sha256').update(Buffer.concat([left, right])).digest();
+  return createHash('sha256')
+    .update(Buffer.concat([left, right]))
+    .digest();
 }
 
 /**
@@ -50,12 +52,17 @@ export function buildMerkleTree(leaves: string[]): MerkleTree {
   while (currentLevel.length > 1) {
     const nextLevel: Buffer[] = [];
     for (let i = 0; i < currentLevel.length; i += 2) {
+      const left = currentLevel[i];
+      if (left === undefined) break;
       if (i + 1 < currentLevel.length) {
-        // Pair exists - hash both
-        nextLevel.push(hashPair(currentLevel[i]!, currentLevel[i + 1]!));
+        const right = currentLevel[i + 1];
+        if (right !== undefined) {
+          // Pair exists - hash both
+          nextLevel.push(hashPair(left, right));
+        }
       } else {
         // Odd leaf - promote unchanged (no duplication)
-        nextLevel.push(currentLevel[i]!);
+        nextLevel.push(left);
       }
     }
     levels.push(nextLevel);
@@ -65,8 +72,12 @@ export function buildMerkleTree(leaves: string[]): MerkleTree {
   // Convert back to hex strings for output
   const hexLevels: string[][] = levels.map(level => level.map(buf => buf.toString('hex')));
 
-  const root = hexLevels[hexLevels.length - 1]![0]!;
-  const leavesOut = hexLevels[0]!;
+  const rootLevel = hexLevels[hexLevels.length - 1];
+  if (rootLevel === undefined || rootLevel[0] === undefined) {
+    throw new Error('Cannot build Merkle tree with zero leaves');
+  }
+  const root = rootLevel[0];
+  const leavesOut = hexLevels[0] ?? [];
   const levelsOut = hexLevels;
 
   return {
@@ -91,13 +102,17 @@ export function generateInclusionProof(tree: MerkleTree, leafIndex: number): Inc
 
   // Traverse up the tree collecting siblings
   for (let level = 0; level < tree.levels.length - 1; level++) {
-    const levelNodes = tree.levels[level]!;
+    const levelNodes = tree.levels[level];
+    if (levelNodes === undefined) break;
     const isRightNode = currentIndex % 2 === 1;
     const siblingIndex = isRightNode ? currentIndex - 1 : currentIndex + 1;
 
     if (siblingIndex < levelNodes.length) {
-      // Safe because we checked bounds
-      siblings.push(levelNodes[siblingIndex]!);
+      const sibling = levelNodes[siblingIndex];
+      if (sibling !== null && sibling !== undefined) {
+        // Safe because we checked bounds
+        siblings.push(sibling);
+      }
     } else {
       // No sibling - this node was promoted (odd count at this level)
       siblings.push(null);
@@ -108,7 +123,7 @@ export function generateInclusionProof(tree: MerkleTree, leafIndex: number): Inc
 
   return {
     leafIndex,
-    leafHash: tree.leaves[leafIndex]!,
+    leafHash: tree.leaves[leafIndex] ?? '',
     siblings,
     root: tree.root,
   };

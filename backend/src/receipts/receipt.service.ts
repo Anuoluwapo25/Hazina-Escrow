@@ -165,11 +165,7 @@ export async function storeReceipt(input: ReceiptCreateInput): Promise<Receipt> 
  * Get a receipt by its ID.
  */
 export async function getReceipt(id: string): Promise<Receipt | undefined> {
-  const result = await db
-    .select()
-    .from(receiptsSqlite)
-    .where(eq(receiptsSqlite.id, id))
-    .limit(1);
+  const result = await db.select().from(receiptsSqlite).where(eq(receiptsSqlite.id, id)).limit(1);
   return result[0] ? rowToReceipt(result[0]) : undefined;
 }
 
@@ -224,7 +220,12 @@ export async function getPendingReceipts(
  */
 export async function updateReceiptAnchor(
   receiptId: string,
-  updates: Partial<Pick<Receipt, 'anchorStatus' | 'anchorTxHash' | 'merkleRoot' | 'merkleIndex' | 'merkleProof' | 'anchoredAt'>>,
+  updates: Partial<
+    Pick<
+      Receipt,
+      'anchorStatus' | 'anchorTxHash' | 'merkleRoot' | 'merkleIndex' | 'merkleProof' | 'anchoredAt'
+    >
+  >,
 ): Promise<Receipt | null> {
   const existing = await getReceipt(receiptId);
   if (!existing) return null;
@@ -235,10 +236,7 @@ export async function updateReceiptAnchor(
     updatedAt: new Date().toISOString(),
   };
 
-  await db
-    .update(receiptsSqlite)
-    .set(receiptToRow(merged))
-    .where(eq(receiptsSqlite.id, receiptId));
+  await db.update(receiptsSqlite).set(receiptToRow(merged)).where(eq(receiptsSqlite.id, receiptId));
 
   return merged;
 }
@@ -322,7 +320,12 @@ export async function verifyReceipt(
 }> {
   const receipt = await getReceipt(receiptId);
   if (!receipt) {
-    return { valid: false, receiptHashMatches: false, status: 'MISMATCH', error: 'Receipt not found' };
+    return {
+      valid: false,
+      receiptHashMatches: false,
+      status: 'MISMATCH',
+      error: 'Receipt not found',
+    };
   }
 
   let receiptHashMatches = true;
@@ -352,7 +355,7 @@ export async function verifyReceipt(
   const anchorVerified = receipt.anchorStatus === 'ANCHORED' || receipt.anchorStatus === 'VERIFIED';
 
   return {
-    valid: receiptHashMatches && (merkleProofValid !== false),
+    valid: receiptHashMatches && merkleProofValid !== false,
     receiptHashMatches,
     merkleProofValid,
     anchorVerified,

@@ -79,9 +79,9 @@ export default function VerifyReceiptPage() {
           Delivery Receipt
         </h1>
         <p className="text-foreground-muted font-body mb-8">
-          This page is public — anyone holding a receipt id can independently check the
-          commitment chain: the receipt hash, the Merkle proof against the anchored root, and
-          the on-chain anchor status.
+          This page is public — anyone holding a receipt id can independently check the commitment
+          chain: the receipt hash, the Merkle proof against the anchored root, and the on-chain
+          anchor status.
         </p>
 
         {loading && !receipt && (
@@ -101,9 +101,7 @@ export default function VerifyReceiptPage() {
             <div
               className={clsx(
                 'rounded-xl border p-4 flex items-center gap-3',
-                valid
-                  ? 'border-emerald-500/40 bg-emerald-500/5'
-                  : 'border-red-500/40 bg-red-500/5',
+                valid ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-red-500/40 bg-red-500/5',
               )}
             >
               {valid ? (
@@ -158,7 +156,9 @@ export default function VerifyReceiptPage() {
                 </div>
                 <div>
                   <p className="text-xs text-foreground-muted font-body mb-1">Payment</p>
-                  <p className="font-mono text-xs text-foreground">{truncateAddress(receipt.txHash)}</p>
+                  <p className="font-mono text-xs text-foreground">
+                    {truncateAddress(receipt.txHash)}
+                  </p>
                 </div>
               </div>
             </div>

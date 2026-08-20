@@ -115,9 +115,7 @@ export async function anchorReceiptDirect(receiptId: string): Promise<Receipt | 
   try {
     const anchorTxHash = await submitAnchorTransaction(receipt.receiptHash);
     const anchored = await markReceiptAnchored(receiptId, anchorTxHash);
-    logger.info(
-      `[Anchor] Direct-anchored receipt ${receiptId} (tx ${anchorTxHash})`,
-    );
+    logger.info(`[Anchor] Direct-anchored receipt ${receiptId} (tx ${anchorTxHash})`);
     return anchored;
   } catch (err) {
     await markReceiptAnchorFailed(receiptId);
@@ -152,16 +150,18 @@ export async function anchorReceiptBatch(receiptIds: string[]): Promise<Receipt[
     const anchorTxHash = await submitAnchorTransaction(root);
 
     const anchored: Receipt[] = [];
-    for (let i = 0; i < receipts.length; i++) {
-      const proof = generateInclusionProof(tree, i);
+    let index = 0;
+    for (const receipt of receipts) {
+      const proof = generateInclusionProof(tree, index);
       const updated = await markReceiptAnchored(
-        receipts[i]!.id,
+        receipt.id,
         anchorTxHash,
         root,
-        i,
+        index,
         proof.siblings,
       );
       if (updated) anchored.push(updated);
+      index++;
     }
     logger.info(
       `[Anchor] Batch-anchored ${anchored.length} receipts (root ${root}, tx ${anchorTxHash})`,
@@ -204,9 +204,7 @@ export async function runAnchorSweep(): Promise<{
   }
 
   if (batchedPending.length > 0) {
-    const anchoredBatch = await anchorReceiptBatch(
-      batchedPending.map(r => r.id),
-    );
+    const anchoredBatch = await anchorReceiptBatch(batchedPending.map(r => r.id));
     batchedAnchored = anchoredBatch.length;
     failed += batchedPending.length - anchoredBatch.length;
   }
