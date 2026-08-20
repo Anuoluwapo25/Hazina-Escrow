@@ -66,9 +66,39 @@ vi.mock('../../common/storage', async importOriginal => {
         timestamp: new Date().toISOString(),
       }),
     ),
+    getTransactionByHash: vi.fn(() =>
+      Promise.resolve({
+        id: 'tx-pending',
+        datasetId: 'ds-test-1',
+        txHash: 'tx-pending',
+        buyerWallet: `G${'A'.repeat(55)}`,
+        amount: 1,
+        timestamp: new Date().toISOString(),
+      }),
+    ),
     getUnpaidTransactions: vi.fn(() => Promise.resolve([])),
   };
 });
+
+vi.mock('../../receipts/receipt.service', () => ({
+  getReceiptAnchorMode: vi.fn(() => 'direct'),
+  storeReceipt: vi.fn(async (input: { datasetId: string; txHash: string }) => ({
+    id: `rcpt-${input.txHash}`,
+    datasetId: input.datasetId,
+    buyer: `G${'A'.repeat(55)}`,
+    seller: `G${'A'.repeat(55)}`,
+    amount: 1,
+    paymentToken: 'USDC',
+    txHash: input.txHash,
+    leafHash: 'aa'.repeat(32),
+    receiptHash: 'bb'.repeat(32),
+    anchorMode: 'direct',
+    anchorStatus: 'NOT_ANCHORED_YET',
+    deliveredAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })),
+}));
 
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
@@ -204,6 +234,10 @@ describe('POST /api/v1/payments/verify/:id', () => {
       mode: 'real',
       source: 'buyer',
     });
+    expect(res.body.receipt).toBeDefined();
+    expect(res.body.receipt.id).toBe('rcpt-tx-happy');
+    expect(res.body.receipt.receiptHash).toBe('bb'.repeat(32));
+    expect(res.body.receipt.anchorStatus).toBe('NOT_ANCHORED_YET');
   });
 
   it('sanitizes a whitespace-only buyerQuestion down to undefined', async () => {

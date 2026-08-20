@@ -32,6 +32,14 @@ function generateReceiptId(): string {
 }
 
 /**
+ * Resolve the anchoring mode configured for new receipts. Read per-call so
+ * tests can override it without re-importing the module. Defaults to 'direct'.
+ */
+export function getReceiptAnchorMode(): ReceiptAnchorMode {
+  return process.env.RECEIPT_ANCHOR_MODE === 'batched' ? 'batched' : 'direct';
+}
+
+/**
  * Deterministic serialization for receipt preimage.
  * Each field is length-prefixed (4-byte big-endian) to avoid ambiguity.
  * Format:
