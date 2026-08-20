@@ -272,11 +272,13 @@ release path (I1), and it overrides the missing buyer confirmation.
 ### I22 — the admin surface rejects everyone else
 
 `pause`, `unpause`, `set_default_fee` / `set_fee` / `update_fee`,
-`set_dataset_fee`, `clear_dataset_fee`, `set_treasury`, `transfer_admin` /
-`set_admin`, `upgrade`, `set_whitelist_enforced`, `set_address_whitelisted`,
+`set_dataset_fee`, `clear_dataset_fee`, `schedule_set_treasury` / `execute_set_treasury` / `cancel_set_treasury`,
+`schedule_admin_change` / `accept_admin` / `cancel_admin_change`,
+
+`schedule_upgrade` / `execute_upgrade` / `cancel_upgrade`, `set_whitelist_enforced`, `set_address_whitelisted`,
 `set_address_blacklisted`, `set_max_escrow_amount`,
 `set_max_escrows_per_ledger`, `set_arbitrator`, `release`, `release_multi`,
-`refund` and `emergency_withdraw` all require the stored admin.
+`schedule_emergency_withdraw` / `execute_emergency_withdraw` / `cancel_emergency_withdraw` all require the stored admin.
 `resolve_dispute` requires the arbitrator.
 
 > `state_machine::admin_surface_rejects_non_admin_callers`,
@@ -286,7 +288,7 @@ release path (I1), and it overrides the missing buyer confirmation.
 
 While paused: `lock`, `lock_multi`, `release`, `release_multi` and `refund`
 fail; `get_escrow`, `get_escrow_count` and the config getters still work.
-`emergency_withdraw` requires the _paused_ state.
+`emergency_withdraw` requires the _paused_ state AND the timelock to have elapsed.
 
 > `state_machine::pause_blocks_writes_and_leaves_reads_working`
 
@@ -305,6 +307,10 @@ silently, but they are **not** claimed to be desirable.
 | A4  | `lock_multi` does not call `assert_valid_parties`, so a buyer may be their own seller in a batch — `lock` forbids it.                                                                  | `lib.rs::lock_multi`      |
 | A5  | `lock_multi` has no expiry parameter; every escrow it creates gets a fixed 1-hour deadline.                                                                                            | `lib.rs::lock_multi`      |
 | A6  | `refund_one` clears `disputed` on refund, but `release_disputed_one` clears it _and_ forces `buyer_confirmed = true`.                                                                  | `lib.rs`                  |
+| A7  | **Emergency withdraw now requires both the paused flag _and_ the timelock to have elapsed**, so a fully compromised admin key cannot instantly drain all funds — there is a observable window. | `lib.rs::schedule_emergency_withdraw` |
+| A8  | **Upgrade now requires the timelock to have elapsed**, so a malicious admin cannot instantly swap the contract WASM without observation.                                                   | `lib.rs::schedule_upgrade` |
+| A9  | **Admin change is now two-step**: proposer schedules, candidate must `accept_admin` with their own signature. A typo'd or hostile address cannot take over unilaterally.               | `lib.rs::schedule_admin_change` |
+| A10 | **Timelock delay itself is timelocked**: changing `MIN_TIMELOCK_DELAY_LEDGERS` or `DEFAULT_TIMELOCK_DELAY_LEDGERS` requires the current delay to have elapsed first.                  | `lib.rs::schedule_set_timelock_delay` |
 
 ---
 
