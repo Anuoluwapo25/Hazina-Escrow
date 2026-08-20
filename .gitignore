@@ -12,6 +12,12 @@ test-backups/
 backend/sqlite.db
 backend/sqlite.db-shm
 backend/sqlite.db-wal
+backend/test.db
+backend/test.db-shm
+backend/test.db-wal
+backend/data/hazina.db
+backend/data/hazina.db-shm
+backend/data/hazina.db-wal
 backend/coverage/
 frontend/coverage/
 frontend/playwright-report/

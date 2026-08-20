@@ -181,6 +181,44 @@ export const sentinelAlerts = pgTable('sentinel_alerts', {
   resolvedBy: text('resolved_by'),
 });
 
+/**
+ * Verifiable delivery receipts — cryptographic commitments to delivered data.
+ * Each receipt binds a delivered payload to a specific purchase and anchors
+ * the commitment on-chain (direct or batched).
+ */
+export const receipts = pgTable(
+  'receipts',
+  {
+    id: text('id').primaryKey(),
+    datasetId: text('dataset_id').notNull(),
+    buyer: text('buyer').notNull(),
+    seller: text('seller').notNull(),
+    amount: numeric('amount').notNull(),
+    paymentToken: text('payment_token').notNull().default('USDC'),
+    txHash: text('tx_hash').notNull().unique(),
+    leafHash: text('leaf_hash').notNull(),
+    receiptHash: text('receipt_hash').notNull().unique(),
+    anchorMode: text('anchor_mode').notNull(),
+    anchorStatus: text('anchor_status').notNull(),
+    anchorTxHash: text('anchor_tx_hash'),
+    merkleRoot: text('merkle_root'),
+    merkleIndex: integer('merkle_index'),
+    merkleProof: text('merkle_proof'),
+    deliveredAt: text('delivered_at').notNull(),
+    anchoredAt: text('anchored_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  table => ({
+    datasetIdx: index('receipts_dataset_idx').on(table.datasetId),
+    buyerIdx: index('receipts_buyer_idx').on(table.buyer),
+    sellerIdx: index('receipts_seller_idx').on(table.seller),
+    txHashIdx: index('receipts_tx_hash_idx').on(table.txHash),
+    receiptHashIdx: index('receipts_receipt_hash_idx').on(table.receiptHash),
+    anchorStatusIdx: index('receipts_anchor_status_idx').on(table.anchorStatus),
+  }),
+);
+
 // ── SQLite tables (used when DATABASE_URL is not postgres) ───────────────────
 
 export const datasetsSqlite = sqliteTable(
@@ -344,3 +382,37 @@ export const sentinelAlertsSqlite = sqliteTable('sentinel_alerts', {
   resolvedAt: sqliteText('resolved_at'),
   resolvedBy: sqliteText('resolved_by'),
 });
+
+/** SQLite mirror of {@link receipts}. */
+export const receiptsSqlite = sqliteTable(
+  'receipts',
+  {
+    id: sqliteText('id').primaryKey(),
+    datasetId: sqliteText('dataset_id').notNull(),
+    buyer: sqliteText('buyer').notNull(),
+    seller: sqliteText('seller').notNull(),
+    amount: sqliteText('amount').notNull(),
+    paymentToken: sqliteText('payment_token').notNull().default('USDC'),
+    txHash: sqliteText('tx_hash').notNull().unique(),
+    leafHash: sqliteText('leaf_hash').notNull(),
+    receiptHash: sqliteText('receipt_hash').notNull().unique(),
+    anchorMode: sqliteText('anchor_mode').notNull(),
+    anchorStatus: sqliteText('anchor_status').notNull(),
+    anchorTxHash: sqliteText('anchor_tx_hash'),
+    merkleRoot: sqliteText('merkle_root'),
+    merkleIndex: sqliteInteger('merkle_index'),
+    merkleProof: sqliteText('merkle_proof'),
+    deliveredAt: sqliteText('delivered_at').notNull(),
+    anchoredAt: sqliteText('anchored_at'),
+    createdAt: sqliteText('created_at').notNull(),
+    updatedAt: sqliteText('updated_at').notNull(),
+  },
+  table => ({
+    datasetIdx: sqliteIndex('receipts_dataset_idx').on(table.datasetId),
+    buyerIdx: sqliteIndex('receipts_buyer_idx').on(table.buyer),
+    sellerIdx: sqliteIndex('receipts_seller_idx').on(table.seller),
+    txHashIdx: sqliteIndex('receipts_tx_hash_idx').on(table.txHash),
+    receiptHashIdx: sqliteIndex('receipts_receipt_hash_idx').on(table.receiptHash),
+    anchorStatusIdx: sqliteIndex('receipts_anchor_status_idx').on(table.anchorStatus),
+  }),
+);

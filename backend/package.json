@@ -30,7 +30,7 @@
     "@stellar/stellar-sdk": "^13.1.0",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
-    "better-sqlite3": "^13.0.1",
+    "better-sqlite3": "^9.6.0",
     "cors": "^2.8.5",
     "dd-trace": "^5.100.0",
     "dotenv": "^16.4.5",
