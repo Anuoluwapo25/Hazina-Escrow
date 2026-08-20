@@ -27,7 +27,7 @@ export interface Receipt {
   anchorTxHash?: string;
   merkleRoot?: string;
   merkleIndex?: number;
-  merkleProof?: string[];
+  merkleProof?: (string | null)[];
   deliveredAt: string;
   anchoredAt?: string;
   createdAt: string;
@@ -37,7 +37,7 @@ export interface Receipt {
 export interface ReceiptMerkleProof {
   leafIndex: number;
   leafHash: string;
-  siblings: string[];
+  siblings: (string | null)[];
   root: string;
 }
 

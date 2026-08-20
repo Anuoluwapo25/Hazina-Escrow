@@ -21,8 +21,9 @@ import type {
 } from './types';
 import db from '../db/client';
 import { receiptsSqlite } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import { logger } from '../lib/logger';
+import { verifyProof as verifyMerkleProofFromTree } from './merkle';
 
 const RECEIPT_ID_PREFIX = 'rcpt_';
 
@@ -188,6 +189,29 @@ export async function getReceiptsByDataset(datasetId: string): Promise<Receipt[]
 }
 
 /**
+ * Get receipts that still need anchoring (NOT_ANCHORED_YET, ANCHORING, or
+ * ANCHOR_FAILED), ordered oldest-first. Pass a mode to filter direct vs
+ * batched anchoring. Limit bounds the batch size for a single sweep.
+ */
+export async function getPendingReceipts(
+  opts: { mode?: ReceiptAnchorMode; limit?: number; statuses?: ReceiptAnchorStatus[] } = {},
+): Promise<Receipt[]> {
+  const statuses = opts.statuses ?? ['NOT_ANCHORED_YET', 'ANCHORING', 'ANCHOR_FAILED'];
+  const conditions = [inArray(receiptsSqlite.anchorStatus, statuses)];
+  if (opts.mode) {
+    conditions.push(eq(receiptsSqlite.anchorMode, opts.mode));
+  }
+
+  const result = await db
+    .select()
+    .from(receiptsSqlite)
+    .where(and(...conditions))
+    .limit(opts.limit ?? 50);
+
+  return result.map(rowToReceipt);
+}
+
+/**
  * Update receipt anchor status and metadata.
  */
 export async function updateReceiptAnchor(
@@ -219,7 +243,7 @@ export async function markReceiptAnchored(
   anchorTxHash: string,
   merkleRoot?: string,
   merkleIndex?: number,
-  merkleProof?: string[],
+  merkleProof?: (string | null)[],
 ): Promise<Receipt | null> {
   return updateReceiptAnchor(receiptId, {
     anchorStatus: 'ANCHORED',
@@ -269,15 +293,7 @@ export function buildMerkleProof(receipt: Receipt): ReceiptMerkleProof | undefin
  * Returns true if the proof is valid.
  */
 export function verifyMerkleProof(proof: ReceiptMerkleProof): boolean {
-  let currentHash = Buffer.from(proof.leafHash, 'hex');
-
-  for (const siblingHex of proof.siblings) {
-    const sibling = Buffer.from(siblingHex, 'hex');
-    const combined = Buffer.concat([currentHash, sibling]);
-    currentHash = createHash('sha256').update(combined).digest();
-  }
-
-  return currentHash.toString('hex') === proof.root;
+  return verifyMerkleProofFromTree(proof);
 }
 
 /**

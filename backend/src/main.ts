@@ -35,6 +35,7 @@ import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
 import { claimableRouter } from './payments/claimable.router';
 import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
+import { startAnchorWorker, stopAnchorWorker } from './receipts/anchor.service';
 import { wellKnownRouter } from './wellknown/x402.router';
 import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
 import { sentinelRouter } from './sentinel/router';
@@ -385,6 +386,7 @@ startDataRefreshWorker();
 void startSentinelIfEnabled();
 startSnapshotCompactionWorker();
 startClaimableSweepWorker();
+startAnchorWorker();
 
 // Give every pre-existing dataset a first snapshot so history starts now rather
 // than at its next refresh (#600). Idempotent, so a restart is free; skipped in
@@ -436,6 +438,7 @@ process.on('SIGTERM', () => {
   stopDataRefreshWorker();
   stopSentinel();
   stopSnapshotCompactionWorker();
+  stopAnchorWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -450,6 +453,7 @@ process.on('SIGINT', () => {
   stopClaimableSweepWorker();
   stopSentinel();
   stopSnapshotCompactionWorker();
+  stopAnchorWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
