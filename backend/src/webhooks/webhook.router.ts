@@ -12,11 +12,7 @@ import {
 } from '../common/storage';
 import { validateBody } from '../common/validate';
 import { notifySeller, signPayload } from './webhook.service';
-import {
-  requireApiKey,
-  requireSellerMutationAuth,
-  requireSellerReadAuth,
-} from '../common/auth.middleware';
+import { requireSellerMutationAuth, requireSellerReadAuth } from '../common/auth.middleware';
 import { encryptSecret } from '../common/secret-crypto';
 import { processPayment } from '../payments/payments.service';
 import { logger } from '../lib/logger';
@@ -243,9 +239,11 @@ webhooksRouter.post('/payment', async (req: Request, res: Response) => {
  *         description: Invalid request body
  */
 // POST /api/webhooks — register a new webhook
+// Accepts the shared API key (legacy/both modes) or a seller JWT (legacy or
+// SEP-10); when a JWT is used, the webhook's sellerWallet must match it.
 webhooksRouter.post(
   '/',
-  requireApiKey,
+  requireSellerMutationAuth,
   validateBody(createWebhookSchema),
   async (req: Request, res: Response) => {
     const { sellerWallet, url, secret, events } = req.body as z.infer<typeof createWebhookSchema>;
