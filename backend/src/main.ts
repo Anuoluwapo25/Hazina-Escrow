@@ -38,6 +38,7 @@ import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/
 import { startAnchorWorker, stopAnchorWorker } from './receipts/anchor.service';
 import { receiptsRouter } from './receipts/receipts.router';
 import { wellKnownRouter } from './wellknown/x402.router';
+import { wellKnownStellarTomlRouter } from './wellknown/stellar-toml.router';
 import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
 import { sentinelRouter } from './sentinel/router';
 import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
@@ -301,6 +302,7 @@ process.on('uncaughtException', (err: Error) => {
 // RFC 8615 well-known URIs are always root-relative, never under /api — mount
 // before the versioned API namespace and the /api legacy-redirect middleware.
 app.use(wellKnownRouter);
+app.use(wellKnownStellarTomlRouter);
 
 // Routes under versioned API namespace.
 const v1Router = express.Router();
