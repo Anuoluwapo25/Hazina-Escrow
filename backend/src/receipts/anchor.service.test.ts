@@ -16,9 +16,7 @@ vi.mock('../receipts/receipt.service', () => ({
   getPendingReceipts: vi.fn(async (opts: { mode: 'direct' | 'batched'; limit?: number }) =>
     mockReceipts.filter(r => r.anchorMode === opts.mode).slice(0, opts.limit ?? 50),
   ),
-  getReceipt: vi.fn(async (id: string) =>
-    mockReceipts.find(r => r.id === id) ?? undefined,
-  ),
+  getReceipt: vi.fn(async (id: string) => mockReceipts.find(r => r.id === id) ?? undefined),
   markReceiptAnchoring: vi.fn(async () => null),
   markReceiptAnchored: vi.fn(
     async (
@@ -55,10 +53,10 @@ vi.mock('@stellar/stellar-sdk', async importOriginal => {
   class MockTransactionBuilder {
     private ops: unknown[] = [];
     private memo: unknown = null;
-    constructor(
-      _account: unknown,
-      _opts: unknown,
-    ) {}
+    constructor(_account: unknown, _opts: unknown) {
+      void _account;
+      void _opts;
+    }
     addOperation(op: unknown) {
       this.ops.push(op);
       return this;
@@ -120,10 +118,7 @@ import {
   runAnchorSweep,
   parseAnchorMode,
 } from './anchor.service';
-import {
-  getPendingReceipts,
-  markReceiptAnchored,
-} from './receipt.service';
+import { getPendingReceipts, markReceiptAnchored } from './receipt.service';
 
 function makeReceipt(overrides: Partial<(typeof mockReceipts)[number]> = {}) {
   const receipt = {
@@ -156,9 +151,7 @@ describe('anchor.service', () => {
     it('requires AGENT_WALLET_SECRET', async () => {
       const prev = process.env.AGENT_WALLET_SECRET;
       delete process.env.AGENT_WALLET_SECRET;
-      await expect(submitAnchorTransaction('a'.repeat(64))).rejects.toThrow(
-        'AGENT_WALLET_SECRET',
-      );
+      await expect(submitAnchorTransaction('a'.repeat(64))).rejects.toThrow('AGENT_WALLET_SECRET');
       if (prev !== undefined) process.env.AGENT_WALLET_SECRET = prev;
     });
 
@@ -194,11 +187,8 @@ describe('anchor.service', () => {
       const result = await anchorReceiptDirect(receipt.id);
 
       expect(result).toBeTruthy();
-      expect(result!.anchorTxHash).toBe('anchor-tx-hash');
-      expect(markReceiptAnchored).toHaveBeenCalledWith(
-        receipt.id,
-        'anchor-tx-hash',
-      );
+      expect(result?.anchorTxHash).toBe('anchor-tx-hash');
+      expect(markReceiptAnchored).toHaveBeenCalledWith(receipt.id, 'anchor-tx-hash');
       delete process.env.AGENT_WALLET_SECRET;
     });
 

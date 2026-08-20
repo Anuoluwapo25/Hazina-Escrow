@@ -56,9 +56,7 @@ function canonicalizeValue(
     case 'number': {
       if (!Number.isFinite(value)) {
         if (options.strictNumbers) {
-          throw new TypeError(
-            `Cannot canonicalise non-finite number at ${path || '<root>'}`,
-          );
+          throw new TypeError(`Cannot canonicalise non-finite number at ${path || '<root>'}`);
         }
         return 'null';
       }
@@ -81,8 +79,8 @@ function canonicalizeValue(
   }
 
   if (Array.isArray(value)) {
-    const items = value.map((item, i) =>
-      canonicalizeValue(item, `${path}[${i}]`, options) ?? 'null',
+    const items = value.map(
+      (item, i) => canonicalizeValue(item, `${path}[${i}]`, options) ?? 'null',
     );
     return `[${items.join(',')}]`;
   }

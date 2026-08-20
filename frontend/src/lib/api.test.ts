@@ -329,9 +329,7 @@ describe('api.getReceipt', () => {
 
     const result = await api.getReceipt('rcpt_123');
 
-    expect(String(fetchMock.mock.calls[0]?.[0] || '')).toContain(
-      '/api/v1/receipts/rcpt_123',
-    );
+    expect(String(fetchMock.mock.calls[0]?.[0] || '')).toContain('/api/v1/receipts/rcpt_123');
     expect(result.receipt.id).toBe('rcpt_123');
     expect(result.merkleProof?.root).toBe('44'.repeat(32));
     expect(result.verification.valid).toBe(true);

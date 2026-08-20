@@ -210,13 +210,7 @@ export interface ReceiptVerification {
   merkleProofValid?: boolean;
   anchorVerified?: boolean;
   anchorTxHash?: string;
-  status:
-    | 'NOT_ANCHORED_YET'
-    | 'ANCHORING'
-    | 'ANCHORED'
-    | 'ANCHOR_FAILED'
-    | 'VERIFIED'
-    | 'MISMATCH';
+  status: 'NOT_ANCHORED_YET' | 'ANCHORING' | 'ANCHORED' | 'ANCHOR_FAILED' | 'VERIFIED' | 'MISMATCH';
   error?: string;
 }
 
