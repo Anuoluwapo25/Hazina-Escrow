@@ -7,6 +7,10 @@ vi.mock('../lib/escrow.client', () => ({
   refundEscrow: vi.fn(),
 }));
 
+vi.mock('../agent/agent.wallet', () => ({
+  sendTokenPayment: vi.fn(),
+}));
+
 vi.mock('../ai/claude.service', () => ({
   generateDataSummary: vi.fn(() =>
     Promise.resolve({ summary: 'Executive summary', answer: 'Answer' }),
@@ -47,6 +51,7 @@ vi.mock('../common/storage', async importOriginal => {
 import { processEscrowPayment, markDeliveryFailure } from './payments.service';
 import { PaymentError } from './stellar.service';
 import { getEscrow, refundEscrow } from '../lib/escrow.client';
+import { sendTokenPayment } from '../agent/agent.wallet';
 import { getDataset, getTransactionByHash, updateTransactionByHash } from '../common/storage';
 import type { Dataset } from '../common/storage';
 
@@ -219,7 +224,7 @@ describe('markDeliveryFailure — escrow refund on exhausted retries', () => {
     expect(result.transaction.deliveryStatus).toBe('failed');
   });
 
-  it('never refunds a legacy custodial transaction (no escrowId), regardless of attempt count', async () => {
+  it('never uses the on-chain refundEscrow path for a custodial transaction (no escrowId)', async () => {
     vi.mocked(getTransactionByHash).mockResolvedValue({
       id: 'tx-1',
       datasetId: 'ds-1',
@@ -266,5 +271,133 @@ describe('markDeliveryFailure — escrow refund on exhausted retries', () => {
     // rather than being silently marked refunded.
     expect(result.transaction.status).toBe('delivery_failed');
     expect(result.transaction.deliveryStatus).toBe('failed');
+  });
+});
+
+describe('markDeliveryFailure — custodial buyer refund on exhausted retries (#518)', () => {
+  const BUYER_WALLET = `G${'C'.repeat(55)}`;
+
+  beforeEach(() => {
+    vi.mocked(getDataset).mockResolvedValue(DATASET);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('refunds a custodial buyer directly once delivery has failed MAX_CUSTODIAL_DELIVERY_ATTEMPTS times', async () => {
+    vi.mocked(getTransactionByHash).mockResolvedValue({
+      id: 'tx-1',
+      datasetId: 'ds-1',
+      txHash: 'demo-hash-1',
+      amount: 1,
+      status: 'delivery_failed',
+      buyerWallet: BUYER_WALLET,
+      deliveryAttempts: 2, // this failure will be the 3rd attempt
+      timestamp: new Date().toISOString(),
+    });
+    vi.mocked(sendTokenPayment).mockResolvedValue({
+      txHash: 'refund-tx-hash',
+      from: 'GAGENT',
+      to: BUYER_WALLET,
+      amount: '1.0000000',
+      tokenCode: 'USDC',
+    });
+
+    const result = await markDeliveryFailure({
+      transactionId: 'tx-1',
+      txHash: 'demo-hash-1',
+      datasetId: 'ds-1',
+      error: new Error('AI summary service unavailable'),
+    });
+
+    expect(sendTokenPayment).toHaveBeenCalledWith({
+      destinationAddress: BUYER_WALLET,
+      amount: '1.0000000',
+      memo: 'hazina-refund-ds-1',
+      tokenCode: 'USDC',
+    });
+    expect(result.transaction.status).toBe('refunded');
+    expect(result.transaction.deliveryStatus).toBe('refunded');
+    expect(result.transaction.sellerReceived).toBe(0);
+    expect(vi.mocked(updateTransactionByHash)).toHaveBeenCalledWith(
+      'demo-hash-1',
+      expect.objectContaining({ status: 'refunded', deliveryStatus: 'refunded' }),
+    );
+  });
+
+  it('does not refund a custodial delivery before MAX_CUSTODIAL_DELIVERY_ATTEMPTS is reached', async () => {
+    vi.mocked(getTransactionByHash).mockResolvedValue({
+      id: 'tx-1',
+      datasetId: 'ds-1',
+      txHash: 'demo-hash-1',
+      amount: 1,
+      status: 'delivery_failed',
+      buyerWallet: BUYER_WALLET,
+      deliveryAttempts: 0, // this failure will only be the 1st attempt
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await markDeliveryFailure({
+      transactionId: 'tx-1',
+      txHash: 'demo-hash-1',
+      datasetId: 'ds-1',
+      error: new Error('transient error'),
+    });
+
+    expect(sendTokenPayment).not.toHaveBeenCalled();
+    expect(result.transaction.status).toBe('delivery_failed');
+    expect(result.transaction.deliveryStatus).toBe('failed');
+  });
+
+  it('escalates to manual review when no buyer wallet was captured for the purchase', async () => {
+    vi.mocked(getTransactionByHash).mockResolvedValue({
+      id: 'tx-1',
+      datasetId: 'ds-1',
+      txHash: 'demo-hash-1',
+      amount: 1,
+      status: 'delivery_failed',
+      deliveryAttempts: 5,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await markDeliveryFailure({
+      transactionId: 'tx-1',
+      txHash: 'demo-hash-1',
+      datasetId: 'ds-1',
+      error: new Error('transient error'),
+    });
+
+    expect(sendTokenPayment).not.toHaveBeenCalled();
+    expect(result.transaction.deliveryStatus).toBe('manual_review_needed');
+    expect(vi.mocked(updateTransactionByHash)).toHaveBeenCalledWith(
+      'demo-hash-1',
+      expect.objectContaining({ deliveryStatus: 'manual_review_needed' }),
+    );
+  });
+
+  it('escalates to manual review when the direct refund attempt itself fails', async () => {
+    vi.mocked(getTransactionByHash).mockResolvedValue({
+      id: 'tx-1',
+      datasetId: 'ds-1',
+      txHash: 'demo-hash-1',
+      amount: 1,
+      status: 'delivery_failed',
+      buyerWallet: BUYER_WALLET,
+      deliveryAttempts: 4,
+      timestamp: new Date().toISOString(),
+    });
+    vi.mocked(sendTokenPayment).mockRejectedValue(new Error('insufficient agent balance'));
+
+    const result = await markDeliveryFailure({
+      transactionId: 'tx-1',
+      txHash: 'demo-hash-1',
+      datasetId: 'ds-1',
+      error: new Error('AI summary service unavailable'),
+    });
+
+    expect(sendTokenPayment).toHaveBeenCalled();
+    expect(result.transaction.status).toBe('delivery_failed');
+    expect(result.transaction.deliveryStatus).toBe('manual_review_needed');
   });
 });

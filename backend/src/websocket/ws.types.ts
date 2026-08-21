@@ -26,7 +26,7 @@ export const TransactionUpdateEventSchema = z.object({
     amount: z.string(), // Big number as string
     buyerQuery: z.string().optional(),
     aiSummary: z.string().optional(),
-    deliveryStatus: z.enum(['pending', 'delivered', 'failed']).optional(),
+    deliveryStatus: z.enum(['pending', 'delivered', 'failed', 'manual_review_needed']).optional(),
     timestamp: z.string().datetime(),
     error: z.string().optional(),
   }),

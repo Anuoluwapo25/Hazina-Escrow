@@ -66,14 +66,8 @@ export interface Transaction {
   amount: number;
   paymentToken?: string;
   status?:
-    | 'pending'
-    | 'verifying'
-    | 'verified'
-    | 'completed'
-    | 'failed'
-    | 'refunded'
-    | 'delivery_failed';
-  deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded';
+    'pending' | 'verifying' | 'verified' | 'completed' | 'failed' | 'refunded' | 'delivery_failed';
+  deliveryStatus?: 'pending' | 'delivered' | 'failed' | 'refunded' | 'manual_review_needed';
   sellerPaid?: boolean;
   sellerAmount?: number;
   sellerTxHash?: string;
@@ -111,10 +105,7 @@ export interface WebhookSubscription {
   createdAt: string;
 }
 export type PayoutFailureStatus =
-  | 'pending_retry'
-  | 'manual_review_needed'
-  | 'paid'
-  | 'settled_as_claimable';
+  'pending_retry' | 'manual_review_needed' | 'paid' | 'settled_as_claimable';
 export interface PayoutFailure {
   id: string;
   datasetId: string;
@@ -682,6 +673,15 @@ export async function getFailedDeliveryTransactions(): Promise<Transaction[]> {
     .select()
     .from(transactionsSqlite)
     .where(eq(transactionsSqlite.deliveryStatus, 'failed'));
+  return result.map(rowToTransaction);
+}
+
+/** Deliveries that exhausted their bounded retries and need a human to look — mirrors getManualReviewPayouts(). */
+export async function getManualReviewDeliveries(): Promise<Transaction[]> {
+  const result = await db
+    .select()
+    .from(transactionsSqlite)
+    .where(eq(transactionsSqlite.deliveryStatus, 'manual_review_needed'));
   return result.map(rowToTransaction);
 }
 

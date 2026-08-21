@@ -33,6 +33,10 @@ vi.mock('../trustline.service', () => ({
   classifyDestinationFailure: vi.fn(() => null),
 }));
 
+vi.mock('../../agent/agent.wallet', () => ({
+  sendTokenPayment: vi.fn(),
+}));
+
 vi.mock('../../common/datadog', () => ({
   domainMetrics: {
     paymentVerified: vi.fn(),
@@ -77,6 +81,8 @@ vi.mock('../../common/storage', async importOriginal => {
       }),
     ),
     getUnpaidTransactions: vi.fn(() => Promise.resolve([])),
+    getFailedDeliveryTransactions: vi.fn(() => Promise.resolve([])),
+    getManualReviewDeliveries: vi.fn(() => Promise.resolve([])),
   };
 });
 
@@ -106,12 +112,19 @@ import {
   paymentsRouter,
   startDeliveryRetryWorker,
   stopDeliveryRetryWorker,
+  retryFailedDeliveries,
 } from '../payments.router';
 import { generateDataSummary } from '../../ai/claude.service';
-import { getDataset, txHashUsed } from '../../common/storage';
-import type { Dataset } from '../../common/storage';
+import {
+  getDataset,
+  txHashUsed,
+  getFailedDeliveryTransactions,
+  getManualReviewDeliveries,
+} from '../../common/storage';
+import type { Dataset, Transaction } from '../../common/storage';
 import { verifyStellarPayment } from '../stellar.service';
 import { domainMetrics } from '../../common/datadog';
+import { sendTokenPayment } from '../../agent/agent.wallet';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -158,6 +171,13 @@ describe('POST /api/v1/payments/verify/:id', () => {
     vi.mocked(generateDataSummary).mockResolvedValue({
       summary: 'Executive summary',
       answer: 'Buyer answer',
+    });
+    vi.mocked(sendTokenPayment).mockResolvedValue({
+      txHash: 'seller-pay-tx',
+      from: 'GAGENT',
+      to: SELLER_WALLET,
+      amount: '0.9500000',
+      tokenCode: 'USDC',
     });
   });
 
@@ -238,6 +258,13 @@ describe('POST /api/v1/payments/verify/:id', () => {
     expect(res.body.receipt.id).toBe('rcpt-tx-happy');
     expect(res.body.receipt.receiptHash).toBe('bb'.repeat(32));
     expect(res.body.receipt.anchorStatus).toBe('NOT_ANCHORED_YET');
+    // Seller is only paid once delivery has actually succeeded (#518).
+    expect(sendTokenPayment).toHaveBeenCalledWith({
+      destinationAddress: SELLER_WALLET,
+      amount: '0.9500000',
+      memo: 'hazina-ds-test-1',
+      tokenCode: 'USDC',
+    });
   });
 
   it('sanitizes a whitespace-only buyerQuestion down to undefined', async () => {
@@ -277,6 +304,108 @@ describe('POST /api/v1/payments/verify/:id', () => {
       status: 'pending',
     });
     expect(domainMetrics.datasetQueried).not.toHaveBeenCalled();
+    // The core #518 fix: a delivery that fails must NOT pay the seller —
+    // they'd be paid for a purchase the buyer never received.
+    expect(sendTokenPayment).not.toHaveBeenCalled();
+  });
+});
+
+// ── Tests: retryFailedDeliveries (background worker) ─────────────────────────
+
+describe('retryFailedDeliveries', () => {
+  const FAILED_CUSTODIAL_TX: Transaction = {
+    id: 'tx-retry-1',
+    datasetId: 'ds-test-1',
+    txHash: 'tx-retry-1-hash',
+    amount: 1,
+    status: 'delivery_failed',
+    deliveryStatus: 'failed',
+    deliveryAttempts: 1,
+    timestamp: new Date().toISOString(),
+  };
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  beforeEach(() => {
+    vi.mocked(getDataset).mockResolvedValue(DATASET);
+    vi.mocked(sendTokenPayment).mockResolvedValue({
+      txHash: 'seller-pay-tx',
+      from: 'GAGENT',
+      to: SELLER_WALLET,
+      amount: '0.9500000',
+      tokenCode: 'USDC',
+    });
+  });
+
+  it('pays the seller once a custodial delivery succeeds on retry', async () => {
+    vi.mocked(getFailedDeliveryTransactions).mockResolvedValueOnce([FAILED_CUSTODIAL_TX]);
+    vi.mocked(generateDataSummary).mockResolvedValue({
+      summary: 'Retried summary',
+      answer: undefined,
+    });
+
+    await retryFailedDeliveries();
+
+    expect(sendTokenPayment).toHaveBeenCalledWith({
+      destinationAddress: SELLER_WALLET,
+      amount: '0.9500000',
+      memo: 'hazina-ds-test-1',
+      tokenCode: 'USDC',
+    });
+  });
+
+  it('does not pay the seller when the retried delivery still fails', async () => {
+    vi.mocked(getFailedDeliveryTransactions).mockResolvedValueOnce([FAILED_CUSTODIAL_TX]);
+    vi.mocked(generateDataSummary).mockRejectedValue(new Error('Claude still unavailable'));
+
+    await retryFailedDeliveries();
+
+    expect(sendTokenPayment).not.toHaveBeenCalled();
+  });
+});
+
+// ── Tests: GET /api/v1/payments/admin/deliveries/stuck ───────────────────────
+
+describe('GET /api/v1/payments/admin/deliveries/stuck', () => {
+  const ADMIN_KEY = 'test-admin-key';
+  let app: Express;
+
+  beforeEach(() => {
+    app = makeApp();
+    process.env.ADMIN_API_KEY = ADMIN_KEY;
+  });
+
+  afterEach(() => {
+    delete process.env.ADMIN_API_KEY;
+    vi.clearAllMocks();
+  });
+
+  it('rejects without the admin key', async () => {
+    const res = await request(app).get('/api/v1/payments/admin/deliveries/stuck');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns deliveries requiring manual review with the admin key', async () => {
+    vi.mocked(getManualReviewDeliveries).mockResolvedValueOnce([
+      {
+        id: 'tx-stuck-1',
+        datasetId: 'ds-test-1',
+        txHash: 'tx-stuck-1-hash',
+        amount: 1,
+        deliveryStatus: 'manual_review_needed',
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/v1/payments/admin/deliveries/stuck')
+      .set('Authorization', `Bearer ${ADMIN_KEY}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.deliveries).toHaveLength(1);
+    expect(res.body.deliveries[0].id).toBe('tx-stuck-1');
   });
 });
 
