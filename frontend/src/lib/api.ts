@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getEnv } from './env';
+import { getSellerToken } from './sellerAuth';
 
 const REQUEST_THROTTLE_MS = 250;
 
@@ -203,6 +204,73 @@ export interface SolvencyReport {
   checkedAt: string;
 }
 
+/** Verifiable delivery receipt — see docs/RECEIPTS.md. */
+export interface ReceiptVerification {
+  valid: boolean;
+  receiptHashMatches: boolean;
+  merkleProofValid?: boolean;
+  anchorVerified?: boolean;
+  anchorTxHash?: string;
+  status: 'NOT_ANCHORED_YET' | 'ANCHORING' | 'ANCHORED' | 'ANCHOR_FAILED' | 'VERIFIED' | 'MISMATCH';
+  error?: string;
+}
+
+export const ReceiptSchema = z.object({
+  id: z.string(),
+  datasetId: z.string(),
+  buyer: z.string(),
+  seller: z.string(),
+  amount: z.number(),
+  paymentToken: z.string(),
+  txHash: z.string(),
+  leafHash: z.string(),
+  receiptHash: z.string(),
+  anchorMode: z.enum(['direct', 'batched']),
+  anchorStatus: z.enum([
+    'NOT_ANCHORED_YET',
+    'ANCHORING',
+    'ANCHORED',
+    'ANCHOR_FAILED',
+    'VERIFIED',
+    'MISMATCH',
+  ]),
+  anchorTxHash: z.string().optional(),
+  merkleRoot: z.string().optional(),
+  merkleIndex: z.number().optional(),
+  merkleProof: z.array(z.string().nullable()).optional(),
+  deliveredAt: z.string(),
+  anchoredAt: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const ReceiptMerkleProofSchema = z.object({
+  leafIndex: z.number(),
+  leafHash: z.string(),
+  siblings: z.array(z.string().nullable()),
+  root: z.string(),
+});
+
+export const ReceiptVerificationSchema = z.object({
+  valid: z.boolean(),
+  receiptHashMatches: z.boolean(),
+  merkleProofValid: z.boolean().optional(),
+  anchorVerified: z.boolean().optional(),
+  anchorTxHash: z.string().optional(),
+  status: z.enum([
+    'NOT_ANCHORED_YET',
+    'ANCHORING',
+    'ANCHORED',
+    'ANCHOR_FAILED',
+    'VERIFIED',
+    'MISMATCH',
+  ]),
+  error: z.string().optional(),
+});
+
+export type Receipt = z.infer<typeof ReceiptSchema>;
+export type ReceiptMerkleProof = z.infer<typeof ReceiptMerkleProofSchema>;
+
 export const DatasetMetaSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -347,15 +415,25 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
   return { ...headers, ...(extra as Record<string, string>) };
 }
 
+/**
+ * Bearer headers for seller-scoped endpoints. Prefers the in-memory SEP-10
+ * seller JWT when the seller has signed in; falls back to the shared API key
+ * (legacy deployments) when it has not.
+ */
+function sellerAuthHeaders(): HeadersInit {
+  const token = getSellerToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function fetchWithTimeout(url: string, options?: RequestOptions): Promise<Response> {
   const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...init } = options ?? {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
+      ...init,
       signal: controller.signal,
       headers: authHeaders(init.headers),
-      ...init,
     });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -494,6 +572,7 @@ export const api = {
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(
       `${getApiBaseUrl()}/analytics/seller/${encodeURIComponent(wallet)}`,
+      { headers: sellerAuthHeaders() },
     ).then(r => ({
       revenueSeries: r.revenueSeries,
       queryVolumeSeries: r.queryVolumeSeries,
@@ -505,9 +584,9 @@ export const api = {
     const url = datasetId
       ? `${getApiBaseUrl()}/datasets/${datasetId}/transactions`
       : `${getApiBaseUrl()}/datasets/transactions`;
-    return request<{ success: boolean; transactions: unknown }>(url).then(r =>
-      parseApiResponse(z.array(TransactionSchema), r.transactions),
-    );
+    return request<{ success: boolean; transactions: unknown }>(url, {
+      headers: sellerAuthHeaders(),
+    }).then(r => parseApiResponse(z.array(TransactionSchema), r.transactions));
   },
 
   initiateQuery: (id: string) =>
@@ -631,7 +710,7 @@ export const api = {
   }) =>
     request<{ success: boolean; dataset: DatasetMeta }>(`${getApiBaseUrl()}/datasets`, {
       method: 'POST',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
       body: JSON.stringify(payload),
     }).then(r => r.dataset),
 
@@ -647,14 +726,14 @@ export const api = {
   ) =>
     request<{ success: boolean; dataset: DatasetMeta }>(`${getApiBaseUrl()}/datasets/${id}`, {
       method: 'PATCH',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
       body: JSON.stringify(payload),
     }).then(r => r.dataset),
 
   deleteDataset: (id: string) =>
     request<{ success: boolean; message: string }>(`${getApiBaseUrl()}/datasets/${id}`, {
       method: 'DELETE',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
     }),
 
   // ── Claimable balance payout fallback (#589) ─────────────────────────────
@@ -663,6 +742,7 @@ export const api = {
   getSellerClaimables: (wallet: string) =>
     request<{ success: boolean; claimables: ClaimableBalanceItem[] }>(
       `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claimables`,
+      { headers: sellerAuthHeaders() },
     ).then(r => r.claimables),
 
   /** Sponsor-signed (not seller-signed) claim XDR — the seller's wallet must still sign it. */
@@ -671,6 +751,7 @@ export const api = {
       `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claim-tx`,
       {
         method: 'POST',
+        headers: sellerAuthHeaders(),
         body: JSON.stringify({ balanceId }),
       },
     ),
@@ -700,6 +781,23 @@ export const api = {
       openEscrowCount: r.openEscrowCount,
       lastCheckedLedger: r.lastCheckedLedger,
       checkedAt: r.checkedAt,
+    })),
+
+  // ── Receipt verification (#594) ────────────────────────────────────────────
+
+  /** Public: fetch a delivery receipt with its merkle proof and verification. */
+  getReceipt: (id: string) =>
+    request<{
+      success: boolean;
+      receipt: unknown;
+      merkleProof?: unknown;
+      verification: unknown;
+    }>(`${getApiBaseUrl()}/receipts/${encodeURIComponent(id)}`).then(r => ({
+      receipt: parseApiResponse(ReceiptSchema, r.receipt),
+      merkleProof: r.merkleProof
+        ? parseApiResponse(ReceiptMerkleProofSchema, r.merkleProof)
+        : undefined,
+      verification: parseApiResponse(ReceiptVerificationSchema, r.verification),
     })),
 };
 

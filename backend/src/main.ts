@@ -11,6 +11,9 @@ dotenv.config();
 // (rather than inside the uncaughtException handler's scope further down)
 // so a bad value crashes startup instead of being swallowed and logged.
 validateEscrowConfig();
+// Fail fast on a misconfigured AUTH_MODE: SEP-10 enabled without its secrets
+// (or with an invalid WEB_AUTH_DOMAIN) would 500 the first sign-in instead.
+validateSep10Config();
 
 initializeDatadog();
 initializeSentry();
@@ -35,13 +38,19 @@ import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
 import { claimableRouter } from './payments/claimable.router';
 import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
+import { startAnchorWorker, stopAnchorWorker } from './receipts/anchor.service';
+import { receiptsRouter } from './receipts/receipts.router';
 import { wellKnownRouter } from './wellknown/x402.router';
+import { wellKnownStellarTomlRouter } from './wellknown/stellar-toml.router';
 import { passkeyWalletRouter } from './wallet/passkeyWallet.router';
 import { sentinelRouter } from './sentinel/router';
 import { startSentinelIfEnabled, stopSentinel } from './sentinel/bootstrap';
 import { validateAgentWallet } from './agent/agent.wallet';
 import { webhooksRouter } from './webhooks/webhook.router';
 import { analyticsRouter } from './analytics.router';
+import { authRouter } from './auth/sep10.router';
+import { startSep10NonceSweeper, stopSep10NonceSweeper } from './auth/nonce.store';
+import { validateSep10Config } from './auth/sep10.config';
 import { readStore } from './common/storage';
 import { BackupScheduler } from './common/backup.scheduler';
 import { backupRouter, setBackupScheduler } from './common/backup.router';
@@ -298,6 +307,7 @@ process.on('uncaughtException', (err: Error) => {
 // RFC 8615 well-known URIs are always root-relative, never under /api — mount
 // before the versioned API namespace and the /api legacy-redirect middleware.
 app.use(wellKnownRouter);
+app.use(wellKnownStellarTomlRouter);
 
 // Routes under versioned API namespace.
 const v1Router = express.Router();
@@ -319,6 +329,12 @@ v1Router.use('/backups', backupRouter);
 v1Router.use('/', claimableRouter);
 // Sentinel self-protects per-route: /solvency is public, /sentinel/alerts* need requireAdminKey.
 v1Router.use('/', sentinelRouter);
+// Receipt verification is public — a delivery receipt is a commitment anyone
+// holding the id can check, and the endpoint exposes no payload bytes.
+v1Router.use('/receipts', receiptsRouter);
+// SEP-10 "Sign in with Stellar" — challenge issuance and signed-challenge
+// verification. Self-guards with 503 when SEP-10 is not enabled.
+v1Router.use('/auth', authRouter);
 
 app.use('/api/v1', v1Router);
 
@@ -346,6 +362,8 @@ app.use('/api/webhooks', webhooksRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api', backupRouter);
 app.use('/api', sentinelRouter);
+app.use('/api/receipts', receiptsRouter);
+app.use('/api/auth', authRouter);
 
 // Global error handling middleware — Issue #283 (standard error shape)
 app.use(
@@ -385,6 +403,8 @@ startDataRefreshWorker();
 void startSentinelIfEnabled();
 startSnapshotCompactionWorker();
 startClaimableSweepWorker();
+startAnchorWorker();
+startSep10NonceSweeper();
 
 // Give every pre-existing dataset a first snapshot so history starts now rather
 // than at its next refresh (#600). Idempotent, so a restart is free; skipped in
@@ -436,6 +456,8 @@ process.on('SIGTERM', () => {
   stopDataRefreshWorker();
   stopSentinel();
   stopSnapshotCompactionWorker();
+  stopAnchorWorker();
+  stopSep10NonceSweeper();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -450,6 +472,8 @@ process.on('SIGINT', () => {
   stopClaimableSweepWorker();
   stopSentinel();
   stopSnapshotCompactionWorker();
+  stopAnchorWorker();
+  stopSep10NonceSweeper();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');

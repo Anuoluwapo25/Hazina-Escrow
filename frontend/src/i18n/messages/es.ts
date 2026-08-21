@@ -41,6 +41,9 @@ export const es: EnglishMessages = {
       copyMemo: 'Copiar memo',
       connectWallet: 'Conectar wallet',
       disconnect: 'Desconectar',
+      sellerSignInFailed: 'Error al iniciar sesión como vendedor',
+      sellerSigningIn: 'Iniciando sesión como vendedor…',
+      sellerSignedIn: 'Sesión iniciada como vendedor',
     },
     labels: {
       price: 'Precio',
@@ -256,6 +259,8 @@ export const es: EnglishMessages = {
     },
   },
   sell: {
+    sellerSignInBanner:
+      'Inicia sesión como vendedor desde la barra de navegación (conecta tu wallet) para publicar este dataset.',
     messages: {
       invalidJson: 'JSON no válido — revisa el formato de tus datos',
       createFailed: 'No se pudo crear la publicación',
@@ -336,6 +341,8 @@ export const es: EnglishMessages = {
     },
   },
   dashboard: {
+    sellerSignInBanner:
+      'Inicia sesión como vendedor desde la barra de navegación (conecta tu wallet) para ver este panel.',
     eyebrow: 'Centro del vendedor',
     title: 'Panel',
     subtitle: 'Tus ganancias en tiempo real y el rendimiento de tus datasets.',

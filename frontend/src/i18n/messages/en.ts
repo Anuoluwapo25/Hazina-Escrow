@@ -41,6 +41,9 @@ export const en = {
       copyMemo: 'Copy memo',
       connectWallet: 'Connect Wallet',
       disconnect: 'Disconnect',
+      sellerSignInFailed: 'Seller sign-in failed',
+      sellerSigningIn: 'Signing in as seller…',
+      sellerSignedIn: 'Signed in as seller',
     },
     labels: {
       price: 'Price',
@@ -255,6 +258,8 @@ export const en = {
     },
   },
   sell: {
+    sellerSignInBanner:
+      'Sign in as a seller from the navigation bar (connect your wallet) to list this dataset.',
     messages: {
       invalidJson: 'Invalid JSON — please check your data format',
       createFailed: 'Failed to create listing',
@@ -334,6 +339,8 @@ export const en = {
     },
   },
   dashboard: {
+    sellerSignInBanner:
+      'Sign in as a seller from the navigation bar (connect your wallet) to view this dashboard.',
     eyebrow: 'Seller Hub',
     title: 'Dashboard',
     subtitle: 'Your real-time earnings and dataset performance.',

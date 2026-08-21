@@ -20,12 +20,21 @@ import {
 import { Sentry } from '../common/sentry';
 import { sendSellerNotificationEmail } from '../notifications/email.service';
 import { recordDatasetSnapshot } from '../snapshots/snapshots.service';
+import { getReceiptAnchorMode, storeReceipt } from '../receipts/receipt.service';
 
 export interface DeliveryResult {
   success: boolean;
   pendingDelivery?: boolean;
   warning?: string | null;
   data?: Record<string, unknown>;
+  receipt?: {
+    id: string;
+    receiptHash: string;
+    leafHash: string;
+    anchorMode: string;
+    anchorStatus: string;
+    deliveredAt: string;
+  };
   ai?: {
     summary: string;
     answer?: string;
@@ -164,9 +173,47 @@ export async function deliverVerifiedPayment(params: {
     source: 'buyer',
   });
 
+  // Attach a verifiable delivery receipt committing to the exact bytes that
+  // were delivered (dataset.data) plus the parties and amount. The receipt is
+  // stored locally with a status of NOT_ANCHORED_YET; the anchoring worker
+  // (anchor.service.ts) later writes the hash on-chain as a MEMO_HASH memo.
+  // Creating the receipt must never block the delivery, so failures are logged
+  // and the sale proceeds — the buyer still gets their data either way.
+  let receipt: DeliveryResult['receipt'];
+  try {
+    const transaction = await getTransactionByHash(txHash);
+    const stored = await storeReceipt({
+      datasetId: dataset.id,
+      buyer: transaction?.buyerWallet ?? dataset.sellerWallet,
+      seller: dataset.sellerWallet,
+      amount: dataset.pricePerQuery,
+      paymentToken: dataset.paymentToken || 'USDC',
+      txHash,
+      deliveredAt: new Date().toISOString(),
+      anchorMode: getReceiptAnchorMode(),
+      datasetPayload: dataset.data,
+    });
+    receipt = {
+      id: stored.id,
+      receiptHash: stored.receiptHash,
+      leafHash: stored.leafHash,
+      anchorMode: stored.anchorMode,
+      anchorStatus: stored.anchorStatus,
+      deliveredAt: stored.deliveredAt,
+    };
+    logger.info(`[Receipt] Attached receipt ${stored.id} to tx ${txHash} (${stored.receiptHash})`);
+  } catch (receiptErr) {
+    logger.error(
+      `[Receipt] Could not attach receipt for txHash=${txHash} dataset=${dataset.id}: ${
+        receiptErr instanceof Error ? receiptErr.message : String(receiptErr)
+      }`,
+    );
+  }
+
   return {
     success: true,
     data: dataset.data,
+    receipt,
     ai: {
       summary: summaryResult.summary,
       answer: summaryResult.answer,
