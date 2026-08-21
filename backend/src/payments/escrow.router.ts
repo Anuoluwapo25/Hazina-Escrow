@@ -39,7 +39,6 @@ import {
 } from '../lib/escrow.client';
 import { getDataset, getTransactionByEscrowId } from '../common/storage';
 import { getReceiptByTxHash } from '../receipts/receipt.service';
-import { getDataset } from '../common/storage';
 import { verifyQuoteSignature, Quote } from './quote.service';
 
 export const escrowRouter = Router();
