@@ -6,6 +6,7 @@ import { transactionEventEmitter } from '../websocket/transaction-events';
 import { domainMetrics } from '../common/datadog';
 import { verifyStellarPayment, PaymentError } from './stellar.service';
 import { getEscrow, refundEscrow } from '../lib/escrow.client';
+import { sendTokenPayment } from '../agent/agent.wallet';
 import { logger } from '../lib/logger';
 import {
   getDataset,
@@ -17,6 +18,7 @@ import {
   getTransactionsWithFailedSellerNotification,
   updateDataset,
 } from '../common/storage';
+import type { Dataset } from '../common/storage';
 import { Sentry } from '../common/sentry';
 import { sendSellerNotificationEmail } from '../notifications/email.service';
 import { recordDatasetSnapshot } from '../snapshots/snapshots.service';
@@ -42,7 +44,7 @@ export interface DeliveryResult {
   transaction: {
     hash: string;
     status: 'completed' | 'delivery_failed' | 'verified' | 'pending' | 'refunded';
-    deliveryStatus: 'delivered' | 'failed' | 'pending' | 'refunded';
+    deliveryStatus: 'delivered' | 'failed' | 'pending' | 'refunded' | 'manual_review_needed';
     amount: number;
     sellerReceived: number;
     platformFee: number;
@@ -51,14 +53,18 @@ export interface DeliveryResult {
 }
 
 /**
- * Delivery retries for an escrow-backed purchase are bounded — unlike the
- * legacy custodial seller-payout retry (payout-retry.service.ts), which keeps
- * a failed payout in 'manual_review_needed' forever, an escrow buyer's funds
- * are locked on-chain and must not stay stuck indefinitely. After this many
- * failed delivery attempts we refund the buyer instead of retrying forever.
- * Matches the 3-attempt shape of payout-retry.service.ts's RETRY_BACKOFF_MS.
+ * Delivery retries are bounded — unlike the legacy custodial seller-payout
+ * retry (payout-retry.service.ts), which keeps a failed payout in
+ * 'manual_review_needed' forever, a buyer's payment must not stay stuck
+ * indefinitely behind a delivery that can never succeed (bad dataset data, a
+ * revoked API key, ...). After this many failed delivery attempts we resolve
+ * the purchase instead of retrying forever: refund an escrow-backed buyer
+ * on-chain, or refund a custodial buyer directly; if the refund itself fails,
+ * escalate to manual review. Matches the 3-attempt shape of
+ * payout-retry.service.ts's RETRY_BACKOFF_MS.
  */
 const MAX_ESCROW_DELIVERY_ATTEMPTS = 3;
+const MAX_CUSTODIAL_DELIVERY_ATTEMPTS = 3;
 
 export async function deliverVerifiedPayment(params: {
   transactionId: string;
@@ -229,6 +235,60 @@ export async function deliverVerifiedPayment(params: {
   };
 }
 
+/**
+ * Terminal state for a custodial delivery failure that could not be resolved
+ * automatically (no buyer wallet on record, or the refund attempt itself
+ * failed). Sets deliveryStatus to 'manual_review_needed' so it drops out of
+ * getFailedDeliveryTransactions() and stops retrying forever — mirroring
+ * payout-retry.service.ts's manual_review_needed escalation.
+ */
+async function markCustodialDeliveryForManualReview(params: {
+  transactionId: string;
+  txHash: string;
+  dataset: Dataset;
+  buyerQuestion?: string;
+  attempts: number;
+  message: string;
+}): Promise<DeliveryResult> {
+  const { transactionId, txHash, dataset, buyerQuestion, attempts, message } = params;
+
+  await updateTransactionByHash(txHash, {
+    status: 'delivery_failed',
+    deliveryStatus: 'manual_review_needed',
+    deliveryError: message,
+    deliveryAttempts: attempts,
+    buyerQuery: buyerQuestion,
+  });
+
+  Sentry.captureMessage(`Custodial delivery failure needs manual review — txHash=${txHash}`, {
+    level: 'error',
+    tags: { component: 'custodial-delivery-manual-review' },
+    extra: { txHash, attempts },
+  });
+
+  transactionEventEmitter.updateTransactionStatus(transactionId, dataset.id, 'delivery_failed', {
+    amount: dataset.pricePerQuery.toString(),
+    buyerQuery: buyerQuestion,
+    deliveryStatus: 'manual_review_needed',
+    error: message,
+  });
+
+  return {
+    success: true,
+    pendingDelivery: true,
+    warning: 'MANUAL_REVIEW_NEEDED' as const,
+    transaction: {
+      hash: txHash,
+      status: 'delivery_failed',
+      deliveryStatus: 'manual_review_needed',
+      amount: dataset.pricePerQuery,
+      sellerReceived: 0,
+      platformFee: 0,
+      deliveryError: message,
+    },
+  };
+}
+
 export async function markDeliveryFailure(params: {
   transactionId: string;
   txHash: string;
@@ -304,6 +364,88 @@ export async function markDeliveryFailure(params: {
         extra: { escrowId: existing.escrowId, txHash, attempts },
       });
     }
+  } else if (existing?.escrowId === undefined && attempts >= MAX_CUSTODIAL_DELIVERY_ATTEMPTS) {
+    // Custodial purchase whose delivery has permanently failed. The seller was
+    // never paid for it (payout is now gated on delivery success — see
+    // payments.router.ts), so refund the buyer directly rather than leaving
+    // their payment stuck behind a delivery that will never succeed. If we
+    // can't identify or reach the buyer's wallet, surface it for manual
+    // review instead of silently eating the loss or retrying forever.
+    const buyerWallet = existing?.buyerWallet;
+    if (buyerWallet) {
+      try {
+        const refundPayment = await sendTokenPayment({
+          destinationAddress: buyerWallet,
+          amount: dataset.pricePerQuery.toFixed(7),
+          memo: `hazina-refund-${dataset.id.slice(0, 10)}`,
+          tokenCode: dataset.paymentToken || 'USDC',
+        });
+        await updateTransactionByHash(txHash, {
+          status: 'refunded',
+          deliveryStatus: 'refunded',
+          deliveryError: message,
+          deliveryAttempts: attempts,
+          buyerQuery: buyerQuestion,
+        });
+
+        logger.warn(
+          `[Escrow] Custodial delivery permanently failed for txHash=${txHash} after ${attempts} attempts — refunded buyer ${buyerWallet} (${refundPayment.txHash})`,
+        );
+        Sentry.captureMessage(
+          `Custodial delivery failure exhausted retries — refunded buyer for txHash=${txHash}`,
+          {
+            level: 'warning',
+            tags: { component: 'custodial-delivery-refund' },
+            extra: { txHash, buyerWallet, attempts, refundTxHash: refundPayment.txHash },
+          },
+        );
+
+        transactionEventEmitter.updateTransactionStatus(transactionId, dataset.id, 'refunded', {
+          amount: dataset.pricePerQuery.toString(),
+          buyerQuery: buyerQuestion,
+          deliveryStatus: 'failed',
+          error: message,
+        });
+
+        return {
+          success: true,
+          transaction: {
+            hash: txHash,
+            status: 'refunded',
+            deliveryStatus: 'refunded',
+            amount: dataset.pricePerQuery,
+            sellerReceived: 0,
+            platformFee: 0,
+            deliveryError: message,
+          },
+        };
+      } catch (refundErr) {
+        const refundErrMsg = refundErr instanceof Error ? refundErr.message : String(refundErr);
+        logger.error(
+          `[Escrow] Refund attempt failed for custodial txHash=${txHash} after exhausted delivery retries: ${refundErrMsg}`,
+        );
+        return markCustodialDeliveryForManualReview({
+          transactionId,
+          txHash,
+          dataset,
+          buyerQuestion,
+          attempts,
+          message: `Refund failed: ${refundErrMsg}. Original delivery error: ${message}`,
+        });
+      }
+    }
+
+    logger.error(
+      `[Escrow] Custodial delivery permanently failed for txHash=${txHash} with no buyer wallet on record — cannot auto-refund`,
+    );
+    return markCustodialDeliveryForManualReview({
+      transactionId,
+      txHash,
+      dataset,
+      buyerQuestion,
+      attempts,
+      message,
+    });
   }
 
   await updateTransactionByHash(txHash, {
@@ -342,8 +484,6 @@ export async function markDeliveryFailure(params: {
       hash: txHash,
       status: 'delivery_failed',
       deliveryStatus: 'failed',
-      //       status: "delivery_failed",
-      //       deliveryStatus: "failed",
       amount: dataset.pricePerQuery,
       sellerReceived: sellerShare(dataset.pricePerQuery),
       platformFee: computePlatformFee(dataset.pricePerQuery),
@@ -438,12 +578,14 @@ export async function processPayment(params: {
     );
   }
 
-  // Update or add transaction
+  // Update or add transaction. buyerWallet (the payer of the verified Stellar
+  // transaction) is the refund destination if delivery permanently fails.
   if (existing) {
     await updateTransactionByMemo(existing.memo || '', {
       txHash,
       status: 'verified',
       verifiedAt: new Date().toISOString(),
+      buyerWallet: verification.payerAddress,
     });
   } else {
     await addTransaction({
@@ -456,6 +598,7 @@ export async function processPayment(params: {
       deliveryStatus: 'pending',
       sellerPaid: false,
       buyerQuery: buyerQuestion,
+      buyerWallet: verification.payerAddress,
       timestamp: new Date().toISOString(),
       verifiedAt: new Date().toISOString(),
       deliveryAttempts: 0,

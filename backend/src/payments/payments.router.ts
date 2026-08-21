@@ -17,8 +17,10 @@ import {
   getUnpaidTransactions,
   reserveTxHash,
   getFailedDeliveryTransactions,
+  getManualReviewDeliveries,
   txHashUsed,
 } from '../common/storage';
+import type { Dataset } from '../common/storage';
 import {
   getManualReviewPayouts,
   recordPayoutFailure,
@@ -317,6 +319,82 @@ paymentsRouter.get('/query/:id/quote', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Pays the seller their share of a custodial (non-escrow) purchase. Called
+ * only once delivery has actually succeeded — either on the buyer's initial
+ * /verify/:id request, or later from retryFailedDeliveries() once a delivery
+ * retry succeeds — so a seller is never paid for data the buyer never got.
+ * Falls back to a claimable balance or the payout DLQ if the direct send fails.
+ */
+async function payoutSeller(dataset: Dataset, txHash: string): Promise<void> {
+  const sellerAmount = sellerShare(dataset.pricePerQuery);
+  const tokenCode = dataset.paymentToken || 'USDC';
+
+  const preflight = await checkDestinationReady(dataset.sellerWallet, tokenCode).catch(
+    // A preflight check failing (e.g. Horizon timeout) must not block the
+    // payout attempt itself — fall through and let sendTokenPayment try.
+    () => ({ ready: true as const }),
+  );
+
+  if (!preflight.ready) {
+    console.warn(
+      `[Escrow] Seller ${dataset.sellerWallet} cannot receive ${tokenCode} directly ` +
+        `(${preflight.reason}) — settling as a claimable balance`,
+    );
+    await settleAsClaimableBalance({
+      datasetId: dataset.id,
+      sellerWallet: dataset.sellerWallet,
+      buyerTxHash: txHash,
+      amount: sellerAmount,
+      tokenCode,
+      notificationEmail: dataset.notificationEmail,
+    });
+    return;
+  }
+
+  try {
+    const payment = await sendTokenPayment({
+      destinationAddress: dataset.sellerWallet,
+      amount: sellerAmount.toFixed(7),
+      memo: `hazina-${dataset.id.slice(0, 10)}`,
+      tokenCode,
+    });
+    console.log(
+      `[Escrow] Paid seller ${sellerAmount} ${tokenCode} → ${dataset.sellerWallet} (${payment.txHash})`,
+    );
+  } catch (payErr) {
+    console.warn(
+      '[Escrow] Seller payment failed (data still delivered):',
+      payErr instanceof Error ? payErr.message : payErr,
+    );
+
+    // Preflight passed but the live submit still bounced with a
+    // destination-related error (stale cache, race with account
+    // deletion, ...) — route to the same claimable-balance fallback
+    // instead of the DLQ, since a retry would fail identically.
+    const destinationFailure = classifyDestinationFailure(payErr);
+    if (destinationFailure) {
+      await settleAsClaimableBalance({
+        datasetId: dataset.id,
+        sellerWallet: dataset.sellerWallet,
+        buyerTxHash: txHash,
+        amount: sellerAmount,
+        tokenCode,
+        notificationEmail: dataset.notificationEmail,
+      });
+    } else {
+      await recordPayoutFailure({
+        datasetId: dataset.id,
+        sellerWallet: dataset.sellerWallet,
+        buyerTxHash: txHash,
+        intendedAmount: sellerAmount,
+        paymentToken: tokenCode,
+        error: payErr instanceof Error ? payErr.message : String(payErr),
+      });
+    }
+  }
+}
+
 export async function retryFailedDeliveries(): Promise<void> {
   const failedTransactions = await getFailedDeliveryTransactions();
 
@@ -345,6 +423,18 @@ export async function retryFailedDeliveries(): Promise<void> {
               `[Escrow] Release failed for escrow #${transaction.escrowId} after delivery retry (data delivered, funds still locked on-chain): ${
                 releaseErr instanceof Error ? releaseErr.message : releaseErr
               }`,
+            );
+          }
+        } else {
+          // Custodial purchase: it wasn't paid on the initial (failed) attempt
+          // since payout is now gated on delivery success — pay the seller now
+          // that a retry finally delivered the data.
+          const dataset = await getDataset(transaction.datasetId);
+          if (dataset) {
+            await payoutSeller(dataset, transaction.txHash);
+          } else {
+            logger.error(
+              `[Escrow] Cannot pay seller for delivered txHash=${transaction.txHash} — dataset ${transaction.datasetId} no longer exists`,
             );
           }
         }
@@ -416,79 +506,18 @@ paymentsRouter.post(
         buyerQuestion,
       });
 
-      // Forward seller's share on-chain; failures enter the DLQ for retry.
-      // Sellers are paid in the same token the buyer paid in.
-      const sellerAmount = sellerShare(dataset.pricePerQuery);
-      const tokenCode = dataset.paymentToken || 'USDC';
-
-      const preflight = await checkDestinationReady(dataset.sellerWallet, tokenCode).catch(
-        // A preflight check failing (e.g. Horizon timeout) must not block the
-        // payout attempt itself — fall through and let sendTokenPayment try.
-        () => ({ ready: true as const }),
-      );
-
-      if (!preflight.ready) {
-        console.warn(
-          `[Escrow] Seller ${dataset.sellerWallet} cannot receive ${tokenCode} directly ` +
-            `(${preflight.reason}) — settling as a claimable balance`,
-        );
-        await settleAsClaimableBalance({
-          datasetId: dataset.id,
-          sellerWallet: dataset.sellerWallet,
-          buyerTxHash: txHash,
-          amount: sellerAmount,
-          tokenCode,
-          notificationEmail: dataset.notificationEmail,
-        });
-      } else {
-        try {
-          const payment = await sendTokenPayment({
-            destinationAddress: dataset.sellerWallet,
-            amount: sellerAmount.toFixed(7),
-            memo: `hazina-${dataset.id.slice(0, 10)}`,
-            tokenCode,
-          });
-          console.log(
-            `[Escrow] Paid seller ${sellerAmount} ${tokenCode} → ${dataset.sellerWallet} (${payment.txHash})`,
-          );
-        } catch (payErr) {
-          console.warn(
-            '[Escrow] Seller payment failed (data still delivered):',
-            payErr instanceof Error ? payErr.message : payErr,
-          );
-
-          // Preflight passed but the live submit still bounced with a
-          // destination-related error (stale cache, race with account
-          // deletion, ...) — route to the same claimable-balance fallback
-          // instead of the DLQ, since a retry would fail identically.
-          const destinationFailure = classifyDestinationFailure(payErr);
-          if (destinationFailure) {
-            await settleAsClaimableBalance({
-              datasetId: dataset.id,
-              sellerWallet: dataset.sellerWallet,
-              buyerTxHash: txHash,
-              amount: sellerAmount,
-              tokenCode,
-              notificationEmail: dataset.notificationEmail,
-            });
-          } else {
-            await recordPayoutFailure({
-              datasetId: dataset.id,
-              sellerWallet: dataset.sellerWallet,
-              buyerTxHash: txHash,
-              intendedAmount: sellerAmount,
-              paymentToken: tokenCode,
-              error: payErr instanceof Error ? payErr.message : String(payErr),
-            });
-          }
-        }
-      }
-
       if (result.pendingDelivery) {
+        // Delivery failed (or is still pending manual review) — the seller
+        // must NOT be paid for a purchase the buyer never received. Once
+        // delivery does succeed, retryFailedDeliveries() pays the seller then.
         return res.status(202).json(result);
       }
 
-      // result.pendingDelivery is guaranteed false here (handled above).
+      // Delivery succeeded — now, and only now, forward the seller's share
+      // on-chain. Sellers are paid in the same token the buyer paid in;
+      // failures enter the claimable-balance fallback or the payout DLQ.
+      await payoutSeller(dataset, txHash);
+
       return res.json({ ...result, warning: null });
     } catch (err) {
       if (err instanceof StellarTimeoutError) {
@@ -598,6 +627,39 @@ paymentsRouter.post(
 paymentsRouter.get('/admin/payouts/stuck', requireAdminKey, (_req: Request, res: Response) => {
   return res.json({ payouts: getManualReviewPayouts() });
 });
+
+/**
+ * @openapi
+ * /api/admin/deliveries/stuck:
+ *   get:
+ *     summary: List deliveries requiring manual review
+ *     description: >
+ *       Returns custodial-purchase transactions whose delivery permanently
+ *       failed and could not be auto-refunded (no buyer wallet on record, or
+ *       the refund attempt itself failed). Requires admin key.
+ *     responses:
+ *       200:
+ *         description: List of stuck deliveries
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 deliveries:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       401:
+ *         description: Missing or invalid admin key
+ */
+// GET /api/admin/deliveries/stuck — list deliveries requiring manual review
+paymentsRouter.get(
+  '/admin/deliveries/stuck',
+  requireAdminKey,
+  async (_req: Request, res: Response) => {
+    return res.json({ deliveries: await getManualReviewDeliveries() });
+  },
+);
 
 /**
  * @openapi

@@ -27,6 +27,8 @@ interface VerifyResult {
   reason?: string;
   actualAmount?: number;
   memo?: string;
+  /** Source account of the matched payment op — the buyer's refund destination if delivery permanently fails. */
+  payerAddress?: string;
 }
 
 /**
@@ -123,6 +125,7 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
     interface PaymentOpLike {
       type: string;
       to: string;
+      from: string;
       asset_type: string;
       asset_code?: string;
       asset_issuer?: string;
@@ -212,6 +215,7 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
       valid: true,
       actualAmount,
       memo: tx.memo || '',
+      payerAddress: payOp.from,
     };
   } catch (err: unknown) {
     if (err instanceof StellarTimeoutError) {
