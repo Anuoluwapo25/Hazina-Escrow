@@ -9,7 +9,11 @@ export interface EnvConfig {
   /** Base URL of the backend API (e.g. http://localhost:3001) */
   apiUrl: string;
   enableDemoMode: boolean;
-  /** API key for backend auth */
+  /**
+   * Legacy shared API key for backend auth. Optional since SEP-10 (Sign in
+   * with Stellar) replaced it: sellers authenticate with a wallet-signed
+   * challenge and receive a short-lived JWT instead.
+   */
   apiKey: string;
   /** Max parallel in-flight API requests (default 8) */
   maxConcurrentRequests: number;
@@ -23,7 +27,7 @@ export interface EnvConfig {
   passkeyWalletWasmHash: string;
 }
 
-const REQUIRED_ENV_VARS = ['VITE_API_URL', 'VITE_API_KEY'] as const;
+const REQUIRED_ENV_VARS = ['VITE_API_URL'] as const;
 
 function readEnableDemoMode() {
   return (

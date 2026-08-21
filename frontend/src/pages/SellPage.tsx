@@ -16,6 +16,7 @@ import {
 import { api } from '../lib/api';
 import { formatUSDC, getTypeMeta, DATA_TYPE_META } from '../lib/utils';
 import clsx from 'clsx';
+import { useStellarAuth } from '../hooks/useStellarAuth';
 import { getCatalog, useI18n } from '../i18n';
 import { useToastContext } from '../components/ui/useToastContext';
 import { Toast, ToastProps } from '../components/ui/Toast';
@@ -118,6 +119,7 @@ export default function SellPage() {
   const catalog = getCatalog(locale);
   const navigate = useNavigate();
   const { success: toastSuccess, error: toastError } = useToastContext();
+  const { isAuthenticated: isSellerAuthenticated } = useStellarAuth();
   const [form, setForm] = useState<FormState>(() => loadDraft().form);
   const [tab, setTab] = useState<Tab>('form');
   const [submitting, setSubmitting] = useState(false);
@@ -312,6 +314,13 @@ export default function SellPage() {
           </h1>
           <p className="text-foreground-muted font-body text-lg">{t('sell.subtitle')}</p>
         </div>
+
+        {!isSellerAuthenticated && (
+          <div className="flex items-center gap-3 mb-8 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-sm font-body">
+            <Info className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>{t('sell.sellerSignInBanner')}</span>
+          </div>
+        )}
 
         {/* Tab switcher */}
         <div className="flex gap-1 p-1 glass-card inline-flex mb-8 rounded-xl">

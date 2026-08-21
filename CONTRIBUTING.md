@@ -76,6 +76,16 @@ cd contracts/hazina-escrow && cargo test
 
 All tests must pass before opening a PR.
 
+### SEP-10 seller authentication ("Sign in with Stellar")
+
+Sellers authenticate with a wallet-signed SEP-10 challenge instead of the shared `API_KEY`. The backend issues a challenge at `GET /api/v1/auth?account=<wallet>` (advertised in `/.well-known/stellar.toml` as `WEB_AUTH_ENDPOINT`), the frontend signs it with Freighter, and `POST /api/v1/auth` returns a short-lived seller JWT that is held in memory and attached as the Bearer token for seller-scoped endpoints.
+
+- **Modes** (`AUTH_MODE`): `legacy` (default, shared API key), `sep10` (wallet only), `both` (either).
+- **Required for `sep10`/`both`**: `WEB_AUTH_SIGNING_KEY` (the web-auth keypair secret; its public key becomes the toml `SIGNING_KEY`), `WEB_AUTH_JWT_SECRET` (HS256 secret for the seller JWT), and optionally `WEB_AUTH_DOMAIN` (defaults to `PUBLIC_BASE_URL` host, then `hazina-escrow.app`). `SEP10_CHALLENGE_TTL_SECONDS` / `SEP10_JWT_TTL_SECONDS` default to 300/900.
+- **Backend layout**: the SDK-dependent logic lives in `backend/src/auth/sep10.service.ts`; the pure crypto (JWT) in `sep10.jwt.ts`; config in `sep10.config.ts`; routes in `sep10.router.ts`; the single-use nonce store in `nonce.store.ts` (with a startup sweeper). The seller-auth middleware is `backend/src/common/auth.middleware.ts` and is intentionally SDK-free so the shared-key test suite still mocks `@stellar/stellar-sdk` to `{ StrKey }`.
+- **Frontend**: the browser flow is `frontend/src/lib/sep10.ts` (challenge → Freighter sign → verify), the in-memory session store is `sellerAuth.ts`, the React binding is `hooks/useStellarAuth.ts`, and the Navbar runs sign-in automatically after connecting a wallet. `VITE_API_KEY` is optional.
+- **Testing**: SEP-10 features ship with gate tests (challenge nonce, verify/replay, JWT, middleware scoping, router, frontend store/flow) plus `backend/src/auth/sep10.interop.test.ts`, which drives our endpoints with the official `@stellar/stellar-sdk` `WebAuth` client to prove spec compatibility.
+
 ---
 
 ## Project Structure

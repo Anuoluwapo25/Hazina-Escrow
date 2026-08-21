@@ -41,6 +41,9 @@ export const fr: EnglishMessages = {
       copyMemo: 'Copier le mémo',
       connectWallet: 'Connecter le wallet',
       disconnect: 'Déconnecter',
+      sellerSignInFailed: 'Échec de la connexion vendeur',
+      sellerSigningIn: 'Connexion vendeur en cours…',
+      sellerSignedIn: 'Connecté en tant que vendeur',
     },
     labels: {
       price: 'Prix',
@@ -256,6 +259,8 @@ export const fr: EnglishMessages = {
     },
   },
   sell: {
+    sellerSignInBanner:
+      'Connectez-vous en tant que vendeur depuis la barre de navigation (connectez votre wallet) pour lister ce dataset.',
     messages: {
       invalidJson: 'JSON invalide — veuillez vérifier le format de vos données',
       createFailed: "Impossible de créer l'annonce",
@@ -336,6 +341,8 @@ export const fr: EnglishMessages = {
     },
   },
   dashboard: {
+    sellerSignInBanner:
+      'Connectez-vous en tant que vendeur depuis la barre de navigation (connectez votre wallet) pour voir ce tableau de bord.',
     eyebrow: 'Espace vendeur',
     title: 'Tableau de bord',
     subtitle: 'Vos revenus en temps réel et la performance de vos datasets.',

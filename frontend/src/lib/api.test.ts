@@ -6,6 +6,7 @@ import {
   AGENT_REQUEST_TIMEOUT_MS,
 } from './api';
 import { initEnv } from './env';
+import { setSellerSession } from './sellerAuth';
 
 vi.mock('./env', () => ({
   getEnv: () => ({ apiUrl: 'http://localhost', apiKey: 'test', maxConcurrentRequests: 8 }),
@@ -370,5 +371,66 @@ describe('api.getReceipt', () => {
 
     expect(result.merkleProof).toBeUndefined();
     expect(result.verification.anchorVerified).toBe(false);
+  });
+});
+
+describe('api seller-scoped requests use the SEP-10 seller JWT', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'));
+    __resetRequestThrottleForTests();
+  });
+
+  afterEach(() => {
+    __resetRequestThrottleForTests();
+    setSellerSession(null);
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('attaches the seller JWT as the Authorization header when signed in', async () => {
+    const token = 'fake-seller-jwt';
+    setSellerSession({
+      token,
+      sellerWallet: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      expiresAtSec: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        transactions: [
+          {
+            id: 'tx-1',
+            datasetId: 'ds-1',
+            txHash: 'txh-1',
+            amount: 0.05,
+            timestamp: '2026-04-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getTransactions('ds-1');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, { headers?: Record<string, string> }];
+    expect(String(url)).toContain('/datasets/ds-1/transactions');
+    expect(init.headers?.Authorization).toBe(`Bearer ${token}`);
+  });
+
+  it('falls back to the shared API key when no seller session exists', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        transactions: [],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getTransactions('ds-1');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, { headers?: Record<string, string> }];
+    expect(init.headers?.Authorization).toBe('Bearer test');
   });
 });
