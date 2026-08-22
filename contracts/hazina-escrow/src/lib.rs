@@ -1821,6 +1821,91 @@ fn test_lock_multi_and_release_multi() {
         let _ = client.lock_multi(&buyer, &usdc, &shares, &dataset_ids);
     }
 
+    // ── Component-count ceiling ─────────────────────────────────────────────
+    //
+    // `lock_multi` has no cap of its own: every share in the batch is checked
+    // and stored in the same call, so an unbounded batch is really an
+    // unbounded loop body. The only thing standing between a bundle curator
+    // and "how many sellers can I put in one bundle?" is the existing rate
+    // circuit breaker (`check_rate_circuit_breaker_n`, `DataKey::MaxEscrowsPerLedger`,
+    // default `DEFAULT_MAX_ESCROWS_PER_LEDGER`): it counts every share in one
+    // `lock_multi` call against the same per-ledger budget a run of single
+    // `lock` calls would consume, checked *before* any transfer or storage
+    // write. A fresh ledger therefore accepts a `lock_multi` batch of up to
+    // `get_max_escrows_per_ledger()` components in one call; one more than
+    // that panics whole with `RateLimitExceeded` (#14) and leaves no partial
+    // escrows or transfer behind. Bundle curators must cap component count at
+    // this value (read live via `get_max_escrows_per_ledger`, since an admin
+    // can lower — or raise — it after deploy).
+
+    #[test]
+    fn test_lock_multi_accepts_a_batch_at_the_component_count_ceiling() {
+        let (env, client, _admin, buyer, _seller, usdc) = setup();
+        let token_client = TokenClient::new(&env, &usdc);
+        let limit = client.get_max_escrows_per_ledger();
+        assert_eq!(limit, DEFAULT_MAX_ESCROWS_PER_LEDGER);
+
+        let mut shares = Vec::new(&env);
+        let mut ds_ids = Vec::new(&env);
+        for _ in 0..limit {
+            shares.push_back(SellerShare {
+                seller: Address::generate(&env),
+                amount: MIN_LOCK_AMOUNT,
+            });
+            ds_ids.push_back(dataset_id(&env, "ds-ceiling"));
+        }
+        let total = MIN_LOCK_AMOUNT * limit as i128;
+        let before = token_client.balance(&buyer);
+
+        let first_id = client.lock_multi(&buyer, &usdc, &shares, &ds_ids);
+
+        assert_eq!(first_id, 0);
+        assert_eq!(client.get_escrow_count(), limit as u64);
+        assert_eq!(token_client.balance(&buyer), before - total);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #14)")]
+    fn test_lock_multi_one_past_the_ceiling_rejects_the_whole_batch() {
+        let (env, client, _admin, buyer, _seller, usdc) = setup();
+        let limit = client.get_max_escrows_per_ledger();
+
+        let mut shares = Vec::new(&env);
+        let mut ds_ids = Vec::new(&env);
+        for _ in 0..(limit + 1) {
+            shares.push_back(SellerShare {
+                seller: Address::generate(&env),
+                amount: MIN_LOCK_AMOUNT,
+            });
+            ds_ids.push_back(dataset_id(&env, "ds-over-ceiling"));
+        }
+
+        client.lock_multi(&buyer, &usdc, &shares, &ds_ids);
+    }
+
+    #[test]
+    fn test_lock_multi_rejected_batch_at_ceiling_leaves_no_partial_state() {
+        let (env, client, _admin, buyer, _seller, usdc) = setup();
+        let token_client = TokenClient::new(&env, &usdc);
+        let limit = client.get_max_escrows_per_ledger();
+        let before = token_client.balance(&buyer);
+
+        let mut shares = Vec::new(&env);
+        let mut ds_ids = Vec::new(&env);
+        for _ in 0..(limit + 1) {
+            shares.push_back(SellerShare {
+                seller: Address::generate(&env),
+                amount: MIN_LOCK_AMOUNT,
+            });
+            ds_ids.push_back(dataset_id(&env, "ds-over-ceiling-clean"));
+        }
+
+        let result = client.try_lock_multi(&buyer, &usdc, &shares, &ds_ids);
+        assert!(result.is_err());
+        assert_eq!(client.get_escrow_count(), 0);
+        assert_eq!(token_client.balance(&buyer), before);
+    }
+
     // ── Pause / unpause ───────────────────────────────────────────────────────
 
     #[test]

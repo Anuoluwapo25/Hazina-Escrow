@@ -9,6 +9,10 @@ import {
   claimableBalancesSqlite,
   sentinelCursorSqlite,
   sentinelAlertsSqlite,
+  bundlesSqlite,
+  bundleComponentsSqlite,
+  bundlePurchasesSqlite,
+  bundlePurchaseComponentsSqlite,
 } from '../db/schema';
 
 const pendingTxHashes = new Set<string>();
@@ -152,6 +156,84 @@ export interface ClaimableBalance {
   createdAt: string;
   updatedAt: string;
 }
+// ── Bundles (#615) ───────────────────────────────────────────────────────────
+// A curator-composed product: several sellers' datasets sold as one purchase
+// at one price, settled atomically on-chain via lock_multi/release_multi.
+
+export interface BundleComponentRecord {
+  id: string;
+  bundleId: string;
+  datasetId: string;
+  /** Basis points of `Bundle.totalPrice` this dataset's seller receives. */
+  shareBps: number;
+  /** Display order — the sequence the curator arranged components in. */
+  position: number;
+  createdAt: string;
+}
+
+export interface Bundle {
+  id: string;
+  name: string;
+  description: string;
+  curatorWallet: string;
+  totalPrice: number;
+  paymentToken?: string;
+  /** Basis points of `totalPrice` the curator receives, on top of every component's shareBps. */
+  curatorFeeBps: number;
+  /** Soft-delete flag; defaults to true. */
+  active?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  components: BundleComponentRecord[];
+}
+
+export type BundlePurchaseStatus =
+  | 'locked'
+  | 'delivering'
+  | 'delivered'
+  | 'released'
+  | 'refunding'
+  | 'refunded'
+  | 'failed';
+
+export interface BundlePurchase {
+  id: string;
+  bundleId: string;
+  buyerWallet: string;
+  firstEscrowId: number;
+  /** Every escrow id in the lock_multi batch, in lock order (dataset legs, then the curator leg). */
+  escrowIds: number[];
+  totalAmount: number;
+  paymentToken?: string;
+  status: BundlePurchaseStatus;
+  lockTxHash?: string;
+  releaseTxHash?: string;
+  /** Single cross-dataset synthesis (via research.service.ts) — never N stitched per-dataset summaries. */
+  aiSummary?: string;
+  failureReason?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BundlePurchaseComponentRole = 'dataset' | 'curator';
+export type BundlePurchaseComponentDeliveryStatus = 'pending' | 'delivered' | 'failed';
+
+export interface BundlePurchaseComponent {
+  id: string;
+  purchaseId: string;
+  /** The dataset id for a 'dataset' leg, or the synthetic curator-fee marker for the 'curator' leg. */
+  datasetId: string;
+  role: BundlePurchaseComponentRole;
+  escrowId: number;
+  sellerWallet: string;
+  amount: number;
+  buyerConfirmed: boolean;
+  deliveryStatus: BundlePurchaseComponentDeliveryStatus;
+  deliveryError?: string;
+  deliveryAttempts: number;
+  createdAt: string;
+}
+
 export interface Store {
   datasets: Dataset[];
   transactions: Transaction[];
@@ -201,6 +283,136 @@ export interface SentinelAlert {
   lastNotifiedAt?: string;
   resolvedAt?: string;
   resolvedBy?: string;
+}
+
+// ── Row ↔ domain converters (bundles) ─────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToBundle(row: any): Omit<Bundle, 'components'> {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    curatorWallet: row.curatorWallet,
+    totalPrice: Number(row.totalPrice),
+    paymentToken: row.paymentToken ?? undefined,
+    curatorFeeBps: Number(row.curatorFeeBps),
+    active: row.active === null || row.active === undefined ? undefined : Boolean(row.active),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function bundleToRow(bundle: Omit<Bundle, 'components'>): Record<string, unknown> {
+  return {
+    id: bundle.id,
+    name: bundle.name,
+    description: bundle.description,
+    curatorWallet: bundle.curatorWallet,
+    totalPrice: String(bundle.totalPrice),
+    paymentToken: bundle.paymentToken ?? 'USDC',
+    curatorFeeBps: bundle.curatorFeeBps,
+    active: bundle.active === false ? 0 : 1,
+    createdAt: bundle.createdAt,
+    updatedAt: bundle.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToBundleComponent(row: any): BundleComponentRecord {
+  return {
+    id: row.id,
+    bundleId: row.bundleId,
+    datasetId: row.datasetId,
+    shareBps: Number(row.shareBps),
+    position: Number(row.position),
+    createdAt: row.createdAt,
+  };
+}
+
+function bundleComponentToRow(component: BundleComponentRecord): Record<string, unknown> {
+  return {
+    id: component.id,
+    bundleId: component.bundleId,
+    datasetId: component.datasetId,
+    shareBps: component.shareBps,
+    position: component.position,
+    createdAt: component.createdAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToBundlePurchase(row: any): BundlePurchase {
+  return {
+    id: row.id,
+    bundleId: row.bundleId,
+    buyerWallet: row.buyerWallet,
+    firstEscrowId: Number(row.firstEscrowId),
+    escrowIds: JSON.parse(row.escrowIds) as number[],
+    totalAmount: Number(row.totalAmount),
+    paymentToken: row.paymentToken ?? undefined,
+    status: row.status as BundlePurchaseStatus,
+    lockTxHash: row.lockTxHash ?? undefined,
+    releaseTxHash: row.releaseTxHash ?? undefined,
+    aiSummary: row.aiSummary ?? undefined,
+    failureReason: row.failureReason ?? undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function bundlePurchaseToRow(purchase: BundlePurchase): Record<string, unknown> {
+  return {
+    id: purchase.id,
+    bundleId: purchase.bundleId,
+    buyerWallet: purchase.buyerWallet,
+    firstEscrowId: purchase.firstEscrowId,
+    escrowIds: JSON.stringify(purchase.escrowIds),
+    totalAmount: String(purchase.totalAmount),
+    paymentToken: purchase.paymentToken ?? 'USDC',
+    status: purchase.status,
+    lockTxHash: purchase.lockTxHash ?? null,
+    releaseTxHash: purchase.releaseTxHash ?? null,
+    aiSummary: purchase.aiSummary ?? null,
+    failureReason: purchase.failureReason ?? null,
+    createdAt: purchase.createdAt,
+    updatedAt: purchase.updatedAt,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToBundlePurchaseComponent(row: any): BundlePurchaseComponent {
+  return {
+    id: row.id,
+    purchaseId: row.purchaseId,
+    datasetId: row.datasetId,
+    role: row.role as BundlePurchaseComponentRole,
+    escrowId: Number(row.escrowId),
+    sellerWallet: row.sellerWallet,
+    amount: Number(row.amount),
+    buyerConfirmed: Boolean(row.buyerConfirmed),
+    deliveryStatus: row.deliveryStatus as BundlePurchaseComponentDeliveryStatus,
+    deliveryError: row.deliveryError ?? undefined,
+    deliveryAttempts: Number(row.deliveryAttempts ?? 0),
+    createdAt: row.createdAt,
+  };
+}
+
+function bundlePurchaseComponentToRow(component: BundlePurchaseComponent): Record<string, unknown> {
+  return {
+    id: component.id,
+    purchaseId: component.purchaseId,
+    datasetId: component.datasetId,
+    role: component.role,
+    escrowId: component.escrowId,
+    sellerWallet: component.sellerWallet,
+    amount: String(component.amount),
+    buyerConfirmed: component.buyerConfirmed ? 1 : 0,
+    deliveryStatus: component.deliveryStatus,
+    deliveryError: component.deliveryError ?? null,
+    deliveryAttempts: component.deliveryAttempts,
+    createdAt: component.createdAt,
+  };
 }
 
 // ── Row ↔ domain converters ──────────────────────────────────────────────────
@@ -973,4 +1185,195 @@ export async function getOpenSentinelAlerts(): Promise<SentinelAlert[]> {
 export async function getAllSentinelAlerts(): Promise<SentinelAlert[]> {
   const result = await db.select().from(sentinelAlertsSqlite);
   return result.map(rowToSentinelAlert);
+}
+
+// ── Bundles (#615) ───────────────────────────────────────────────────────────
+
+/**
+ * Thrown when a bundle's persisted components don't sum to 10 000 bps with
+ * `curatorFeeBps`. The API layer already validates this on the request body
+ * (zod); this is the DB-layer re-check against what actually landed in the
+ * table, guarding against a lost/duplicated component write.
+ */
+export class BundleShareMismatchError extends Error {
+  constructor(bundleId: string, sumBps: number) {
+    super(`Bundle ${bundleId} components + curator fee sum to ${sumBps} bps, expected 10000`);
+    this.name = 'BundleShareMismatchError';
+  }
+}
+
+/**
+ * Persists a bundle and its components, then re-reads what was actually
+ * written and asserts the bps invariant against it. If the persisted rows
+ * don't sum to exactly 10 000, the bundle and every component just written
+ * are deleted and BundleShareMismatchError is thrown — no half-created bundle
+ * is ever left behind for a buyer to purchase into.
+ */
+export async function createBundle(
+  bundle: Omit<Bundle, 'components' | 'createdAt' | 'updatedAt'> & {
+    createdAt: string;
+    updatedAt: string;
+  },
+  components: BundleComponentRecord[],
+): Promise<Bundle> {
+  await db.insert(bundlesSqlite).values(bundleToRow(bundle));
+  for (const component of components) {
+    await db.insert(bundleComponentsSqlite).values(bundleComponentToRow(component));
+  }
+
+  const persistedComponents = await getBundleComponents(bundle.id);
+  const sumBps = persistedComponents.reduce((sum, c) => sum + c.shareBps, 0) + bundle.curatorFeeBps;
+  if (sumBps !== 10_000) {
+    await db.delete(bundleComponentsSqlite).where(eq(bundleComponentsSqlite.bundleId, bundle.id));
+    await db.delete(bundlesSqlite).where(eq(bundlesSqlite.id, bundle.id));
+    throw new BundleShareMismatchError(bundle.id, sumBps);
+  }
+
+  return { ...bundle, components: persistedComponents };
+}
+
+export async function getBundleComponents(bundleId: string): Promise<BundleComponentRecord[]> {
+  const result = await db
+    .select()
+    .from(bundleComponentsSqlite)
+    .where(eq(bundleComponentsSqlite.bundleId, bundleId));
+  return result
+    .map(rowToBundleComponent)
+    .sort((a: BundleComponentRecord, b: BundleComponentRecord) => a.position - b.position);
+}
+
+export async function getBundle(id: string): Promise<Bundle | undefined> {
+  const result = await db.select().from(bundlesSqlite).where(eq(bundlesSqlite.id, id)).limit(1);
+  if (!result[0]) return undefined;
+  const components = await getBundleComponents(id);
+  return { ...rowToBundle(result[0]), components };
+}
+
+export async function getAllBundles(): Promise<Bundle[]> {
+  const rows = await db.select().from(bundlesSqlite);
+  const bundles = await Promise.all(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rows.map(async (row: any) => {
+      const components = await getBundleComponents(row.id as string);
+      return { ...rowToBundle(row), components };
+    }),
+  );
+  return bundles;
+}
+
+export async function getBundlesByCurator(curatorWallet: string): Promise<Bundle[]> {
+  const rows = await db
+    .select()
+    .from(bundlesSqlite)
+    .where(eq(bundlesSqlite.curatorWallet, curatorWallet));
+  return Promise.all(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rows.map(async (row: any) => {
+      const components = await getBundleComponents(row.id as string);
+      return { ...rowToBundle(row), components };
+    }),
+  );
+}
+
+/** Every bundle that carries at least one component backed by `datasetId` — a seller's "which bundles include my data". */
+export async function getBundlesContainingDataset(datasetId: string): Promise<Bundle[]> {
+  const componentRows = await db
+    .select()
+    .from(bundleComponentsSqlite)
+    .where(eq(bundleComponentsSqlite.datasetId, datasetId));
+  const bundleIds: string[] = [
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...new Set<string>(componentRows.map((row: any): string => row.bundleId as string)),
+  ];
+  const bundles = await Promise.all(bundleIds.map(id => getBundle(id)));
+  return bundles.filter((b): b is Bundle => b !== undefined);
+}
+
+export async function updateBundle(id: string, updates: Partial<Bundle>): Promise<Bundle | null> {
+  const existing = await getBundle(id);
+  if (!existing) return null;
+  const { components: _components, ...updateFields } = updates;
+  const merged = { ...existing, ...updateFields };
+  await db.update(bundlesSqlite).set(bundleToRow(merged)).where(eq(bundlesSqlite.id, id));
+  return merged;
+}
+
+export async function addBundlePurchase(purchase: BundlePurchase): Promise<void> {
+  await db.insert(bundlePurchasesSqlite).values(bundlePurchaseToRow(purchase));
+}
+
+export async function getBundlePurchase(id: string): Promise<BundlePurchase | undefined> {
+  const result = await db
+    .select()
+    .from(bundlePurchasesSqlite)
+    .where(eq(bundlePurchasesSqlite.id, id))
+    .limit(1);
+  return result[0] ? rowToBundlePurchase(result[0]) : undefined;
+}
+
+export async function updateBundlePurchase(
+  id: string,
+  updates: Partial<BundlePurchase>,
+): Promise<BundlePurchase | null> {
+  const existing = await getBundlePurchase(id);
+  if (!existing) return null;
+  const merged = { ...existing, ...updates };
+  await db
+    .update(bundlePurchasesSqlite)
+    .set(bundlePurchaseToRow(merged))
+    .where(eq(bundlePurchasesSqlite.id, id));
+  return merged;
+}
+
+export async function getBundlePurchasesForBundle(bundleId: string): Promise<BundlePurchase[]> {
+  const result = await db
+    .select()
+    .from(bundlePurchasesSqlite)
+    .where(eq(bundlePurchasesSqlite.bundleId, bundleId));
+  return result.map(rowToBundlePurchase);
+}
+
+export async function addBundlePurchaseComponent(
+  component: BundlePurchaseComponent,
+): Promise<void> {
+  await db.insert(bundlePurchaseComponentsSqlite).values(bundlePurchaseComponentToRow(component));
+}
+
+export async function getBundlePurchaseComponents(
+  purchaseId: string,
+): Promise<BundlePurchaseComponent[]> {
+  const result = await db
+    .select()
+    .from(bundlePurchaseComponentsSqlite)
+    .where(eq(bundlePurchaseComponentsSqlite.purchaseId, purchaseId));
+  return result.map(rowToBundlePurchaseComponent);
+}
+
+export async function updateBundlePurchaseComponent(
+  id: string,
+  updates: Partial<BundlePurchaseComponent>,
+): Promise<BundlePurchaseComponent | null> {
+  const existing = await db
+    .select()
+    .from(bundlePurchaseComponentsSqlite)
+    .where(eq(bundlePurchaseComponentsSqlite.id, id))
+    .limit(1);
+  if (existing.length === 0) return null;
+  const merged = { ...rowToBundlePurchaseComponent(existing[0]), ...updates };
+  await db
+    .update(bundlePurchaseComponentsSqlite)
+    .set(bundlePurchaseComponentToRow(merged))
+    .where(eq(bundlePurchaseComponentsSqlite.id, id));
+  return merged;
+}
+
+/** Every purchase-component leg paid to `sellerWallet` — a seller's "what did bundles earn me". */
+export async function getBundlePurchaseComponentsForSeller(
+  sellerWallet: string,
+): Promise<BundlePurchaseComponent[]> {
+  const result = await db
+    .select()
+    .from(bundlePurchaseComponentsSqlite)
+    .where(eq(bundlePurchaseComponentsSqlite.sellerWallet, sellerWallet));
+  return result.map(rowToBundlePurchaseComponent);
 }

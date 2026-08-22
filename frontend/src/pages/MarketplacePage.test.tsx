@@ -10,6 +10,7 @@ import { api } from '../lib/api';
 vi.mock('../lib/api', () => ({
   api: {
     getDatasets: vi.fn(),
+    getBundles: vi.fn(),
   },
 }));
 
@@ -62,10 +63,56 @@ function renderMarketplacePage(initialEntries: string[] = ['/marketplace']) {
   );
 }
 
+const CURATOR = `G${'C'.repeat(55)}`;
+
+const sampleBundle = {
+  id: 'bundle-1',
+  name: 'DeFi Risk Pack',
+  description: 'Whale + risk + sentiment, one price.',
+  curatorWallet: CURATOR,
+  totalPrice: 0.12,
+  curatorFeeBps: 1000,
+  active: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  components: [
+    {
+      id: 'c1',
+      bundleId: 'bundle-1',
+      datasetId: 'ds-whale',
+      shareBps: 4500,
+      position: 0,
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  degraded: false,
+};
+
 describe('MarketplacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getDatasets).mockResolvedValue(defaultDatasets);
+    vi.mocked(api.getBundles).mockResolvedValue([]);
+  });
+
+  it('renders a bundle card with its splits, distinct from dataset cards, when bundles exist', async () => {
+    vi.mocked(api.getBundles).mockResolvedValue([sampleBundle]);
+
+    renderMarketplacePage(['/marketplace']);
+
+    await screen.findByText('DeFi Risk Pack');
+    expect(screen.getByText('Test Dataset 1')).toBeTruthy();
+
+    // Expand the splits list and check the per-component share is shown.
+    fireEvent.click(screen.getByText('View splits'));
+    expect(screen.getByText('45%')).toBeTruthy();
+  });
+
+  it('does not render a bundles section when there are no bundles', async () => {
+    vi.mocked(api.getBundles).mockResolvedValue([]);
+    renderMarketplacePage(['/marketplace']);
+    await screen.findByText('Test Dataset 1');
+    expect(screen.queryByText('Data Bundles')).toBeNull();
   });
 
   it('shows dataset skeletons while the initial fetch is pending', async () => {

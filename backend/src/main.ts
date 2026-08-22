@@ -33,6 +33,7 @@ import {
 } from './payments/payments.router';
 import { agentRouter } from './agent/agent.router';
 import { escrowRouter } from './payments/escrow.router';
+import { bundleRouter } from './payments/bundle.router';
 import { claimableRouter } from './payments/claimable.router';
 import { startClaimableSweepWorker, stopClaimableSweepWorker } from './payments/claimable.service';
 import { wellKnownRouter } from './wellknown/x402.router';
@@ -310,6 +311,9 @@ v1Router.use('/payments', requireApiKey, paymentsRouter);
 // Escrow routes are buyer-facing (build/submit/read need no API key); the
 // admin release/refund/resolve endpoints self-protect with requireAdminKey.
 v1Router.use('/payments', escrowRouter);
+// Bundle routes self-protect per-route (requireCuratorMutationAuth on create;
+// everything else is buyer/seller-facing and scoped by wallet in the body/params).
+v1Router.use('/', bundleRouter);
 // Passkey wallet routes are buyer-facing and self-guard with a 503 when
 // LAUNCHTUBE_JWT is unset; the passkeyLimiter above caps their fee-budget exposure.
 v1Router.use('/', passkeyWalletRouter);
@@ -339,6 +343,7 @@ app.use('/api/datasets', datasetsRouter);
 app.use('/api/datasets', snapshotsRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
+app.use('/api', bundleRouter);
 app.use('/api', claimableRouter);
 app.use('/api', passkeyWalletRouter);
 app.use('/api/agent', agentRouter);

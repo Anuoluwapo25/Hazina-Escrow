@@ -24,14 +24,18 @@ import {
   Pencil,
   Trash2,
   Wallet,
+  Layers,
 } from 'lucide-react';
 
 import {
   api,
+  Bundle,
   ClaimableBalanceItem,
+  CuratorBundleEarnings,
   DatasetMeta,
   PaginatedDatasets,
   SellerAnalytics,
+  SellerBundleEarnings,
   Transaction,
 } from '../lib/api';
 
@@ -266,6 +270,30 @@ export default function DashboardPage() {
       .getSellerClaimables(selectedWallet)
       .then(setClaimables)
       .catch(() => setClaimables([]));
+  }, [selectedWallet]);
+
+  // Composed bundles (#615) — this wallet's own bundles (curator earnings)
+  // and which bundles include its datasets (seller earnings). A wallet can
+  // be both, so both are fetched unconditionally for the selected wallet.
+  const [curatorBundles, setCuratorBundles] = useState<CuratorBundleEarnings[]>([]);
+  useEffect(() => {
+    if (!selectedWallet) return;
+    api
+      .getCuratorBundleEarnings(selectedWallet)
+      .then(setCuratorBundles)
+      .catch(() => setCuratorBundles([]));
+  }, [selectedWallet]);
+
+  const [sellerBundles, setSellerBundles] = useState<{
+    bundles: Omit<Bundle, 'degraded' | 'degradedReason'>[];
+    earnings: SellerBundleEarnings[];
+  }>({ bundles: [], earnings: [] });
+  useEffect(() => {
+    if (!selectedWallet) return;
+    api
+      .getSellerBundleDashboard(selectedWallet)
+      .then(setSellerBundles)
+      .catch(() => setSellerBundles({ bundles: [], earnings: [] }));
   }, [selectedWallet]);
 
   const exportCsv = () => {
@@ -879,6 +907,90 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
+
+            {/* Composed bundles (#615) — curator earnings + which bundles include this wallet's data */}
+            {(curatorBundles.length > 0 || sellerBundles.bundles.length > 0) && (
+              <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="glass-card p-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="font-display font-semibold text-foreground flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-violet-400" />
+                      {t('bundles.dashboard.curatorTitle')}
+                    </h3>
+                    <Link
+                      to="/curate"
+                      className="text-xs text-violet-300 hover:text-violet-200 font-body flex items-center gap-1 transition-colors"
+                    >
+                      {t('bundles.dashboard.curatorCreateCta')} <ChevronRight className="w-3 h-3" />
+                    </Link>
+                  </div>
+                  {curatorBundles.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Layers className="w-8 h-8 text-muted mx-auto mb-2" />
+                      <p className="text-sm text-foreground-muted font-body">
+                        {t('bundles.dashboard.curatorEmpty')}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {curatorBundles.map(bundle => (
+                        <div
+                          key={bundle.bundleId}
+                          className="flex items-center justify-between rounded-xl bg-surface-2/40 p-3"
+                        >
+                          <div className="min-w-0 mr-2">
+                            <p className="text-sm text-foreground truncate">{bundle.bundleName}</p>
+                            <p className="text-xs text-muted-2 font-body">
+                              {t('bundles.dashboard.purchases', { count: bundle.totalPurchases })} ·{' '}
+                              {t('bundles.dashboard.released', { count: bundle.releasedPurchases })}
+                            </p>
+                          </div>
+                          <span className="text-sm font-display font-bold text-violet-300 flex-shrink-0">
+                            ${formatUSDC(bundle.totalEarned, locale)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="glass-card p-6">
+                  <h3 className="font-display font-semibold text-foreground mb-5 flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-violet-400" />
+                    {t('bundles.dashboard.sellerTitle')}
+                  </h3>
+                  {sellerBundles.bundles.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Layers className="w-8 h-8 text-muted mx-auto mb-2" />
+                      <p className="text-sm text-foreground-muted font-body">
+                        {t('bundles.dashboard.sellerEmpty')}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {sellerBundles.bundles.map(bundle => {
+                        const earned = sellerBundles.earnings
+                          .filter(e => e.bundleId === bundle.id)
+                          .reduce((sum, e) => sum + e.totalEarned, 0);
+                        return (
+                          <div
+                            key={bundle.id}
+                            className="flex items-center justify-between rounded-xl bg-surface-2/40 p-3"
+                          >
+                            <span className="text-sm text-foreground truncate mr-2">
+                              {bundle.name}
+                            </span>
+                            <span className="text-sm font-display font-bold text-violet-300 flex-shrink-0">
+                              ${formatUSDC(earned, locale)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {analytics && (
               <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">

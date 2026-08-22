@@ -28,7 +28,17 @@ import { callContract, getAgentPublicKey, ContractCallError } from '../agent/age
 import { getCircuitBreaker } from '../common/circuit-breaker';
 import { PaymentError } from '../payments/stellar.service';
 import { logger } from './logger';
-import { u64ToScVal, i128ToScVal, addressToScVal, stringToScVal, boolToScVal } from './scval';
+import {
+  u64ToScVal,
+  i128ToScVal,
+  addressToScVal,
+  stringToScVal,
+  boolToScVal,
+  sellerSharesToScVal,
+  stringsToScVal,
+  u64sToScVal,
+  type SellerShareInput,
+} from './scval';
 
 /** Decimals used by USDC/EURC/XLM on Stellar — amounts are i128 stroops. */
 const TOKEN_DECIMALS = 7;
@@ -247,6 +257,176 @@ export async function submitSignedLock(
     await new Promise(r => setTimeout(r, 1_000));
   }
   throw new Error(`lock() confirmation timed out (${txHash})`);
+}
+
+/**
+ * Build an UNSIGNED transaction XDR that invokes `lock_multi(...)` on the
+ * escrow contract — a bundle purchase (#615): one buyer payment split across
+ * several sellers, locked as N escrow records in a single on-chain call. The
+ * buyer signs this with their own wallet, same trust model as `buildLockTx`.
+ *
+ * `shares` are exact per-seller stroop amounts (not basis points — the
+ * caller, `bundle.service.ts`, is responsible for turning bundle bps splits
+ * into an exact stroop vector that sums to the bundle price with no
+ * rounding dust). `shares` and `datasetIds` must be the same length; each
+ * `datasetIds[i]` is the dataset id backing `shares[i]`.
+ */
+export async function buildLockMultiTx(params: {
+  buyer: string;
+  shares: SellerShareInput[];
+  datasetIds: string[];
+  tokenCode?: string;
+}): Promise<{ xdr: string; contractId: string }> {
+  const { buyer, shares, datasetIds } = params;
+  const tokenCode = params.tokenCode ?? 'USDC';
+
+  if (shares.length === 0) {
+    throw new Error('lock_multi requires at least one component share');
+  }
+  if (shares.length !== datasetIds.length) {
+    throw new Error('shares and datasetIds must have the same length for lock_multi');
+  }
+
+  const tokenAddress = getTokenSacAddress(tokenCode);
+  if (!tokenAddress) {
+    throw new Error(
+      `No Soroban token contract (SAC) configured for ${tokenCode} — cannot build on-chain lock_multi. ` +
+        `Set ${tokenCode}_SAC_ADDRESS.`,
+    );
+  }
+
+  const args: StellarSdk.xdr.ScVal[] = [
+    addressToScVal(buyer),
+    addressToScVal(tokenAddress),
+    sellerSharesToScVal(shares),
+    stringsToScVal(datasetIds),
+  ];
+
+  return buildBuyerSignedCall('lock_multi', buyer, args);
+}
+
+/**
+ * Submit a buyer-signed `lock_multi()` transaction. The contract returns only
+ * the first escrow id — every escrow in the batch is assigned a sequential id
+ * starting there (see `lock_multi` in lib.rs), so the full set is derived from
+ * `firstEscrowId` and the component count the caller already knows.
+ */
+export async function submitSignedLockMulti(
+  signedXdr: string,
+  componentCount: number,
+): Promise<{ txHash: string; firstEscrowId: number; escrowIds: number[] }> {
+  const rpc = getRpc();
+  const tx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, getNetworkPassphrase());
+
+  const sendResult = await sorobanBreaker.execute(() =>
+    rpc.sendTransaction(tx as StellarSdk.Transaction),
+  );
+  if (sendResult.status === 'ERROR') {
+    logger.error(`[Escrow] lock_multi() submit error: ${JSON.stringify(sendResult.errorResult)}`);
+    throw new Error('lock_multi() submit error — please try again');
+  }
+
+  const txHash = sendResult.hash;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const result = await sorobanBreaker.execute(() => rpc.getTransaction(txHash));
+    if (result.status === StellarSdk.rpc.Api.GetTransactionStatus.SUCCESS) {
+      if (!result.returnValue) {
+        throw new Error('lock_multi() succeeded but returned no escrow id');
+      }
+      const firstEscrowId = Number(StellarSdk.scValToNative(result.returnValue));
+      const escrowIds = Array.from({ length: componentCount }, (_, i) => firstEscrowId + i);
+      logger.info(
+        `[Escrow] Buyer locked bundle funds → escrows #${firstEscrowId}..#${firstEscrowId + componentCount - 1} (${txHash})`,
+      );
+      return { txHash, firstEscrowId, escrowIds };
+    }
+    if (result.status === StellarSdk.rpc.Api.GetTransactionStatus.FAILED) {
+      logger.error(`[Escrow] lock_multi() failed on-chain (${txHash})`);
+      throw new Error('lock_multi() failed on-chain');
+    }
+    await new Promise(r => setTimeout(r, 1_000));
+  }
+  throw new Error(`lock_multi() confirmation timed out (${txHash})`);
+}
+
+/**
+ * Submit a signed transaction that invokes a void-returning escrow method
+ * (currently only `confirm_delivery`) and wait for on-chain confirmation.
+ * Fills a gap the single-dataset flow left open: `buildConfirmDeliveryTx`
+ * existed to build the unsigned XDR, but nothing submitted it. The bundle
+ * purchase flow's N-signature confirm step (#615) needs it — the buyer signs
+ * one `confirm_delivery` per bundle component, and each is submitted
+ * independently via this helper before `release_multi` is attempted.
+ */
+export async function submitSignedVoidCall(
+  signedXdr: string,
+  methodLabel: string,
+): Promise<{ txHash: string }> {
+  const rpc = getRpc();
+  const tx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, getNetworkPassphrase());
+
+  const sendResult = await sorobanBreaker.execute(() =>
+    rpc.sendTransaction(tx as StellarSdk.Transaction),
+  );
+  if (sendResult.status === 'ERROR') {
+    logger.error(
+      `[Escrow] ${methodLabel}() submit error: ${JSON.stringify(sendResult.errorResult)}`,
+    );
+    throw new Error(`${methodLabel}() submit error — please try again`);
+  }
+
+  const txHash = sendResult.hash;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const result = await sorobanBreaker.execute(() => rpc.getTransaction(txHash));
+    if (result.status === StellarSdk.rpc.Api.GetTransactionStatus.SUCCESS) {
+      logger.info(`[Escrow] ${methodLabel}() confirmed (${txHash})`);
+      return { txHash };
+    }
+    if (result.status === StellarSdk.rpc.Api.GetTransactionStatus.FAILED) {
+      logger.error(`[Escrow] ${methodLabel}() failed on-chain (${txHash})`);
+      throw new Error(`${methodLabel}() failed on-chain`);
+    }
+    await new Promise(r => setTimeout(r, 1_000));
+  }
+  throw new Error(`${methodLabel}() confirmation timed out (${txHash})`);
+}
+
+/** Submit a signed `confirm_delivery()` transaction for one escrow. */
+export async function submitSignedConfirmDelivery(signedXdr: string): Promise<{ txHash: string }> {
+  return submitSignedVoidCall(signedXdr, 'confirm_delivery');
+}
+
+/**
+ * Release a set of escrows as admin in one on-chain call — a bundle's payout
+ * (#615). Every escrow must already have `buyer_confirmed = true` (the
+ * contract's `release_one` panics `BuyerNotConfirmed` otherwise) and the
+ * contract processes the whole list as one transaction; if any escrow in the
+ * set fails its per-escrow checks, the entire call reverts and nothing is
+ * paid. Returns the confirmed transaction hash.
+ */
+export async function releaseMultiEscrow(escrowIds: number[]): Promise<string> {
+  const admin = getAgentPublicKey();
+  if (!admin) {
+    throw new Error('AGENT_WALLET_SECRET not configured — cannot release escrow as admin');
+  }
+  if (escrowIds.length === 0) {
+    throw new Error('release_multi requires at least one escrow id');
+  }
+  const contractId = getEscrowContractId();
+  logger.info(`[Escrow] Releasing bundle escrows [${escrowIds.join(', ')}] on ${contractId}`);
+  try {
+    return await callContract(contractId, 'release_multi', [
+      addressToScVal(admin),
+      u64sToScVal(escrowIds),
+    ]);
+  } catch (err) {
+    translateContractError(
+      err,
+      `Failed to release bundle escrows [${escrowIds.join(', ')}] — please try again`,
+    );
+  }
 }
 
 /**

@@ -181,6 +181,90 @@ export const sentinelAlerts = pgTable('sentinel_alerts', {
   resolvedBy: text('resolved_by'),
 });
 
+/**
+ * A curator-composed product: several sellers' datasets sold as one purchase at
+ * one price, paid out atomically via the escrow contract's `lock_multi` /
+ * `release_multi` (#615). `curatorFeeBps` plus the sum of every
+ * `bundleComponents.shareBps` row for this bundle must equal exactly 10 000 —
+ * enforced at the API boundary (zod) and re-verified against what is actually
+ * persisted immediately after insert (see assertBundleSharesSumTo10000 in
+ * common/storage.ts), since this schema has no cross-row CHECK constraint.
+ */
+export const bundles = pgTable('bundles', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description').notNull(),
+  curatorWallet: text('curator_wallet').notNull(),
+  totalPrice: numeric('total_price').notNull(),
+  paymentToken: text('payment_token').notNull().default('USDC'),
+  curatorFeeBps: integer('curator_fee_bps').notNull(),
+  active: boolean('active').notNull().default(true),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/** One seller's dataset inside a bundle, with its basis-points share of `bundles.totalPrice`. */
+export const bundleComponents = pgTable(
+  'bundle_components',
+  {
+    id: text('id').primaryKey(),
+    bundleId: text('bundle_id').notNull(),
+    datasetId: text('dataset_id').notNull(),
+    shareBps: integer('share_bps').notNull(),
+    position: integer('position').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  table => ({
+    bundleIdIdx: index('bundle_components_bundle_id_idx').on(table.bundleId),
+    datasetIdIdx: index('bundle_components_dataset_id_idx').on(table.datasetId),
+  }),
+);
+
+/**
+ * One buyer's purchase of a bundle — the on-chain `lock_multi` batch this
+ * purchase created. `escrowIds` holds every escrow id in the batch (one per
+ * dataset component, plus one trailing synthetic id for the curator's own
+ * fee leg) as a JSON array, in the same order the shares were locked in.
+ */
+export const bundlePurchases = pgTable('bundle_purchases', {
+  id: text('id').primaryKey(),
+  bundleId: text('bundle_id').notNull(),
+  buyerWallet: text('buyer_wallet').notNull(),
+  firstEscrowId: integer('first_escrow_id').notNull(),
+  escrowIds: text('escrow_ids').notNull(),
+  totalAmount: numeric('total_amount').notNull(),
+  paymentToken: text('payment_token').notNull().default('USDC'),
+  status: text('status').notNull(),
+  lockTxHash: text('lock_tx_hash'),
+  releaseTxHash: text('release_tx_hash'),
+  aiSummary: text('ai_summary'),
+  failureReason: text('failure_reason'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/** Per-leg delivery/confirmation tracking for one bundle purchase. */
+export const bundlePurchaseComponents = pgTable(
+  'bundle_purchase_components',
+  {
+    id: text('id').primaryKey(),
+    purchaseId: text('purchase_id').notNull(),
+    datasetId: text('dataset_id').notNull(),
+    role: text('role').notNull(),
+    escrowId: integer('escrow_id').notNull(),
+    sellerWallet: text('seller_wallet').notNull(),
+    amount: numeric('amount').notNull(),
+    buyerConfirmed: boolean('buyer_confirmed').notNull().default(false),
+    deliveryStatus: text('delivery_status').notNull().default('pending'),
+    deliveryError: text('delivery_error'),
+    deliveryAttempts: integer('delivery_attempts').notNull().default(0),
+    createdAt: text('created_at').notNull(),
+  },
+  table => ({
+    purchaseIdIdx: index('bundle_purchase_components_purchase_id_idx').on(table.purchaseId),
+  }),
+);
+
 // ── SQLite tables (used when DATABASE_URL is not postgres) ───────────────────
 
 export const datasetsSqlite = sqliteTable(
@@ -344,3 +428,74 @@ export const sentinelAlertsSqlite = sqliteTable('sentinel_alerts', {
   resolvedAt: sqliteText('resolved_at'),
   resolvedBy: sqliteText('resolved_by'),
 });
+
+/** SQLite mirror of {@link bundles}. */
+export const bundlesSqlite = sqliteTable('bundles', {
+  id: sqliteText('id').primaryKey(),
+  name: sqliteText('name').notNull(),
+  description: sqliteText('description').notNull(),
+  curatorWallet: sqliteText('curator_wallet').notNull(),
+  totalPrice: sqliteText('total_price').notNull(),
+  paymentToken: sqliteText('payment_token').notNull().default('USDC'),
+  curatorFeeBps: sqliteInteger('curator_fee_bps').notNull(),
+  active: sqliteInteger('active').notNull().default(1),
+  createdAt: sqliteText('created_at').notNull(),
+  updatedAt: sqliteText('updated_at').notNull(),
+});
+
+/** SQLite mirror of {@link bundleComponents}. */
+export const bundleComponentsSqlite = sqliteTable(
+  'bundle_components',
+  {
+    id: sqliteText('id').primaryKey(),
+    bundleId: sqliteText('bundle_id').notNull(),
+    datasetId: sqliteText('dataset_id').notNull(),
+    shareBps: sqliteInteger('share_bps').notNull(),
+    position: sqliteInteger('position').notNull(),
+    createdAt: sqliteText('created_at').notNull(),
+  },
+  table => ({
+    bundleIdIdx: sqliteIndex('bundle_components_bundle_id_idx').on(table.bundleId),
+    datasetIdIdx: sqliteIndex('bundle_components_dataset_id_idx').on(table.datasetId),
+  }),
+);
+
+/** SQLite mirror of {@link bundlePurchases}. */
+export const bundlePurchasesSqlite = sqliteTable('bundle_purchases', {
+  id: sqliteText('id').primaryKey(),
+  bundleId: sqliteText('bundle_id').notNull(),
+  buyerWallet: sqliteText('buyer_wallet').notNull(),
+  firstEscrowId: sqliteInteger('first_escrow_id').notNull(),
+  escrowIds: sqliteText('escrow_ids').notNull(),
+  totalAmount: sqliteText('total_amount').notNull(),
+  paymentToken: sqliteText('payment_token').notNull().default('USDC'),
+  status: sqliteText('status').notNull(),
+  lockTxHash: sqliteText('lock_tx_hash'),
+  releaseTxHash: sqliteText('release_tx_hash'),
+  aiSummary: sqliteText('ai_summary'),
+  failureReason: sqliteText('failure_reason'),
+  createdAt: sqliteText('created_at').notNull(),
+  updatedAt: sqliteText('updated_at').notNull(),
+});
+
+/** SQLite mirror of {@link bundlePurchaseComponents}. */
+export const bundlePurchaseComponentsSqlite = sqliteTable(
+  'bundle_purchase_components',
+  {
+    id: sqliteText('id').primaryKey(),
+    purchaseId: sqliteText('purchase_id').notNull(),
+    datasetId: sqliteText('dataset_id').notNull(),
+    role: sqliteText('role').notNull(),
+    escrowId: sqliteInteger('escrow_id').notNull(),
+    sellerWallet: sqliteText('seller_wallet').notNull(),
+    amount: sqliteText('amount').notNull(),
+    buyerConfirmed: sqliteInteger('buyer_confirmed').notNull().default(0),
+    deliveryStatus: sqliteText('delivery_status').notNull().default('pending'),
+    deliveryError: sqliteText('delivery_error'),
+    deliveryAttempts: sqliteInteger('delivery_attempts').notNull().default(0),
+    createdAt: sqliteText('created_at').notNull(),
+  },
+  table => ({
+    purchaseIdIdx: sqliteIndex('bundle_purchase_components_purchase_id_idx').on(table.purchaseId),
+  }),
+);
