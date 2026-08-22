@@ -252,8 +252,8 @@ Steps 6 and 7 are parallelizable once the contract interface freezes at step 5.
 | Testnet walkthrough in PR | Step 8 |
 | `contracts:check` and `contracts:formal` green | Scripts extended in step 5 |
 
-## Open items for review
+## Decisions (locked)
 
-1. Approve D1 Option A (escrow counter + cross-contract pull) and the extra `escrow_contract` param on `init`.
-2. Confirm D2 `MAX_SLASH_BPS = 2_000` and the default `SLASH_BPS` the backend applies per incident (proposal: 1_000, half the cap).
-3. Confirm D3 tier thresholds.
+1. **D1 — Dispute linkage:** Option A adopted. Escrow maintains `OpenDisputesBySeller(Address) -> u32` counter; bond pulls it cross-contract in `request_unstake`. `escrow_contract: Address` added as a param to `init`.
+2. **D2 — Slash bounds:** `MAX_SLASH_BPS = 2_000` (20 %). Backend default slash: `SLASH_BPS = 1_000` per incident (half the cap).
+3. **D3 — Tier thresholds:** Bronze >= 100 USDC (1_000_000_000 stroops), Silver >= 500 USDC (5_000_000_000), Gold >= 2_500 USDC (25_000_000_000). USDC has 7 decimals.
