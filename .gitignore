@@ -29,6 +29,7 @@ contracts/hazina-escrow/test_snapshots/fuzz_tests/
 # Added by cargo
 
 /target
+**/target/
 target_local/
 .cargo-home/
 fix.md
