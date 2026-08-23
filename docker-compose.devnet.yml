@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.devnet.yml — ephemeral local Stellar network.
+#
+# Boots stellar-core + Horizon + Soroban RPC + friendbot in one container, on a
+# local-only network. Nothing here can reach public testnet or mainnet: the
+# passphrase is quickstart's "Standalone Network ; February 2017" and
+# scripts/devnet/lib/guard.ts refuses to sign against anything else.
+#
+# Run it through `npm run devnet` rather than by hand — the provisioner is what
+# waits for readiness, deploys the contract and writes .env.devnet.
+#
+#   npm run devnet         boot + provision
+#   npm run devnet:status   show what is running
+#   npm run devnet:reset    destroy and reprovision from zero
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  stellar-devnet:
+    # Pinned by digest, never :latest — see issue #457. The tag is informational;
+    # the digest is the actual pin. v657-b1330.1 ships stellar-core 28.0.1 /
+    # protocol 27, matching what public testnet runs. Bump tag + digest together.
+    image: stellar/quickstart:v657-b1330.1-latest@sha256:6c8874f3576031979b0686c28b7abd2399942790ec5fa15a5d53348bc35eb2a9
+    container_name: hazina-devnet
+    # --local              : standalone network, deterministic root key
+    # --enable rpc,...     : Soroban RPC + Horizon + friendbot behind one port
+    # --limits unlimited   : generous resource limits so contract deploys fit
+    # No volume is mounted, which is what makes the container ephemeral: every
+    # `docker compose down` throws the whole ledger away.
+    command: ['--local', '--enable', 'rpc,horizon,friendbot', '--limits', 'unlimited']
+    ports:
+      # Single nginx front door: Horizon on /, RPC on /rpc, friendbot on /friendbot
+      - '${DEVNET_PORT:-8000}:8000'
+    # Quickstart needs headroom for core + postgres + Horizon + RPC in one
+    # container. Below ~2GB core gets OOM-killed mid-catchup and the network
+    # never reaches a ready state — see docs/DEVNET.md troubleshooting.
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      # Horizon reports a non-zero ingested ledger only once it is genuinely
+      # usable. Friendbot comes up later still, which the provisioner waits for
+      # separately — do not treat this healthcheck as "ready to provision".
+      test:
+        [
+          'CMD-SHELL',
+          'curl -sf http://localhost:8000/ | grep -q ''"history_latest_ledger": [1-9]''',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+    stop_grace_period: 5s

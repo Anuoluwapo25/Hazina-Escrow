@@ -135,11 +135,17 @@ async function seedTransactions(jsonData: Record<string, unknown>): Promise<void
 
 async function seed(): Promise<void> {
   try {
-    const dataPath = resolve(__dirname, '../../data/datasets.json');
+    // SEED_DATA_PATH lets the local devnet seed the marketplace with its own
+    // deterministic datasets (whose sellerWallet values are real devnet
+    // addresses) instead of the demo fixtures. See docs/DEVNET.md.
+    //   SEED_DATA_PATH=../data/devnet.datasets.json npm run seed --prefix backend
+    const dataPath = process.env.SEED_DATA_PATH
+      ? resolve(process.cwd(), process.env.SEED_DATA_PATH)
+      : resolve(__dirname, '../../data/datasets.json');
     const fileContent = await fs.readFile(dataPath, 'utf-8');
     const jsonData = JSON.parse(fileContent);
 
-    logger.info('Seeding database...');
+    logger.info(`Seeding database from ${dataPath}...`);
 
     await seedDatasets(jsonData);
     await seedTransactions(jsonData);
