@@ -90,6 +90,10 @@ pub enum DataKey {
     PendingTreasuryChange,
     /// Pending timelocked delay change.
     PendingDelayChange,
+    /// Number of open disputes for a given seller. Incremented in
+    /// `raise_dispute`, decremented when a disputed escrow settles.
+    /// Read cross-contract by the bond crate in `request_unstake`.
+    OpenDisputesBySeller(Address),
 }
 
 #[contracttype]
@@ -759,6 +763,20 @@ impl HazinaEscrow {
         env.storage()
             .persistent()
             .set(&EscrowKey::Record(escrow_id), &record);
+
+        // Bump the per-seller open-dispute counter so the bond crate can
+        // cross-contract read it in `request_unstake`.
+        let seller = record.seller.clone();
+        let prev: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OpenDisputesBySeller(seller.clone()))
+            .unwrap_or(0);
+        env.storage().persistent().set(
+            &DataKey::OpenDisputesBySeller(seller),
+            &(prev + 1),
+        );
+
         env.events().publish(
             (soroban_sdk::symbol_short!("disp_up"),),
             (escrow_id, buyer, evidence_hash, deadline),
@@ -881,28 +899,59 @@ impl HazinaEscrow {
             &record.buyer,
             &record.amount,
         );
+        let was_disputed = record.disputed;
         record.refunded = true;
         record.disputed = false;
         env.storage()
             .persistent()
             .set(&EscrowKey::Record(escrow_id), &record);
+
+        // Decrement the per-seller open-dispute counter when settling
+        // a disputed escrow (only incremented for disputed escrows).
+        if was_disputed {
+            let seller = record.seller.clone();
+            let prev: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::OpenDisputesBySeller(seller.clone()))
+                .unwrap_or(0);
+            if prev > 0 {
+                env.storage().persistent().set(
+                    &DataKey::OpenDisputesBySeller(seller),
+                    &(prev - 1),
+                );
+            }
+        }
+
         env.events().publish(
             (symbol_short!("refunded"),),
             (escrow_id, record.buyer, record.amount),
         );
-    }
-
-
-    fn release_disputed_one(env: &Env, admin: &Address, escrow_id: u64) {
+    }    fn release_disputed_one(env: &Env, admin: &Address, escrow_id: u64) {
         let mut record = Self::read_escrow(env, escrow_id);
         record.disputed = false;
         // Arbitrator's decision overrides the buyer-confirmation requirement —
         // that gate exists to protect an unresponsive buyer, not a buyer who
         // has already had their dispute heard and resolved against them.
         record.buyer_confirmed = true;
+        let seller = record.seller.clone();
         env.storage()
             .persistent()
             .set(&EscrowKey::Record(escrow_id), &record);
+
+        // Decrement the per-seller open-dispute counter.
+        let prev: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OpenDisputesBySeller(seller.clone()))
+            .unwrap_or(0);
+        if prev > 0 {
+            env.storage().persistent().set(
+                &DataKey::OpenDisputesBySeller(seller),
+                &(prev - 1),
+            );
+        }
+
         Self::release_one(env, admin, escrow_id);
     }
 
@@ -1138,6 +1187,16 @@ impl HazinaEscrow {
         env.storage()
             .instance()
             .get(&DataKey::EscrowCount)
+            .unwrap_or(0)
+    }
+
+    /// Returns the number of currently open (unresolved) disputes for a seller.
+    /// Used cross-contract by the bond crate in `request_unstake`.
+    /// Named `dspt_cnt` (<= 9 chars) to fit `symbol_short!` for cross-contract calls.
+    pub fn dspt_cnt(env: Env, seller: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::OpenDisputesBySeller(seller))
             .unwrap_or(0)
     }
 

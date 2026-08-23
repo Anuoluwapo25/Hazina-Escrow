@@ -1,6 +1,7 @@
 name: Contract Fuzz
 
-# Property-based invariant suite for contracts/hazina-escrow.
+# Property-based invariant suite for contracts/hazina-escrow and
+# contracts/hazina-seller-bond.
 # Specification: docs/INVARIANTS.md. Runbook: docs/FUZZING.md.
 
 on:
@@ -38,27 +39,34 @@ jobs:
   gate:
     name: Contract Gate Tests
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        contract:
+          - name: hazina-escrow
+            dir: contracts/hazina-escrow
+          - name: hazina-seller-bond
+            dir: contracts/hazina-seller-bond
     defaults:
       run:
-        working-directory: contracts/hazina-escrow
+        working-directory: ${{ matrix.contract.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: contracts/hazina-escrow
+          workspaces: ${{ matrix.contract.dir }}
 
       # No feature flag: the fuzz target declares `required-features`, so this
       # does not even build it. Sub-second, never flaky.
-      - name: Example tests
+      - name: Gate tests
         run: cargo test --locked
 
       - name: Release build
         run: cargo build --release --locked
 
-  # ── Property suite ────────────────────────────────────────────────────────────
-  fuzz:
-    name: Invariant Suite
+  # ── Property suite (escrow) ──────────────────────────────────────────────────
+  fuzz-escrow:
+    name: Invariant Suite (escrow)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -108,7 +116,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: proptest-regressions-${{ github.run_id }}
+          name: proptest-regressions-${{ matrix.contract }}-${{ github.run_id }}
           path: contracts/hazina-escrow/proptest-regressions/
           if-no-files-found: ignore
           retention-days: 30
