@@ -2,25 +2,25 @@
 
 Branch: `feature/access-pass-contract` (off `main` @ `1eabd78`, fork synced with upstream).
 Issue: Dataset Subscription Access Pass. New crate `contracts/hazina-access-pass/` plus backend and UI integration.
-Status: PLAN ONLY. No implementation until approved.
+Status: APPROVED. All four blocking decisions resolved (see §11). Stage 1 (contract + tests) in progress.
 
 ---
 
 ## 0. Audit summary (what the new code must match)
 
-| Area | Source of truth | What the new work copies |
-|---|---|---|
-| Contract layout | `contracts/hazina-escrow/src/lib.rs` | `#![no_std]`, `// ─── Section ───` headers, `pub const` with doc comments for test-visible constants, `panic_with_error!` everywhere, `require_auth()` before `assert_*` helpers |
-| Errors | `HazinaEscrowError` (lib.rs:104) | `#[contracterror]` enum, explicit discriminants from 1, tests assert `"Error(Contract, #N)"` |
-| Storage split | lib.rs:60-98 | Instance storage: init flag, admin, counters, config. Persistent storage: per-entity records. TTL bumps on every write AND in read getters (`get_escrow`, lib.rs:1127) |
-| TTL idiom | lib.rs:19-22, 622-626 | `extend_ttl(key, MIN_TTL, BUMP_LEDGERS)` = `(17_280, 518_400)` (~24h floor, ~60d bump) |
-| Fee model (#551) | lib.rs:283-355, 1259-1264 | Default fee in instance storage (default 500 bps), per-dataset override in persistent storage, `MAX_FEE_BPS = 2_000`, effective = override or default, 1-stroop fee floor on settlement (lib.rs:932-939) |
-| Events | throughout lib.rs | `env.events().publish((topic,), payload)`; one event per state change |
-| Tests | lib.rs:1388+ inline module | `setup()` helper (mock auths, raised TTLs, minted USDC), `#[should_panic(expected = "Error(Contract, #N)")]`, `formal_` prefix for invariant tests |
-| Fuzz suite | `contracts/hazina-escrow/tests/fuzz/` | proptest behind `fuzz-tests` feature + `required-features`, committed regressions, harness with raised-TTL `bare_env()` |
-| Backend client | `backend/src/lib/escrow.client.ts` | Read-only sim via `rpc.simulateTransaction` (no signing), shared `'soroban-rpc'` circuit breaker, panic-code to sanitized message map (`CONTRACT_ERROR_MESSAGES`), unsigned-XDR builders for buyer-signed calls, scval helpers from `backend/src/lib/scval.ts` |
-| Contract ID config | `backend/src/lib/stellar.config.ts:33-62` | Per-call env reads, `getXContractId()` throws naming the missing env var, startup validation |
-| Frontend | `frontend/src/pages/SellPage.tsx`, `DatasetDetailPage.tsx` | lucide icons, `clsx`, `useI18n()` catalog, Toast system, react-query (`useQuery` with `queryKey`), badges as `type-badge` spans (`border-emerald-400/30 bg-emerald-400/10 text-emerald-400`), cards as `glass-card`, CTAs as `btn-gold` |
+| Area               | Source of truth                                            | What the new work copies                                                                                                                                                                                                                                       |
+| ------------------ | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contract layout    | `contracts/hazina-escrow/src/lib.rs`                       | `#![no_std]`, `// ─── Section ───` headers, `pub const` with doc comments for test-visible constants, `panic_with_error!` everywhere, `require_auth()` before `assert_*` helpers                                                                               |
+| Errors             | `HazinaEscrowError` (lib.rs:104)                           | `#[contracterror]` enum, explicit discriminants from 1, tests assert `"Error(Contract, #N)"`                                                                                                                                                                   |
+| Storage split      | lib.rs:60-98                                               | Instance storage: init flag, admin, counters, config. Persistent storage: per-entity records. TTL bumps on every write AND in read getters (`get_escrow`, lib.rs:1127)                                                                                         |
+| TTL idiom          | lib.rs:19-22, 622-626                                      | `extend_ttl(key, MIN_TTL, BUMP_LEDGERS)` = `(17_280, 518_400)` (~24h floor, ~60d bump)                                                                                                                                                                         |
+| Fee model (#551)   | lib.rs:283-355, 1259-1264                                  | Default fee in instance storage (default 500 bps), per-dataset override in persistent storage, `MAX_FEE_BPS = 2_000`, effective = override or default, 1-stroop fee floor on settlement (lib.rs:932-939)                                                       |
+| Events             | throughout lib.rs                                          | `env.events().publish((topic,), payload)`; one event per state change                                                                                                                                                                                          |
+| Tests              | lib.rs:1388+ inline module                                 | `setup()` helper (mock auths, raised TTLs, minted USDC), `#[should_panic(expected = "Error(Contract, #N)")]`, `formal_` prefix for invariant tests                                                                                                             |
+| Fuzz suite         | `contracts/hazina-escrow/tests/fuzz/`                      | proptest behind `fuzz-tests` feature + `required-features`, committed regressions, harness with raised-TTL `bare_env()`                                                                                                                                        |
+| Backend client     | `backend/src/lib/escrow.client.ts`                         | Read-only sim via `rpc.simulateTransaction` (no signing), shared `'soroban-rpc'` circuit breaker, panic-code to sanitized message map (`CONTRACT_ERROR_MESSAGES`), unsigned-XDR builders for buyer-signed calls, scval helpers from `backend/src/lib/scval.ts` |
+| Contract ID config | `backend/src/lib/stellar.config.ts:33-62`                  | Per-call env reads, `getXContractId()` throws naming the missing env var, startup validation                                                                                                                                                                   |
+| Frontend           | `frontend/src/pages/SellPage.tsx`, `DatasetDetailPage.tsx` | lucide icons, `clsx`, `useI18n()` catalog, Toast system, react-query (`useQuery` with `queryKey`), badges as `type-badge` spans (`border-emerald-400/30 bg-emerald-400/10 text-emerald-400`), cards as `glass-card`, CTAs as `btn-gold`                        |
 
 ### CI gaps found (same class of gap as seller-bond)
 
@@ -157,15 +157,19 @@ pub enum HazinaAccessPassError {
 ```
 
 ### `initialize(env, admin, escrow_contract, token)`
+
 - Guard: `Initialized` checked and set FIRST (escrow pattern, lib.rs:239-256). Second call panics `AlreadyInitialized`.
 - Stores admin, escrow contract address, token. Treasury unset until `set_treasury` (falls back to admin, like escrow's `unwrap_or(admin)`, lib.rs:1306-1310).
 - Event: `initialized` (admin, escrow_contract, token).
 
 ### `set_treasury(env, admin, treasury)`
+
 - Admin-gated. Event: `trs_set` (treasury).
 
 ### `define_plan(env, seller, dataset_id, price_per_period, period_seconds, max_seats) -> u64`
+
 Checks:
+
 - `seller.require_auth()`
 - `dataset_id` non-empty else `EmptyDatasetId`
 - `price_per_period >= MIN_SUB_AMOUNT` (10_000 stroops, mirrors `MIN_LOCK_AMOUNT`) else `InvalidAmount`
@@ -177,7 +181,9 @@ Invariants: plan ids strictly increase from 0; a defined plan is immutable excep
 Event: `plan_new` (plan_id, seller, dataset_id, price_per_period, period_seconds, max_seats).
 
 ### `subscribe(env, buyer, dataset_id, plan_id)`
+
 Checks, in order:
+
 1. Not paused-equivalent: n/a (no pause in v1 scope; noted in §11 Q4).
 2. `buyer.require_auth()`
 3. Plan exists else `PlanNotFound`; `plan.active` else `PlanInactive`
@@ -193,12 +199,15 @@ Funds custody: the contract holds the full price for the term (needed for pro-ra
 Event: `subscribed` (buyer, dataset_id, plan_id, expiry, amount_paid, fee_bps).
 
 ### `renew(env, buyer, dataset_id)`
+
 Checks:
+
 - `buyer.require_auth()`
 - Pass exists and `!revoked` else `PassNotFound`; plan exists and active else `PlanInactive`
 - Seat already held; unchanged.
 
 Settlement sequence:
+
 1. **Settle prior term out of custody**: `fee = amount_paid * fee_bps / 10_000` with the escrow 1-stroop floor when `fee_bps > 0` (lib.rs:932-939); transfer net to `plan.seller`, fee to treasury.
 2. **Charge the new term**: fresh fee lookup (step 6 of subscribe), `transfer(buyer → contract, plan.price_per_period)` before any write.
 3. **Fresh-term semantics** (issue boundary case):
@@ -209,14 +218,17 @@ Settlement sequence:
 Event: `renewed` (buyer, dataset_id, old_expiry, new_expiry, amount_charged).
 
 ### `has_access(env, buyer, dataset_id) -> bool`
+
 - Pure read. Returns `false` unless: record exists AND `!revoked` AND `env.ledger().timestamp() < expiry`.
 - Never panics on a missing pass. Bumps the pass entry TTL (active readers keep their record alive).
 
 ### `get_pass(env, buyer, dataset_id) -> Option<PassRecord>`
+
 - Returns `None` when absent (deviation from escrow's panicking getter, see §11 Q3): the UI polls this constantly and a trap-per-miss read would be hostile to the frontend and to read-only simulations.
 - Bumps pass entry TTL.
 
 ### `settle_expired(env, buyer, dataset_id)` — NEW function, see §11 Q2
+
 - Permissionless (anyone may trigger; follows escrow precedents where anyone executes an already-determined action, e.g. `execute_upgrade`, lib.rs:436).
 - Requires `now >= expiry`, pass exists, `!revoked`, prior term unsettled.
 - Pays prior term out of custody (same settle math as renew step 1), marks the pass settled (`amount_paid = 0`, keep record for history).
@@ -224,11 +236,14 @@ Event: `renewed` (buyer, dataset_id, old_expiry, new_expiry, amount_charged).
 - Event: `settled` (buyer, dataset_id, seller_net, fee).
 
 ### `revoke(env, caller, buyer, dataset_id)`
+
 Checks:
+
 - `caller.require_auth()`; caller must be `plan.seller` OR `admin` else `NotSeller` / `NotAdmin`
 - Pass exists and `!revoked` else `PassNotFound`
 
 Pro-rata arithmetic (the issue boundary case):
+
 ```
 elapsed   = min(now, expiry) - start                 // saturating
 remaining = term_period_seconds - elapsed            // saturating, >= 0
@@ -237,6 +252,7 @@ earned    = amount_paid - refund
 fee       = earned * fee_bps / 10_000                // floor, 1-stroop minimum when fee_bps > 0 and earned > 0
 seller_net = earned - fee
 ```
+
 Transfers: `refund → buyer`, `seller_net → plan.seller`, `fee → treasury`, all out of custody. Conservation invariant: `amount_paid == refund + seller_net + fee + dust_in_contract` where dust is zero by construction (floor rounding pushes remainder into `seller_net`... verify in tests; if a 1-stroop case leaves dust, assert conservation including contract balance delta instead).
 
 Mark `revoked = true`, decrement seats, bump TTL. Record kept (audit trail); a later subscribe overwrites the key.
@@ -244,6 +260,7 @@ Mark `revoked = true`, decrement seats, bump TTL. Record kept (audit trail); a l
 Event: `revoked` (buyer, dataset_id, refund, earned).
 
 ### Read helpers
+
 - `get_plan(plan_id) -> PlanRecord` (panics `PlanNotFound`, matches escrow getter style)
 - `get_seats_used(plan_id) -> u32`
 
@@ -278,21 +295,22 @@ All in `contracts/hazina-access-pass/src/lib.rs` inline modules, using an escrow
 
 ### Issue boundary cases
 
-| # | Case | Test | Assertion |
-|---|---|---|---|
-| B1 | Active pass blocks subscribe up to the last second | `test_subscribe_blocked_at_expiry_minus_one` | advance to `expiry - 1`; `try_subscribe` errs `#12`; `has_access` true |
-| B2 | Expired pass allows fresh subscribe | `test_subscribe_allowed_at_exact_expiry` | at `now == expiry`: `has_access` false, subscribe succeeds, new `start == now` |
-| B3 | Renew after expiry is a FRESH term | `test_renew_after_expiry_is_fresh_term` | renew at `expiry + 3600`; assert `expiry == renew_now + period`, NOT `old_expiry + period` |
-| B4 | Renew before expiry extends | `test_renew_before_expiry_extends` | renew at `expiry - 100`; assert `expiry == old_expiry + period` |
-| B5 | Max seats reached | `test_subscribe_fails_when_max_seats_reached` | fill to `max_seats`; next distinct buyer errs `#11` |
-| B6 | Slot reuse does not double-count | `test_resubscribe_after_expiry_reuses_seat` | full plan; expired holder resubscribes; succeeds; `get_seats_used` unchanged |
-| B7 | Pro-rata refund arithmetic | `test_revoke_refunds_pro_rata_half_term` (+ rounding cases) | revoke at half term: exact expected numbers for refund/earned/fee incl. the 1-stroop floor case (`amount_paid` odd, `fee_bps` small) |
-| B8 | Revoke after natural expiry refunds zero, settles seller | `test_revoke_after_expiry_settles_not_refunds` | balances move to seller+treasury only; buyer refund 0 |
-| B9 | TTL bump behavior | `test_ttl_bumped_on_write_and_read` | assert persistent entry TTL `>= PASS_MIN_TTL` after subscribe, after renew, and after `has_access` on an aging entry (SDK `storage().persistent().get_ttl`) |
-| B10 | No pass without settled payment | `test_no_pass_when_transfer_fails` | drain buyer below price; `catch_unwind(try_subscribe)`; assert `get_pass == None`, `has_access == false`, `seats_used` unchanged, contract balance unchanged |
-| B11 | AlreadySubscribed mid-term | `test_double_subscribe_panics` | second subscribe same buyer errs `#12` |
+| #   | Case                                                     | Test                                                        | Assertion                                                                                                                                                    |
+| --- | -------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| B1  | Active pass blocks subscribe up to the last second       | `test_subscribe_blocked_at_expiry_minus_one`                | advance to `expiry - 1`; `try_subscribe` errs `#12`; `has_access` true                                                                                       |
+| B2  | Expired pass allows fresh subscribe                      | `test_subscribe_allowed_at_exact_expiry`                    | at `now == expiry`: `has_access` false, subscribe succeeds, new `start == now`                                                                               |
+| B3  | Renew after expiry is a FRESH term                       | `test_renew_after_expiry_is_fresh_term`                     | renew at `expiry + 3600`; assert `expiry == renew_now + period`, NOT `old_expiry + period`                                                                   |
+| B4  | Renew before expiry extends                              | `test_renew_before_expiry_extends`                          | renew at `expiry - 100`; assert `expiry == old_expiry + period`                                                                                              |
+| B5  | Max seats reached                                        | `test_subscribe_fails_when_max_seats_reached`               | fill to `max_seats`; next distinct buyer errs `#11`                                                                                                          |
+| B6  | Slot reuse does not double-count                         | `test_resubscribe_after_expiry_reuses_seat`                 | full plan; expired holder resubscribes; succeeds; `get_seats_used` unchanged                                                                                 |
+| B7  | Pro-rata refund arithmetic                               | `test_revoke_refunds_pro_rata_half_term` (+ rounding cases) | revoke at half term: exact expected numbers for refund/earned/fee incl. the 1-stroop floor case (`amount_paid` odd, `fee_bps` small)                         |
+| B8  | Revoke after natural expiry refunds zero, settles seller | `test_revoke_after_expiry_settles_not_refunds`              | balances move to seller+treasury only; buyer refund 0                                                                                                        |
+| B9  | TTL bump behavior                                        | `test_ttl_bumped_on_write_and_read`                         | assert persistent entry TTL `>= PASS_MIN_TTL` after subscribe, after renew, and after `has_access` on an aging entry (SDK `storage().persistent().get_ttl`)  |
+| B10 | No pass without settled payment                          | `test_no_pass_when_transfer_fails`                          | drain buyer below price; `catch_unwind(try_subscribe)`; assert `get_pass == None`, `has_access == false`, `seats_used` unchanged, contract balance unchanged |
+| B11 | AlreadySubscribed mid-term                               | `test_double_subscribe_panics`                              | second subscribe same buyer errs `#12`                                                                                                                       |
 
 ### Auth / validation matrix (escrow style, `should_panic(expected = ...)`)
+
 Non-admin `initialize` params tampering, non-seller `define_plan` (mock auth off via `set_auths`), non-owner `renew`, outsider `revoke` (`#4`), empty dataset id (`#5`), zero price / period / seats (`#6/#7/#8`), unknown plan (`#9`), inactive plan (`#10`), unknown pass (`#13`).
 
 ### `formal_` invariant tests (run by formal-checks.sh)
@@ -307,6 +325,7 @@ formal_seat_count_matches_state          // seats_used equals count of non-revok
 ### Fuzz suite (stage 1b, mirrors escrow wiring exactly)
 
 `tests/fuzz/{main.rs, harness.rs, lifecycle.rs}` behind `fuzz-tests` feature:
+
 - Strategy: sequences of `Subscribe / Renew / Revoke / AdvanceTime / SettleExpired` over a small buyer pool and 1-2 plans.
 - Properties: value conservation across custody at every step; `has_access(b) == (pass exists && !revoked && now < expiry)` at all times; no successful money-moving op leaves the pass unwritten; seat counter consistency.
 
@@ -316,16 +335,16 @@ Regressions committed under `proptest-regressions/` like escrow.
 
 ## 6. CI plan (exact changes)
 
-| File | Change |
-|---|---|
-| `scripts/contracts/checks.sh` | Replace single `CONTRACT_DIR` with a loop over `hazina-escrow hazina-access-pass`; fmt/clippy/test/wasm-build run per crate; `set -eu` keeps fail-fast. Root `npm run contracts:check` picks this up with zero package.json changes |
-| `scripts/contracts/formal-checks.sh` | Same loop; `cargo test ... formal_` per crate |
-| `.github/workflows/ci.yml` | `contract` job: add `strategy.matrix.crate: [hazina-escrow, hazina-access-pass]`, working-directory `contracts/${{ matrix.crate }}`. `contract-artifacts` job: add a parallel WASM build + spec extraction for `hazina_access_pass.wasm`; artifact path gains the new wasm/spec (artifact name suffixed per crate) |
+| File                                  | Change                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/contracts/checks.sh`         | Replace single `CONTRACT_DIR` with a loop over `hazina-escrow hazina-access-pass`; fmt/clippy/test/wasm-build run per crate; `set -eu` keeps fail-fast. Root `npm run contracts:check` picks this up with zero package.json changes                                                                                                     |
+| `scripts/contracts/formal-checks.sh`  | Same loop; `cargo test ... formal_` per crate                                                                                                                                                                                                                                                                                           |
+| `.github/workflows/ci.yml`            | `contract` job: add `strategy.matrix.crate: [hazina-escrow, hazina-access-pass]`, working-directory `contracts/${{ matrix.crate }}`. `contract-artifacts` job: add a parallel WASM build + spec extraction for `hazina_access_pass.wasm`; artifact path gains the new wasm/spec (artifact name suffixed per crate)                      |
 | `.github/workflows/contract-fuzz.yml` | `gate` job: matrix over both crates (`cargo test --locked`, release build). `fuzz` job: keep escrow suite as-is; add a step running the access-pass suite with the same budget env vars; extend `Swatinem/rust-cache` `workspaces:` to list both crates; regression-seed upload path becomes a glob `contracts/*/proptest-regressions/` |
-| `.prettierignore` | Replace the two `contracts/hazina-escrow/...` entries with `contracts/*/target` and `contracts/*/Cargo.lock` |
-| `.gitignore` | DONE on this branch (`**/target/`) |
-| ESLint/Prettier TS globs | NO change needed: root `format`/`lint` scripts glob `backend/src/**/*.{ts,tsx}` and `frontend/src/**/*.{ts,tsx}`; new files land inside them automatically |
-| Husky `lint-staged` | NO change needed: same reason |
+| `.prettierignore`                     | Replace the two `contracts/hazina-escrow/...` entries with `contracts/*/target` and `contracts/*/Cargo.lock`                                                                                                                                                                                                                            |
+| `.gitignore`                          | DONE on this branch (`**/target/`)                                                                                                                                                                                                                                                                                                      |
+| ESLint/Prettier TS globs              | NO change needed: root `format`/`lint` scripts glob `backend/src/**/*.{ts,tsx}` and `frontend/src/**/*.{ts,tsx}`; new files land inside them automatically                                                                                                                                                                              |
+| Husky `lint-staged`                   | NO change needed: same reason                                                                                                                                                                                                                                                                                                           |
 
 Definition of done for stage 1: a push containing ONLY contract code goes green on `format`, `lint`, `typecheck`, `contract` (both matrix legs), `Contract Gate Tests` (both crates), and `Invariant Suite`.
 
@@ -334,24 +353,30 @@ Definition of done for stage 1: a push containing ONLY contract code goes green 
 ## 7. Backend integration plan
 
 ### Config — `backend/src/lib/stellar.config.ts`
+
 Add alongside the escrow block (lines 33-62), same idioms (per-call env read, throws naming the var, strkey validation):
+
 - `isAccessPassConfigured()`, `getAccessPassContractId()` reading `ACCESS_PASS_CONTRACT_ID`
 - `validateAccessPassConfig()` called at startup next to `validateEscrowConfig()`
 
 ### New client — `backend/src/lib/access-pass.client.ts`
+
 Modeled line-for-line on `escrow.client.ts`:
 
 Read-only simulation calls (NO signing, source account = agent pubkey ?? contract id, fallback `new StellarSdk.Account(sourceAddr, '0')` exactly like `getEscrow`, escrow.client.ts:473-505):
+
 - `hasAccess(buyer, datasetId): Promise<boolean>` — simulates `has_access`, decodes `scvBool`
 - `getPass(buyer, datasetId): Promise<AccessPassState | null>` — simulates `get_pass`, `None` maps to null
 - `getPlan(planId): Promise<PlanState>`
 
 Write-path builders (unsigned XDR, buyer signs in wallet — mirrors `buildConfirmDeliveryTx` / `buildBuyerSignedCall`):
+
 - `buildSubscribeTx({ buyer, datasetId, planId })`
 - `buildRenewTx({ buyer, datasetId })`
 - `submitSignedAccessTx(signedXdr)` relay + poll, returning `{ txHash }`
 
 Shared infrastructure:
+
 - Reuses the SAME `'soroban-rpc'` circuit breaker registry entry (escrow.client.ts:48-54) so subscription reads trip the shared breaker during RPC outage.
 - `ACCESS_PASS_ERROR_MESSAGES: Record<number, string>` mirroring the error enum numbering in §3; `throwSanitized` copy keeps raw sim payloads out of thrown messages.
 
@@ -360,13 +385,16 @@ Shared infrastructure:
 **Fail-closed behavior (the load-bearing rule)**: if Soroban RPC is unreachable, the breaker is open, simulation fails, or decoding fails, `hasAccess` THROWS (`AccessCheckUnavailableError`). It never returns `true` on failure and never returns `false`-with-error-swallowed. Documented contract for callers: a thrown error means DENY access and surface a "verification temporarily unavailable" state. A vitest case asserts the throw on simulated RPC failure and that no code path maps an exception to `true`.
 
 ### Routes
+
 New `backend/src/datasets/access-pass.routes.ts` following `datasets.router.ts` conventions, mounted in `main.ts` next to the datasets router:
+
 - `GET /api/datasets/:id/access-pass?buyer=...` → cached `hasAccess` + pass details
 - `GET /api/datasets/:id/plans` → plans for dataset, indexed OFF-CHAIN from `plan_new` events (Soroban cannot enumerate keys cheaply; a small indexer table populated from event polling, same pattern the receipts/sentinel modules use for chain observation)
 - `POST /api/datasets/:id/plans/subscribe-tx` → returns unsigned XDR for wallet signature
 - `POST /api/datasets/:id/plans/renew-tx` → same
 
 ### Backend tests (`access-pass.client.test.ts`, vitest, colocated like `escrow.client.test.ts`)
+
 Decode happy path; sim failure → throw (fail closed); breaker open → throw; cache hit within TTL; cache miss after TTL; error map coverage for every enum code; builder arg-order snapshots against known ScVal encodings.
 
 ---
@@ -374,11 +402,13 @@ Decode happy path; sim failure → throw (fail closed); breaker open → throw; 
 ## 8. Frontend integration plan
 
 ### Seller side — `SellPage.tsx` "Offer a subscription"
+
 - New collapsible section in the sell form (after pricing): toggle "Offer a subscription", fields price-per-period (presets row matching `PRICE_PRESETS` idiom, SellPage.tsx:24), period selector (day/week/month mapped to seconds), max seats number input.
 - Extends `FormState`, draft persistence, preview tab, and i18n catalog keys (`sell.subscription.*`).
 - Submit flow: existing POST creates the dataset; then the page requests `subscribe-tx`-style builder for `define_plan`, Freighter-signs, submits via the relay endpoint. Toast feedback reuses `useToastContext`.
 
 ### Buyer side — `DatasetDetailPage.tsx` sidebar
+
 - `SubscriptionPlanCard` component (`frontend/src/components/ui/SubscriptionPlanCard.tsx`): `glass-card` section listing plans (price/period/seats-left), primary CTA `btn-gold` "Subscribe". Clicking builds the unsigned XDR via API, signs with the connected wallet, submits, then invalidates the access-pass query.
 - `ActivePassBadge` component (`frontend/src/components/ui/ActivePassBadge.tsx`): emerald badge variant copied from the live-feed badge (DatasetDetailPage.tsx:129-139): `border-emerald-400/30 bg-emerald-400/10 text-emerald-400`, pulsing dot icon, text "Active · expires {timeAgo}". Renders from `useAccessPass`.
 - `useAccessPass(datasetId)` hook: react-query, `queryKey: ['access-pass', wallet, datasetId]`, `queryFn` hits `GET /api/datasets/:id/access-pass`, `staleTime: 15_000` (mirrors backend cache), `refetchInterval: 60_000`. On query ERROR renders a neutral "Access status unavailable" state and DISABLES data-purchase actions (fail closed at the UI layer too).
@@ -390,6 +420,7 @@ Decode happy path; sim failure → throw (fail closed); breaker open → throw; 
 ## 9. Staged breakdown
 
 **Stage 1 — contract + tests (this branch, first PR-ready unit)**
+
 1. Crate scaffold: `Cargo.toml`, `src/lib.rs` skeleton with constants/keys/errors/types.
 2. Full impl: init, define_plan, subscribe, renew, has_access, get_pass, settle_expired, revoke, getters.
 3. Inline unit tests (B1-B11 + auth matrix) green: `cargo test --manifest-path contracts/hazina-access-pass/Cargo.toml`.
@@ -402,6 +433,7 @@ Commit 1: `feat(access-pass): subscription access pass contract with boundary te
 Commit 2 (if separated): `ci(contracts): include hazina-access-pass in checks, CI matrix, and fuzz suite`.
 
 **Stage 2 — backend/UI integration**
+
 1. stellar.config additions + startup validation (+ test).
 2. `access-pass.client.ts` with cache/fail-closed/breaker (+ vitest suite).
 3. Routes + minimal event indexer table for plans (+ router tests).
@@ -422,12 +454,12 @@ Not in scope (explicitly): deploying either contract to testnet/mainnet, mainnet
 
 ---
 
-## 11. Decisions I need from you before writing code
+## 11. Decisions — RESOLVED by Babigdk
 
-**Q1 — Seat semantics (§2).** Chosen: expired passes keep their seat until the holder resubscribes (slot reuse) or someone revokes. Conservative but O(1) and deterministic. Alternative would need iteration over buyers, which Soroban storage does not support cheaply. OK?
+**Q1 — Seat semantics (§2).** APPROVED: expired passes keep their seat until the holder resubscribes (slot reuse) or someone revokes. Conservative but O(1) and deterministic.
 
-**Q2 — `settle_expired` (§3).** The issue's function list has no way to pay the seller for a term that ends by natural expiry (no renew, no revoke). I recommend adding permissionless `settle_expired` (anyone can trigger; escrow precedent: `execute_upgrade`). Without it, value leaks in custody forever. Approve the extra function?
+**Q2 — `settle_expired` (§3).** APPROVED: permissionless `settle_expired(buyer, dataset_id)` ships in stage 1 so sellers get paid on natural expiry without buyer action.
 
-**Q3 — `get_pass` returns `Option` instead of panicking.** Deviates from escrow's panicking getter; right call for a polled UI read. OK?
+**Q3 — `get_pass` returns `Option`.** APPROVED.
 
-**Q4 — No pause/circuit-breaker on v1 of the pass contract.** Escrow has pause + rate limits. For v1 I propose shipping WITHOUT them (smaller audit surface, funds flows are bounded per-term) and adding pause in a fast-follow if you want parity. Or should pause be in stage 1?
+**Q4 — Pause/circuit-breaker.** RESOLVED: v1 ships WITHOUT pause/circuit-breaker. Filed as a fast-follow; not blocking this PR. Consequence for the error enum: no `Paused` code; enum gains `NotExpired = 16` (settle_expired before expiry) and `NothingToSettle = 17` (settle on an already-settled pass), which the original numbering did not anticipate.

@@ -1,6 +1,6 @@
 name: Contract Fuzz
 
-# Property-based invariant suite for contracts/hazina-escrow.
+# Property-based invariant suite for every contract under contracts/.
 # Specification: docs/INVARIANTS.md. Runbook: docs/FUZZING.md.
 
 on:
@@ -36,17 +36,21 @@ env:
 jobs:
   # ── Deterministic gate ────────────────────────────────────────────────────────
   gate:
-    name: Contract Gate Tests
+    name: Contract Gate Tests (${{ matrix.contract }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        contract: [hazina-escrow, hazina-access-pass]
     defaults:
       run:
-        working-directory: contracts/hazina-escrow
+        working-directory: contracts/${{ matrix.contract }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: contracts/hazina-escrow
+          workspaces: contracts
 
       # No feature flag: the fuzz target declares `required-features`, so this
       # does not even build it. Sub-second, never flaky.
@@ -58,11 +62,15 @@ jobs:
 
   # ── Property suite ────────────────────────────────────────────────────────────
   fuzz:
-    name: Invariant Suite
+    name: Invariant Suite (${{ matrix.contract }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        contract: [hazina-escrow, hazina-access-pass]
     defaults:
       run:
-        working-directory: contracts/hazina-escrow
+        working-directory: contracts/${{ matrix.contract }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -108,8 +116,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: proptest-regressions-${{ github.run_id }}
-          path: contracts/hazina-escrow/proptest-regressions/
+          name: proptest-regressions-${{ matrix.contract }}-${{ github.run_id }}
+          path: contracts/${{ matrix.contract }}/proptest-regressions/
           if-no-files-found: ignore
           retention-days: 30
 
