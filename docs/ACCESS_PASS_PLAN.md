@@ -2,7 +2,7 @@
 
 Branch: `feature/access-pass-contract` (off `main` @ `1eabd78`, fork synced with upstream).
 Issue: Dataset Subscription Access Pass. New crate `contracts/hazina-access-pass/` plus backend and UI integration.
-Status: APPROVED. All four blocking decisions resolved (see §11). Stage 1 (contract + tests) in progress.
+Status: APPROVED. All four blocking decisions resolved (see §11). Stage 1 (contract + tests) DONE. Stage 2 (backend + UI integration) DONE — see §9 for the stage 2 completion note.
 
 ---
 
@@ -440,8 +440,18 @@ Commit 2 (if separated): `ci(contracts): include hazina-access-pass in checks, C
 4. Frontend: hook, `SubscriptionPlanCard`, `ActivePassBadge`, SellPage subscription section (+ component tests + stories + i18n).
 5. Full local gate: root `npm run lint`, `npm run format:check`, backend/frontend typecheck + tests.
 
-Commit 3: `feat(access-pass): backend client with fail-closed reads and subscription APIs`.
-Commit 4: `feat(frontend): subscription offer UI and active-pass badge`.
+Commit 3: `feat(access-pass): backend client with fail-closed reads and subscription APIs` — DONE (c4de72f).
+Commit 4: `feat(frontend): subscription offer UI and active-pass badge` — this commit.
+
+Stage 2 status: COMPLETE. Beyond the plan above, stage 2 shipped:
+- `GET /:id/plans` enriches each indexed plan with live `seatsUsed`/`seatsLeft`
+  (fail-open to `null` on seat-read failure so listings stay up).
+- Frontend: `useAccessPass` hook, `ActivePassBadge`, `SubscriptionPlanCard`,
+  SellPage "Offer a subscription" section with draft persistence, i18n for
+  en/es/fr/sw, component tests + stories.
+- Local gate: backend typecheck/lint clean, 54 access-pass tests green;
+  frontend typecheck/lint clean (2 pre-existing warnings), prettier@3.8.3
+  clean on all touched files, full vitest suite 125 passed / 6 skipped.
 
 Not in scope (explicitly): deploying either contract to testnet/mainnet, mainnet fee configuration, pause/circuit-breaker surface on the pass contract (see Q4).
 
