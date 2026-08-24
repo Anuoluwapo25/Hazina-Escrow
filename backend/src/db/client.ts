@@ -17,6 +17,8 @@ import {
   bundleComponentsSqlite,
   bundlePurchasesSqlite,
   bundlePurchaseComponentsSqlite,
+  receiptsSqlite,
+  sep10NoncesSqlite,
 } from './schema';
 
 const databaseUrl = process.env.DATABASE_URL || 'file:./sqlite.db';
@@ -47,6 +49,8 @@ const db = (() => {
         bundleComponents: bundleComponentsSqlite,
         bundlePurchases: bundlePurchasesSqlite,
         bundlePurchaseComponents: bundlePurchaseComponentsSqlite,
+        receipts: receiptsSqlite,
+        sep10Nonces: sep10NoncesSqlite,
       },
     });
     migrateSqlite(sqliteDb, { migrationsFolder: path.resolve(__dirname, '../../drizzle') });

@@ -14,6 +14,7 @@ import TermsPage from './pages/TermsPage';
 import ClaimPage from './pages/ClaimPage';
 import AdminClaimablesPage from './pages/AdminClaimablesPage';
 import SolvencyPage from './pages/SolvencyPage';
+import VerifyReceiptPage from './pages/VerifyReceiptPage';
 import { useI18n } from './i18n';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/ui/ToastProvider';
@@ -134,6 +135,14 @@ export default function App() {
               element={
                 <RouteBoundary label="Solvency">
                   <SolvencyPage />
+                </RouteBoundary>
+              }
+            />
+            <Route
+              path="/receipts/:receiptId"
+              element={
+                <RouteBoundary label="Receipt verification">
+                  <VerifyReceiptPage />
                 </RouteBoundary>
               }
             />

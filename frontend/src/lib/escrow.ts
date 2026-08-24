@@ -23,10 +23,14 @@ export interface LockResult {
  *   3. sign it in Freighter
  *   4. relay the signed transaction and return the on-chain escrow id
  */
-export async function lockFundsInEscrow(datasetId: string, amount?: number): Promise<LockResult> {
+export async function lockFundsInEscrow(
+  datasetId: string,
+  amount?: number,
+  quote?: Record<string, unknown>,
+): Promise<LockResult> {
   const buyer = await connectFreighter();
 
-  const built = await api.buildEscrowLock(buyer, datasetId, amount);
+  const built = await api.buildEscrowLock(buyer, datasetId, amount, quote);
   const signedXdr = await signWithFreighter(built.xdr);
   const submitted = await api.submitEscrowLock(signedXdr);
 
@@ -45,7 +49,9 @@ export async function confirmDelivery(escrowId: number): Promise<string> {
 
 /**
  * Buyer raises a dispute on-chain. Signs raise_dispute() with their own wallet.
- * `evidenceHash` is an optional 32-byte hex string hashing off-chain evidence.
+ * `evidenceHash` is an optional 32-byte hex string hashing off-chain evidence;
+ * when omitted the backend anchors the dispute to the delivery receipt's
+ * receipt hash (the verifiable commitment) for this escrow's transaction.
  */
 export async function raiseDispute(escrowId: number, evidenceHash?: string): Promise<string> {
   const buyer = await connectFreighter();

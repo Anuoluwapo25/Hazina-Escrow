@@ -37,8 +37,10 @@ import {
   sellerSharesToScVal,
   stringsToScVal,
   u64sToScVal,
+  arrayToScVal,
   type SellerShareInput,
 } from './scval';
+import type { Quote } from '../payments/quote.service';
 
 /** Decimals used by USDC/EURC/XLM on Stellar — amounts are i128 stroops. */
 const TOKEN_DECIMALS = 7;
@@ -169,8 +171,9 @@ export async function buildLockTx(params: {
   datasetId: string;
   tokenCode?: string;
   expirySeconds?: number;
+  quote?: Quote;
 }): Promise<{ xdr: string; contractId: string }> {
-  const { buyer, seller, amount, datasetId } = params;
+  const { buyer, seller, amount, datasetId, quote } = params;
   const tokenCode = params.tokenCode ?? 'USDC';
   const expirySeconds = params.expirySeconds ?? DEFAULT_ESCROW_EXPIRY_SECONDS;
 
@@ -196,10 +199,50 @@ export async function buildLockTx(params: {
     u64ToScVal(expirySeconds),
   ];
 
-  const tx = new StellarSdk.TransactionBuilder(buyerAccount, {
+  const txBuilder = new StellarSdk.TransactionBuilder(buyerAccount, {
     fee: StellarSdk.BASE_FEE,
     networkPassphrase: getNetworkPassphrase(),
-  })
+  });
+
+  if (quote && quote.source.asset !== quote.destination.asset) {
+    const routerId = process.env.SOROSWAP_ROUTER_ID;
+    if (!routerId) throw new Error('SOROSWAP_ROUTER_ID not configured for swap');
+    const router = new StellarSdk.Contract(routerId);
+
+    // Convert path to addresses (Assuming SACs are used)
+    const pathAddresses = quote.path.map(p => {
+      if (p === 'native') return getTokenSacAddress('XLM') as string;
+      const code = p.split(':')[0] || '';
+      return getTokenSacAddress(code) || (p.split(':')[1] as string);
+    });
+    // Add source and dest
+    const sourceCode = quote.source.asset.split(':')[0] || '';
+    const sourceAddr =
+      quote.source.asset === 'native'
+        ? (getTokenSacAddress('XLM') as string)
+        : getTokenSacAddress(sourceCode) || (quote.source.asset.split(':')[1] as string);
+
+    const destCode = quote.destination.asset.split(':')[0] || '';
+    const destAddr =
+      quote.destination.asset === 'native'
+        ? (getTokenSacAddress('XLM') as string)
+        : getTokenSacAddress(destCode) || (quote.destination.asset.split(':')[1] as string);
+
+    const fullPath = [sourceAddr, ...pathAddresses, destAddr].filter(Boolean) as string[];
+
+    const swapArgs = [
+      i128ToScVal(toStroops(parseFloat(quote.source.maxAmount))), // amount_in
+      i128ToScVal(toStroops(parseFloat(quote.destination.amount))), // amount_out_min
+      arrayToScVal(fullPath.map(p => addressToScVal(p))), // path
+      addressToScVal(buyer), // to
+      u64ToScVal(Math.floor(Date.now() / 1000) + 300), // deadline
+    ];
+
+    // We'll use swap_exact_tokens_for_tokens to provide the exact amount_in and expect at least amount_out_min.
+    txBuilder.addOperation(router.call('swap_exact_tokens_for_tokens', ...swapArgs));
+  }
+
+  const tx = txBuilder
     .addOperation(contract.call('lock', ...args))
     .setTimeout(300)
     .build();

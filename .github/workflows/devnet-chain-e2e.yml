@@ -1,0 +1,350 @@
+name: Devnet Chain E2E
+
+# On-chain end-to-end suite against an ephemeral local Stellar network.
+#
+# Deliberately NOT in the fast PR lane. It boots stellar-core + Horizon + RPC in
+# Docker and executes real transactions, which costs minutes rather than seconds.
+# Running it on every push would tax every contributor for a change that cannot
+# touch the chain.
+#
+# It runs when:
+#   • a PR is labelled `chain-e2e` (or is already labelled and gets pushed to)
+#   • the escrow contract or the devnet tooling itself changes on main
+#   • nightly, on a schedule
+#   • manually, via workflow_dispatch — including the 10-run soak
+#
+# Docs: docs/DEVNET.md
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'scripts/devnet/**'
+      - 'test/chain/**'
+      - 'docker-compose.devnet.yml'
+      - 'vitest.chain.config.ts'
+      - '.github/workflows/devnet-chain-e2e.yml'
+  schedule:
+    # 03:30 UTC daily, half an hour after contract-fuzz so they do not contend.
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Consecutive suite runs (10 = the pre-merge flake gate)'
+        required: false
+        default: '1'
+
+concurrency:
+  group: devnet-chain-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Off the default 8000 to avoid colliding with anything else on the runner.
+  DEVNET_PORT: 8000
+
+jobs:
+  # ── Gate tests ────────────────────────────────────────────────────────────────
+  # Deterministic, offline, ~2s. Runs first so a broken guard or a determinism
+  # regression fails in seconds instead of after a five-minute Docker boot.
+  gate:
+    name: Devnet Gate Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Gate tests
+        run: npm run test:devnet
+
+  # ── On-chain e2e ──────────────────────────────────────────────────────────────
+  chain-e2e:
+    name: On-chain E2E
+    needs: gate
+    # Only when explicitly asked for. A PR opts in with the `chain-e2e` label;
+    # main, schedule and manual dispatch always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'chain-e2e')
+    runs-on: ubuntu-latest
+    # The issue is explicit: this is a blocking job, not advisory.
+    continue-on-error: false
+    # Budget is ~10 minutes; the ceiling is generous so a slow runner reports a
+    # real failure rather than a bare cancellation.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      # Caches ~/.cargo and contracts/hazina-escrow/target. This is the single
+      # biggest lever on runtime: a cold wasm build is ~60s, a warm one is ~2s.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/hazina-escrow
+          key: devnet-wasm
+
+      # Second cache layer, on the built artifact itself. Keyed on the contract
+      # source + manifest, so an unrelated commit reuses the wasm outright and
+      # skips cargo altogether.
+      - name: Cache built contract wasm
+        id: wasm-cache
+        uses: actions/cache@v4
+        with:
+          path: contracts/hazina-escrow/target/wasm32v1-none/release/hazina_escrow.wasm
+          key: >-
+            hazina-escrow-wasm-${{ runner.os }}-${{
+              hashFiles('contracts/hazina-escrow/src/**', 'contracts/hazina-escrow/Cargo.toml',
+                        'contracts/hazina-escrow/Cargo.lock')
+            }}
+
+      - name: Pre-pull the pinned quickstart image
+        # Pulled in its own step so image-download time is visible in the log and
+        # does not silently inflate the "provision" measurement below.
+        run: |
+          IMAGE=$(grep -oP 'image:\s*\K\S+' docker-compose.devnet.yml | head -1)
+          echo "Pulling $IMAGE"
+          docker pull "$IMAGE"
+
+      - name: Install root dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build contract wasm
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo build --manifest-path contracts/hazina-escrow/Cargo.toml \
+            --release --target wasm32v1-none --locked
+
+      - name: Boot and provision the devnet
+        id: provision
+        env:
+          # The wasm is already built (or restored from cache) by this point.
+          DEVNET_SKIP_BUILD: 'true'
+        run: |
+          START=$(date +%s)
+          npm run devnet
+          echo "seconds=$(( $(date +%s) - START ))" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the devnet is the local one
+        # Belt-and-braces on top of the in-process guard: fail loudly if anything
+        # other than the standalone network ended up being provisioned.
+        run: |
+          npm run devnet:status
+          PASSPHRASE=$(curl -s "http://localhost:${DEVNET_PORT}/" | jq -r .network_passphrase)
+          echo "network passphrase: $PASSPHRASE"
+          if [ "$PASSPHRASE" != "Standalone Network ; February 2017" ]; then
+            echo "::error::Refusing to continue — not the local devnet ($PASSPHRASE)"
+            exit 1
+          fi
+
+      - name: Run on-chain e2e suite
+        id: suite
+        run: |
+          RUNS="${{ github.event.inputs.runs || '1' }}"
+          START=$(date +%s)
+          for i in $(seq 1 "$RUNS"); do
+            echo "::group::chain e2e run $i/$RUNS"
+            npm run e2e:chain
+            echo "::endgroup::"
+          done
+          echo "seconds=$(( $(date +%s) - START ))" >> "$GITHUB_OUTPUT"
+          echo "runs=$RUNS" >> "$GITHUB_OUTPUT"
+
+      - name: Report runtime
+        if: always()
+        run: |
+          PROVISION="${{ steps.provision.outputs.seconds || 0 }}"
+          SUITE="${{ steps.suite.outputs.seconds || 0 }}"
+          RUNS="${{ steps.suite.outputs.runs || 0 }}"
+          TOTAL=$(( PROVISION + SUITE ))
+          {
+            echo "## Devnet chain e2e"
+            echo ""
+            echo "| stage | seconds |"
+            echo "| --- | ---: |"
+            echo "| provision devnet | ${PROVISION} |"
+            echo "| e2e suite (${RUNS} run(s)) | ${SUITE} |"
+            echo "| **total** | **${TOTAL}** |"
+            echo ""
+            if [ "$TOTAL" -gt 600 ]; then
+              echo "⚠️ Over the ~10 minute budget (${TOTAL}s)."
+            else
+              echo "✅ Within the ~10 minute budget (${TOTAL}s)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "total=${TOTAL}" >> "$GITHUB_ENV"
+
+      - name: Comment runtime on the PR
+        # Reports the budget back into the PR, as the issue asks.
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const provision = Number('${{ steps.provision.outputs.seconds || 0 }}');
+            const suite = Number('${{ steps.suite.outputs.seconds || 0 }}');
+            const runs = '${{ steps.suite.outputs.runs || 0 }}';
+            const total = provision + suite;
+            const ok = total <= 600;
+            const body = [
+              '### Devnet chain e2e',
+              '',
+              `| stage | seconds |`,
+              `| --- | ---: |`,
+              `| provision devnet | ${provision} |`,
+              `| e2e suite (${runs} run(s)) | ${suite} |`,
+              `| **total** | **${total}** |`,
+              '',
+              ok
+                ? `✅ Within the ~10 minute budget (${total}s).`
+                : `⚠️ Over the ~10 minute budget (${total}s).`,
+              '',
+              '<sub>Reproduce locally: `npm run devnet && npm run e2e:chain`</sub>',
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.startsWith('### Devnet chain e2e'),
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Devnet logs on failure
+        if: failure()
+        run: |
+          echo "::group::devnet container logs"
+          docker compose -f docker-compose.devnet.yml -p hazina-devnet logs --tail 300 stellar-devnet || true
+          echo "::endgroup::"
+          npm run devnet:status || true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chain-e2e-results
+          path: |
+            test-results/
+            devnet.accounts.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: npm run devnet:down || true
+
+  # ── Flake gate ────────────────────────────────────────────────────────────────
+  # "The suite must pass 10 consecutive runs before merge. Flaky chain tests are
+  # worse than no chain tests." Runs nightly and on demand. All 10 runs execute
+  # against one devnet: reprovisioning between runs would test provisioning, not
+  # the suite's stability, and the tests assert on balance DELTAS so accumulated
+  # ledger state is exactly the condition they must survive.
+  soak:
+    name: Flake Gate (10 consecutive runs)
+    needs: gate
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/hazina-escrow
+          key: devnet-wasm
+
+      - name: Install root dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build contract wasm
+        run: |
+          cargo build --manifest-path contracts/hazina-escrow/Cargo.toml \
+            --release --target wasm32v1-none --locked
+
+      - name: Boot and provision the devnet
+        env:
+          DEVNET_SKIP_BUILD: 'true'
+        run: npm run devnet
+
+      - name: 10 consecutive runs
+        run: |
+          PASSED=0
+          FAILED=0
+          for i in $(seq 1 10); do
+            echo "::group::soak run $i/10"
+            START=$(date +%s)
+            if npm run e2e:chain; then
+              PASSED=$((PASSED + 1))
+              echo "run $i: PASS ($(( $(date +%s) - START ))s)"
+            else
+              FAILED=$((FAILED + 1))
+              echo "::error::soak run $i FAILED"
+            fi
+            echo "::endgroup::"
+          done
+          {
+            echo "## Flake gate"
+            echo ""
+            echo "- passed: **${PASSED}/10**"
+            echo "- failed: **${FAILED}/10**"
+            echo ""
+            if [ "$FAILED" -eq 0 ]; then
+              echo "✅ 10 consecutive runs passed."
+            else
+              echo "❌ The suite is flaky. Flaky chain tests are worse than no chain tests — fix before merge."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$FAILED" -eq 0 ]
+
+      - name: Devnet logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.devnet.yml -p hazina-devnet logs --tail 300 stellar-devnet || true
+
+      - name: Tear down
+        if: always()
+        run: npm run devnet:down || true

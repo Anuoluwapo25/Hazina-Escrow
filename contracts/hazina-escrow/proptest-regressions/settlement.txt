@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c76df7fcf8baf7b94391a86fab12a106451a906eb936bf993c3a1c48631aead3 # shrinks to amount = 10000, fee_bps = 0, attempts = [Release]
+cc 2f70545c63ffa1ff2aaeb95885f5d9fc6f2c4a28af944f99aaa7e29cbc179ce9 # shrinks to amount = 10000, fee_bps = 0, route = 0
+cc cf9e5e3f13ed54d30237cc507e75a9e4685373845998f65473eb1b570c71a41f # shrinks to amount = 10000, fee_bps = 0, favour_buyer = false
+cc 416e049cf9b4a23e068fff7d654f582b7efcc8841d3879fcc999a9e4ed0ef4ab # shrinks to amounts = [10000, 10000], fee_bps = 0, target = 0, expiry = 1

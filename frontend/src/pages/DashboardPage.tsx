@@ -25,6 +25,7 @@ import {
   Trash2,
   Wallet,
   Layers,
+  AlertCircle,
 } from 'lucide-react';
 
 import {
@@ -40,6 +41,7 @@ import {
 } from '../lib/api';
 
 import { useCountUp } from '../hooks/useCountUp';
+import { useStellarAuth } from '../hooks/useStellarAuth';
 import { formatTimeAgo, formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
 import { Link } from 'react-router-dom';
 import {
@@ -175,6 +177,7 @@ function buildChartData(transactions: Transaction[], locale: string) {
 
 export default function DashboardPage() {
   const { locale, t } = useI18n();
+  const { isAuthenticated: isSellerAuthenticated } = useStellarAuth();
   const [datasets, setDatasets] = useState<DatasetMeta[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -511,6 +514,13 @@ export default function DashboardPage() {
             {t('common.actions.listNewDataset')}
           </Link>
         </div>
+
+        {!isSellerAuthenticated && (
+          <div className="flex items-center gap-3 mb-8 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-sm font-body">
+            <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+            <span>{t('dashboard.sellerSignInBanner')}</span>
+          </div>
+        )}
 
         {/* Wallet filter */}
         {uniqueWallets.length > 1 && (
