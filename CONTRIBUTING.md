@@ -7,6 +7,7 @@ Hazina is a Web3 data marketplace on Stellar — data sellers list on-chain inte
 ## Table of Contents
 
 - [Quick Setup](#quick-setup)
+- [Working on On-Chain Issues](#working-on-on-chain-issues)
 - [Project Structure](#project-structure)
 - [Branch & Commit Conventions](#branch--commit-conventions)
 - [Code Quality Standards](#code-quality-standards)
@@ -22,12 +23,13 @@ Hazina is a Web3 data marketplace on Stellar — data sellers list on-chain inte
 
 ### Prerequisites
 
-| Tool | Version |
-|------|---------|
-| Node.js | 20+ |
-| npm | 10+ |
-| Rust | 1.75+ (for contract work) |
-| Stellar CLI (`stellar`) | latest (for contract work) |
+| Tool                    | Version                          |
+| ----------------------- | -------------------------------- |
+| Node.js                 | 20+ (22.6+ for the local devnet) |
+| npm                     | 10+                              |
+| Rust                    | 1.75+ (for contract work)        |
+| Stellar CLI (`stellar`) | latest (for contract work)       |
+| Docker                  | 20.10+ (for the local devnet)    |
 
 ### 1. Clone and install
 
@@ -75,6 +77,80 @@ cd contracts/hazina-escrow && cargo test
 ```
 
 All tests must pass before opening a PR.
+
+### SEP-10 seller authentication ("Sign in with Stellar")
+
+Sellers authenticate with a wallet-signed SEP-10 challenge instead of the shared `API_KEY`. The backend issues a challenge at `GET /api/v1/auth?account=<wallet>` (advertised in `/.well-known/stellar.toml` as `WEB_AUTH_ENDPOINT`), the frontend signs it with Freighter, and `POST /api/v1/auth` returns a short-lived seller JWT that is held in memory and attached as the Bearer token for seller-scoped endpoints.
+
+- **Modes** (`AUTH_MODE`): `legacy` (default, shared API key), `sep10` (wallet only), `both` (either).
+- **Required for `sep10`/`both`**: `WEB_AUTH_SIGNING_KEY` (the web-auth keypair secret; its public key becomes the toml `SIGNING_KEY`), `WEB_AUTH_JWT_SECRET` (HS256 secret for the seller JWT), and optionally `WEB_AUTH_DOMAIN` (defaults to `PUBLIC_BASE_URL` host, then `hazina-escrow.app`). `SEP10_CHALLENGE_TTL_SECONDS` / `SEP10_JWT_TTL_SECONDS` default to 300/900.
+- **Backend layout**: the SDK-dependent logic lives in `backend/src/auth/sep10.service.ts`; the pure crypto (JWT) in `sep10.jwt.ts`; config in `sep10.config.ts`; routes in `sep10.router.ts`; the single-use nonce store in `nonce.store.ts` (with a startup sweeper). The seller-auth middleware is `backend/src/common/auth.middleware.ts` and is intentionally SDK-free so the shared-key test suite still mocks `@stellar/stellar-sdk` to `{ StrKey }`.
+- **Frontend**: the browser flow is `frontend/src/lib/sep10.ts` (challenge → Freighter sign → verify), the in-memory session store is `sellerAuth.ts`, the React binding is `hooks/useStellarAuth.ts`, and the Navbar runs sign-in automatically after connecting a wallet. `VITE_API_KEY` is optional.
+- **Testing**: SEP-10 features ship with gate tests (challenge nonce, verify/replay, JWT, middleware scoping, router, frontend store/flow) plus `backend/src/auth/sep10.interop.test.ts`, which drives our endpoints with the official `@stellar/stellar-sdk` `WebAuth` client to prove spec compatibility.
+
+---
+
+## Working on On-Chain Issues
+
+**If your issue touches payments, escrow, payouts, or receipts, do not go looking
+for testnet XLM.** Boot a private Stellar network instead:
+
+```bash
+npm run devnet
+```
+
+One command starts a local network, deploys the escrow contract, issues a test
+USDC asset, funds buyer/seller/admin/arbitrator accounts, seeds the marketplace,
+and writes a ready `.env.devnet`. No testnet faucet, no personal keys, no manual
+account provisioning. Every contributor gets the same addresses and the same
+contract id.
+
+```bash
+npm run devnet          # boot + provision (~6s once the image is pulled)
+cp .env.devnet backend/.env
+npm run dev             # the backend now talks to a real chain
+```
+
+### Prove it works
+
+```bash
+npm run e2e:chain
+```
+
+Sixteen on-chain tests: lock → deliver → release with the 95/5 split asserted
+from real ledger balances, refund, dispute → resolve, a payout to a
+trustline-less account, and a double-spend attempt. Every assertion reads
+authoritative on-chain state, never an API response body.
+
+### In your PR
+
+Add the **`chain-e2e`** label to run the on-chain suite in CI. It is not in the
+fast PR lane — it boots Docker and executes real transactions, so it only runs
+when asked. Reviewers can reproduce your change locally with:
+
+```bash
+npm run devnet && npm run e2e:chain
+```
+
+which is a great deal better than "trust the screenshot".
+
+### Other commands
+
+| Command                 | What it does                                     |
+| ----------------------- | ------------------------------------------------ |
+| `npm run devnet:status` | Is it up? Which network? What balances?          |
+| `npm run devnet:reset`  | Destroy and reprovision from zero                |
+| `npm run devnet:down`   | Stop and remove everything                       |
+| `npm run test:devnet`   | Gate tests for the devnet tooling (offline, ~2s) |
+
+Full guide, account table and troubleshooting (port conflicts, Docker memory,
+stale volumes): **[docs/DEVNET.md](docs/DEVNET.md)**.
+
+> The devnet cannot touch public testnet or mainnet. A guard rejects any
+> non-local network passphrase or endpoint before anything is signed.
+
+Demo mode still exists and is still the right choice for frontend and AI issues
+that never touch Stellar.
 
 ---
 
@@ -155,7 +231,7 @@ async function getDataset(id) {
 
 // Good
 async function getDataset(id: string): Promise<Dataset | undefined> {
-  return readStore().datasets.find((d) => d.id === id);
+  return readStore().datasets.find(d => d.id === id);
 }
 ```
 
@@ -244,7 +320,7 @@ const sellerAmount = dataset.pricePerQuery * (1 - PLATFORM_FEE_RATE);
 - **No `console.log` in committed code.** Use the `logger` (pino) instead.
 - **No hardcoded secrets, keys, or addresses.** All config comes from environment variables via `.env`.
 - **No commented-out code.** Delete it — git history preserves the past.
-- **Write self-documenting names.** Comments should explain *why*, not *what*.
+- **Write self-documenting names.** Comments should explain _why_, not _what_.
 
 ---
 
@@ -349,25 +425,27 @@ Aim for PRs under 400 lines changed. Large PRs are hard to review and more likel
 
 ## Issue Labels Explained
 
-| Label | Meaning |
-|-------|---------|
-| `good first issue` | Well-scoped, isolated, good for newcomers |
-| `bug` | Something that is broken or incorrect |
-| `enhancement` | New capability or improvement |
-| `security` | Security-sensitive change — discuss in issue before coding |
-| `infrastructure` | CI, Docker, deployment, env config |
-| `tests` | Adding or fixing tests |
-| `frontend` | React/Vite/UI changes only |
-| `backend` | Express/Node.js changes only |
-| `contract` | Soroban Rust contract changes |
-| `ai` | Claude API or research agent changes |
-| `database` | Storage layer changes |
-| `blocked` | Waiting on another issue or external dependency |
+| Label              | Meaning                                                    |
+| ------------------ | ---------------------------------------------------------- |
+| `good first issue` | Well-scoped, isolated, good for newcomers                  |
+| `bug`              | Something that is broken or incorrect                      |
+| `enhancement`      | New capability or improvement                              |
+| `security`         | Security-sensitive change — discuss in issue before coding |
+| `infrastructure`   | CI, Docker, deployment, env config                         |
+| `tests`            | Adding or fixing tests                                     |
+| `frontend`         | React/Vite/UI changes only                                 |
+| `backend`          | Express/Node.js changes only                               |
+| `contract`         | Soroban Rust contract changes                              |
+| `ai`               | Claude API or research agent changes                       |
+| `database`         | Storage layer changes                                      |
+| `blocked`          | Waiting on another issue or external dependency            |
 
 ---
 
 ## Getting Help
 
 - Open a **Discussion** on GitHub for questions about architecture or approach before writing code.
-- Tag `@Anuoluwapo25` if you're stuck on Stellar testnet setup or the x402 payment flow.
+- Tag `@Anuoluwapo25` if you're stuck on the x402 payment flow.
+- For anything on-chain, use the local devnet (`npm run devnet`) rather than
+  provisioning testnet accounts by hand — see [docs/DEVNET.md](docs/DEVNET.md).
 - Demo mode works entirely without a Stellar wallet — use it for all frontend and AI-related issues.

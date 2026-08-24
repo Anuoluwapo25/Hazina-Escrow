@@ -20,8 +20,13 @@ vi.mock('../../common/storage', async importOriginal => {
   return {
     ...actual,
     getDataset: vi.fn(),
+    getTransactionByEscrowId: vi.fn(),
   };
 });
+
+vi.mock('../../receipts/receipt.service', () => ({
+  getReceiptByTxHash: vi.fn(),
+}));
 
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
@@ -38,6 +43,8 @@ import {
 } from '../../lib/escrow.client';
 import { getDataset } from '../../common/storage';
 import type { Dataset } from '../../common/storage';
+import { getTransactionByEscrowId } from '../../common/storage';
+import { getReceiptByTxHash } from '../../receipts/receipt.service';
 
 const SELLER = `G${'A'.repeat(55)}`;
 const BUYER = `G${'B'.repeat(55)}`;
@@ -179,6 +186,73 @@ describe('escrow.router', () => {
       expect(res.status).toBe(200);
       expect(buildRaiseDisputeTx).toHaveBeenCalledWith(
         expect.objectContaining({ buyer: BUYER, escrowId: 3, evidenceHash: expect.any(Buffer) }),
+      );
+    });
+
+    it('defaults the evidence hash to the delivery receipt hash when omitted', async () => {
+      vi.mocked(buildRaiseDisputeTx).mockResolvedValue({ xdr: 'dispute-xdr' });
+      vi.mocked(getTransactionByEscrowId).mockResolvedValue({
+        id: 'tx-1',
+        datasetId: 'ds-1',
+        txHash: 'tx-escrow',
+        buyerWallet: BUYER,
+        amount: 1,
+        timestamp: new Date().toISOString(),
+        escrowId: 3,
+      } as never);
+      vi.mocked(getReceiptByTxHash).mockResolvedValue({
+        id: 'rcpt_1',
+        datasetId: 'ds-1',
+        buyer: BUYER,
+        seller: SELLER,
+        amount: 1,
+        paymentToken: 'USDC',
+        txHash: 'tx-escrow',
+        leafHash: '11'.repeat(32),
+        receiptHash: 'cd'.repeat(32),
+        anchorMode: 'direct',
+        anchorStatus: 'NOT_ANCHORED_YET',
+        deliveredAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as never);
+
+      const res = await request(app)
+        .post('/api/v1/payments/escrow/dispute/build')
+        .send({ buyer: BUYER, escrowId: 3 });
+
+      expect(res.status).toBe(200);
+      expect(getTransactionByEscrowId).toHaveBeenCalledWith(3);
+      expect(getReceiptByTxHash).toHaveBeenCalledWith('tx-escrow');
+      expect(buildRaiseDisputeTx).toHaveBeenCalledWith(
+        expect.objectContaining({
+          buyer: BUYER,
+          escrowId: 3,
+          evidenceHash: Buffer.from('cd'.repeat(32), 'hex'),
+        }),
+      );
+    });
+
+    it('falls back to no evidence hash when there is no receipt', async () => {
+      vi.mocked(buildRaiseDisputeTx).mockResolvedValue({ xdr: 'dispute-xdr' });
+      vi.mocked(getTransactionByEscrowId).mockResolvedValue({
+        id: 'tx-2',
+        datasetId: 'ds-1',
+        txHash: 'tx-no-receipt',
+        buyerWallet: BUYER,
+        amount: 1,
+        timestamp: new Date().toISOString(),
+        escrowId: 4,
+      } as never);
+      vi.mocked(getReceiptByTxHash).mockResolvedValue(undefined);
+
+      const res = await request(app)
+        .post('/api/v1/payments/escrow/dispute/build')
+        .send({ buyer: BUYER, escrowId: 4 });
+
+      expect(res.status).toBe(200);
+      expect(buildRaiseDisputeTx).toHaveBeenCalledWith(
+        expect.objectContaining({ buyer: BUYER, escrowId: 4, evidenceHash: undefined }),
       );
     });
 

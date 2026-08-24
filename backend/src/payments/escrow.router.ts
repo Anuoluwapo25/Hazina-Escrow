@@ -37,7 +37,9 @@ import {
   buildConfirmDeliveryTx,
   buildRaiseDisputeTx,
 } from '../lib/escrow.client';
-import { getDataset } from '../common/storage';
+import { getDataset, getTransactionByEscrowId } from '../common/storage';
+import { getReceiptByTxHash } from '../receipts/receipt.service';
+import { verifyQuoteSignature, Quote } from './quote.service';
 
 export const escrowRouter = Router();
 
@@ -61,6 +63,16 @@ const lockBuildSchema = z.object({
     .int()
     .positive()
     .max(30 * 24 * 60 * 60)
+    .optional(),
+  quote: z
+    .object({
+      destination: z.object({ asset: z.string(), amount: z.string() }),
+      source: z.object({ asset: z.string(), maxAmount: z.string() }),
+      path: z.array(z.string()),
+      slippageBps: z.number(),
+      expiresAt: z.string(),
+      signature: z.string(),
+    })
     .optional(),
 });
 
@@ -127,6 +139,13 @@ escrowRouter.post(
       });
     }
 
+    if (req.body.quote) {
+      const isValid = verifyQuoteSignature(req.body.quote as Quote);
+      if (!isValid) {
+        return res.status(400).json({ error: 'Invalid or expired quote' });
+      }
+    }
+
     try {
       const { xdr, contractId } = await buildLockTx({
         buyer,
@@ -135,6 +154,7 @@ escrowRouter.post(
         datasetId: dataset.id,
         tokenCode: dataset.paymentToken || 'USDC',
         expirySeconds,
+        quote: req.body.quote as Quote,
       });
       return res.json({ success: true, xdr, contractId, amount: lockAmount });
     } catch (err) {
@@ -175,7 +195,12 @@ escrowRouter.post(
   },
 );
 
-// POST /escrow/dispute/build — assemble an unsigned raise_dispute() XDR
+// POST /escrow/dispute/build — assemble an unsigned raise_dispute() XDR.
+// The buyer may supply a 32-byte evidence hash; when omitted, the delivery
+// receipt's receipt hash is used (via the escrow's transaction) so the
+// dispute is anchored to the same verifiable commitment a receipt page or
+// the offline CLI can prove. Falls back to a zero hash only when there is
+// neither an explicit hash nor a receipt.
 escrowRouter.post(
   '/escrow/dispute/build',
   validateBody(buyerCallSchema),
@@ -183,10 +208,22 @@ escrowRouter.post(
     if (!ensureContract(res)) return;
     const { buyer, escrowId, evidenceHash } = req.body as z.infer<typeof buyerCallSchema>;
     try {
+      let evidence = evidenceHash ? Buffer.from(evidenceHash, 'hex') : undefined;
+
+      if (!evidence) {
+        const tx = await getTransactionByEscrowId(escrowId);
+        if (tx?.txHash) {
+          const receipt = await getReceiptByTxHash(tx.txHash);
+          if (receipt) {
+            evidence = Buffer.from(receipt.receiptHash, 'hex');
+          }
+        }
+      }
+
       const { xdr } = await buildRaiseDisputeTx({
         buyer,
         escrowId,
-        evidenceHash: evidenceHash ? Buffer.from(evidenceHash, 'hex') : undefined,
+        evidenceHash: evidence,
       });
       return res.json({ success: true, xdr });
     } catch (err) {

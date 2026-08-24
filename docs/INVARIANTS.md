@@ -272,11 +272,13 @@ release path (I1), and it overrides the missing buyer confirmation.
 ### I22 — the admin surface rejects everyone else
 
 `pause`, `unpause`, `set_default_fee` / `set_fee` / `update_fee`,
-`set_dataset_fee`, `clear_dataset_fee`, `set_treasury`, `transfer_admin` /
-`set_admin`, `upgrade`, `set_whitelist_enforced`, `set_address_whitelisted`,
+`set_dataset_fee`, `clear_dataset_fee`, `schedule_set_treasury` / `execute_set_treasury` / `cancel_set_treasury`,
+`schedule_admin_change` / `accept_admin` / `cancel_admin_change`,
+
+`schedule_upgrade` / `execute_upgrade` / `cancel_upgrade`, `set_whitelist_enforced`, `set_address_whitelisted`,
 `set_address_blacklisted`, `set_max_escrow_amount`,
 `set_max_escrows_per_ledger`, `set_arbitrator`, `release`, `release_multi`,
-`refund` and `emergency_withdraw` all require the stored admin.
+`schedule_emergency_withdraw` / `execute_emergency_withdraw` / `cancel_emergency_withdraw` all require the stored admin.
 `resolve_dispute` requires the arbitrator.
 
 > `state_machine::admin_surface_rejects_non_admin_callers`,
@@ -286,7 +288,7 @@ release path (I1), and it overrides the missing buyer confirmation.
 
 While paused: `lock`, `lock_multi`, `release`, `release_multi` and `refund`
 fail; `get_escrow`, `get_escrow_count` and the config getters still work.
-`emergency_withdraw` requires the _paused_ state.
+`emergency_withdraw` requires the _paused_ state AND the timelock to have elapsed.
 
 > `state_machine::pause_blocks_writes_and_leaves_reads_working`
 
@@ -305,6 +307,10 @@ silently, but they are **not** claimed to be desirable.
 | A4  | `lock_multi` does not call `assert_valid_parties`, so a buyer may be their own seller in a batch — `lock` forbids it.                                                                  | `lib.rs::lock_multi`      |
 | A5  | `lock_multi` has no expiry parameter; every escrow it creates gets a fixed 1-hour deadline.                                                                                            | `lib.rs::lock_multi`      |
 | A6  | `refund_one` clears `disputed` on refund, but `release_disputed_one` clears it _and_ forces `buyer_confirmed = true`.                                                                  | `lib.rs`                  |
+| A7  | **Emergency withdraw now requires both the paused flag _and_ the timelock to have elapsed**, so a fully compromised admin key cannot instantly drain all funds — there is a observable window. | `lib.rs::schedule_emergency_withdraw` |
+| A8  | **Upgrade now requires the timelock to have elapsed**, so a malicious admin cannot instantly swap the contract WASM without observation.                                                   | `lib.rs::schedule_upgrade` |
+| A9  | **Admin change is now two-step**: proposer schedules, candidate must `accept_admin` with their own signature. A typo'd or hostile address cannot take over unilaterally.               | `lib.rs::schedule_admin_change` |
+| A10 | **Timelock delay itself is timelocked**: changing `MIN_TIMELOCK_DELAY_LEDGERS` or `DEFAULT_TIMELOCK_DELAY_LEDGERS` requires the current delay to have elapsed first.                  | `lib.rs::schedule_set_timelock_delay` |
 
 ---
 
@@ -370,3 +376,110 @@ Guidance: treat backend figures as display values, and the contract's integer
 result as authoritative for settlement. Never reconcile a payout against a
 backend-computed number without allowing the 501-stroop budget. See
 [`FUZZING.md`](FUZZING.md) for regenerating the fixture.
+
+---
+
+# Seller bond contract invariants
+
+The properties that must hold for **any** input to `contracts/hazina-seller-bond`.
+
+Every invariant below carries an ID (`B1`, `B2`, …) and the property that
+enforces it. Run the suite:
+
+```bash
+cd contracts/hazina-seller-bond
+cargo test --features fuzz-tests --test fuzz
+```
+
+See `docs/FUZZING.md` for the runbook.
+
+## Vocabulary
+
+| Term         | Meaning                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------- |
+| stroop       | Smallest indivisible token unit. All contract math is in stroops.                                       |
+| bps          | Basis points. `MAX_BASIS_POINTS = 10_000` = 100 %.                                                      |
+| `staked`     | Total USDC deposited by a seller via `stake`.                                                           |
+| `cut`        | `min(staked, max(1, staked * bps / MAX_BASIS_POINTS))` — the amount transferred to the beneficiary.     |
+| slashable    | `staked` remains fully slashable during cooldown and until actually withdrawn.                           |
+
+---
+
+## Value conservation
+
+### B1 — total value is conserved across all operations
+
+Tokens deposited via `stake` == outstanding `staked` + paid-out slashes +
+withdrawals, at every step. For every entry point, the sum of balances over
+{seller, arbitrator, beneficiary, contract} is unchanged. Every transfer is
+a move between two of those accounts.
+
+> `conservation::stake_slash_withdraw_conserves_total_value`
+> `conservation::randomised_sequence_conserves_total_value`
+
+### B2 — stake remains slashable during cooldown
+
+After `request_unstake`, `slash` still succeeds and reduces `staked`. The
+seller's funds are not protected by a pending unstake request.
+
+> `conservation::stake_slashable_during_cooldown`
+
+### B3 — withdrawal is gated by cooldown and clamped
+
+`withdraw` fails before `cooldown_ends`. After cooldown, it pays at most
+`min(pending_unstake, staked)`. A rejected call moves no value.
+
+> `conservation::withdraw_boundary_clamp`
+
+---
+
+## Slash properties
+
+### B4 — double slash on one escrow reverts with typed error
+
+The same `escrow_id` can be slashed exactly once. The second attempt reverts
+with `AlreadySlashed` (error #14) and moves nothing.
+
+> `conservation::double_slash_is_idempotent`
+
+### B5 — slash bounds are enforced everywhere
+
+`0 < bps <= MAX_SLASH_BPS` (2 000) enforced everywhere. `InvalidSlashBps`
+(error #13) rejects out-of-range values; the call moves nothing.
+
+> Gate: `test_slash_rejects_zero_bps`, `test_slash_rejects_bps_above_max`
+
+### B6 — a slash never pays more than currently staked
+
+The clamp `min(staked, max(1, raw_cut))` ensures `cut <= staked` for any
+`bps` in `(0, MAX_SLASH_BPS]`.
+
+> `conservation::slash_never_exceeds_staked`
+
+---
+
+## Tier and dispute properties
+
+### B7 — tier is a pure function of current `staked`
+
+Tier is derived, never stored. Nothing besides the current `staked` amount
+influences the tier. Slashing changes tier automatically.
+
+> `conservation::tier_depends_only_on_staked`
+> Gate: `test_tier_derived_in_get_bond`
+
+### B8 — dispute lock blocks unstake
+
+`request_unstake` fails while the escrow contract reports open disputes for
+the seller (`OpenDisputeBlocksUnstake`, error #11). Succeeds after they
+resolve. This is enforced via cross-contract read of the escrow's
+`dspt_cnt` function.
+
+> Formal: `formal_dispute_locked_stake_cannot_be_withdrawn`
+
+### B9 — failed calls move no value
+
+For every entry point, a rejected call (error or auth failure) leaves all
+balances and state unchanged.
+
+> Gate: all `#[should_panic]` tests in the gate suite

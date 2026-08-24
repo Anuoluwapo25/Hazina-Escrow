@@ -12,11 +12,15 @@ The Soroban contract now supports:
 
 ## Emergency withdrawal policy
 
-`emergency_withdraw` is an escape hatch for stuck assets and is intentionally constrained:
+`schedule_emergency_withdraw` / `execute_emergency_withdraw` / `cancel_emergency_withdraw` is an escape hatch for stuck assets and is intentionally constrained:
 
-- Only the contract admin can call it.
-- The contract must be paused first.
-- Every withdrawal emits an `emerg_wd` event with `(token, to, amount)`.
+- Only the contract admin can propose the sweep (`schedule_emergency_withdraw`).
+- The contract must be paused first — the admin's instant signal that something is wrong.
+- The sweep is constrained to the configured treasury address; an arbitrary `to` address is rejected, so even a fully compromised admin key can only ever steer funds to the treasury.
+- A mandatory timelock delay separates proposal from execution, giving buyers/sellers/observers a real window to notice a suspicious pending action (via the emitted `em_sched` event) before it takes effect.
+- Anyone may execute the sweep once the timelock has elapsed and the contract is still paused (the emergency has not been stood down).
+- The admin may cancel a proposed sweep at any time before execution.
+- Every execution emits an `em_exec` event with `(token, to, amount)`.
 
 ## Input validation
 
@@ -32,16 +36,17 @@ These checks fail before any transfer is attempted, which keeps contract state a
 
 ## Upgrades
 
-The contract exposes an admin-only `upgrade(admin, new_wasm_hash)` entrypoint that calls Soroban's built-in `update_current_contract_wasm` host function.
+The contract exposes admin-only `schedule_upgrade(admin, new_wasm_hash)` entrypoint that proposes a contract WASM swap, followed by `execute_upgrade()` (callable by anyone after the timelock has elapsed) or `cancel_upgrade(admin)` to abort. This gives all users a real window to observe a pending upgrade before it can take effect.
 
 Upgrade flow:
 
 1. Build and upload the new contract Wasm to Stellar.
 2. Capture the returned Wasm hash.
-3. Call `upgrade(admin, new_wasm_hash)` from the current admin address.
-4. Verify the deployment by re-reading the existing escrow state.
+3. Call `schedule_upgrade(admin, new_wasm_hash)` from the current admin address — the hash is now public and immutable until execution.
+4. After the timelock has elapsed, anyone may call `execute_upgrade()` to deploy the new WASM via Soroban's `update_current_contract_wasm`, or the admin may call `cancel_upgrade()` to abort.
+5. Verify the deployment by re-reading the existing escrow state.
 
-The upgrade call requires admin authentication. Non-admin callers are rejected.
+Non-admin callers are rejected at the `schedule_upgrade` step. The timelock ensures no surprise upgrades take effect without observable lead time.
 
 ## Verification scripts
 

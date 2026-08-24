@@ -41,6 +41,9 @@ export const sw: EnglishMessages = {
       copyMemo: 'Nakili memo',
       connectWallet: 'Unganisha wallet',
       disconnect: 'Tenganisha',
+      sellerSignInFailed: 'Imeshindikana kuingia kama muuzaji',
+      sellerSigningIn: 'Inaingia kama muuzaji…',
+      sellerSignedIn: 'Umeingia kama muuzaji',
     },
     labels: {
       price: 'Bei',
@@ -263,6 +266,8 @@ export const sw: EnglishMessages = {
     },
   },
   sell: {
+    sellerSignInBanner:
+      'Ingia kama muuzaji kutoka kwenye upau wa kusogeza (unganisha wallet yako) ili kuorodhesha dataset hii.',
     messages: {
       invalidJson: 'JSON si sahihi — tafadhali kagua muundo wa data yako',
       createFailed: 'Imeshindikana kuunda orodha',
@@ -343,6 +348,8 @@ export const sw: EnglishMessages = {
     },
   },
   dashboard: {
+    sellerSignInBanner:
+      'Ingia kama muuzaji kutoka kwenye upau wa kusogeza (unganisha wallet yako) ili kuona dashibodi hii.',
     eyebrow: 'Kituo cha wauzaji',
     title: 'Dashibodi',
     subtitle: 'Mapato yako ya wakati halisi na utendaji wa dataset zako.',

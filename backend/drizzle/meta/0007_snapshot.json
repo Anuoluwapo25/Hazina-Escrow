@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7255d70d-d1f3-4055-a2bf-feaedb52ed35",
+  "id": "4a8516bd-5829-42f6-9ff2-1aba452091ef",
   "prevId": "bbb3213e-8808-4e16-958d-4ef1cadcf48f",
   "tables": {
     "claimable_balances": {
@@ -128,66 +128,6 @@
             "balance_id"
           ],
           "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "dataset_embeddings": {
-      "name": "dataset_embeddings",
-      "columns": {
-        "dataset_id": {
-          "name": "dataset_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "content_hash": {
-          "name": "content_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "dims": {
-          "name": "dims",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "vector": {
-          "name": "vector",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "dataset_embeddings_content_hash_idx": {
-          "name": "dataset_embeddings_content_hash_idx",
-          "columns": [
-            "content_hash"
-          ],
-          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -611,6 +551,207 @@
             "buyer_tx_hash"
           ],
           "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "receipts": {
+      "name": "receipts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dataset_id": {
+          "name": "dataset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "buyer": {
+          "name": "buyer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "seller": {
+          "name": "seller",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payment_token": {
+          "name": "payment_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'USDC'"
+        },
+        "tx_hash": {
+          "name": "tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "leaf_hash": {
+          "name": "leaf_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "receipt_hash": {
+          "name": "receipt_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "anchor_mode": {
+          "name": "anchor_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "anchor_status": {
+          "name": "anchor_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "anchor_tx_hash": {
+          "name": "anchor_tx_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "merkle_root": {
+          "name": "merkle_root",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "merkle_index": {
+          "name": "merkle_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "merkle_proof": {
+          "name": "merkle_proof",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivered_at": {
+          "name": "delivered_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "anchored_at": {
+          "name": "anchored_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "receipts_tx_hash_unique": {
+          "name": "receipts_tx_hash_unique",
+          "columns": [
+            "tx_hash"
+          ],
+          "isUnique": true
+        },
+        "receipts_receipt_hash_unique": {
+          "name": "receipts_receipt_hash_unique",
+          "columns": [
+            "receipt_hash"
+          ],
+          "isUnique": true
+        },
+        "receipts_dataset_idx": {
+          "name": "receipts_dataset_idx",
+          "columns": [
+            "dataset_id"
+          ],
+          "isUnique": false
+        },
+        "receipts_buyer_idx": {
+          "name": "receipts_buyer_idx",
+          "columns": [
+            "buyer"
+          ],
+          "isUnique": false
+        },
+        "receipts_seller_idx": {
+          "name": "receipts_seller_idx",
+          "columns": [
+            "seller"
+          ],
+          "isUnique": false
+        },
+        "receipts_tx_hash_idx": {
+          "name": "receipts_tx_hash_idx",
+          "columns": [
+            "tx_hash"
+          ],
+          "isUnique": false
+        },
+        "receipts_receipt_hash_idx": {
+          "name": "receipts_receipt_hash_idx",
+          "columns": [
+            "receipt_hash"
+          ],
+          "isUnique": false
+        },
+        "receipts_anchor_status_idx": {
+          "name": "receipts_anchor_status_idx",
+          "columns": [
+            "anchor_status"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {},

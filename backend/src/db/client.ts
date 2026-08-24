@@ -14,6 +14,8 @@ import {
   sentinelCursorSqlite,
   sentinelAlertsSqlite,
   datasetEmbeddingsSqlite,
+  receiptsSqlite,
+  sep10NoncesSqlite,
 } from './schema';
 
 const databaseUrl = process.env.DATABASE_URL || 'file:./sqlite.db';
@@ -41,6 +43,8 @@ const db = (() => {
         sentinelCursor: sentinelCursorSqlite,
         sentinelAlerts: sentinelAlertsSqlite,
         datasetEmbeddings: datasetEmbeddingsSqlite,
+        receipts: receiptsSqlite,
+        sep10Nonces: sep10NoncesSqlite,
       },
     });
     migrateSqlite(sqliteDb, { migrationsFolder: path.resolve(__dirname, '../../drizzle') });

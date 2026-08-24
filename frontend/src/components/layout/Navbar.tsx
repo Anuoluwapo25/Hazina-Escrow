@@ -9,11 +9,14 @@ import {
   Bot,
   Wallet,
   LogOut,
+  Loader2,
 } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useCallback, useState } from 'react';
 import clsx from 'clsx';
 import { isConnected as freighterIsConnected, getPublicKey } from '@stellar/freighter-api';
 import { connectFreighter } from '../../lib/stellarWallets';
+import { useStellarAuth } from '../../hooks/useStellarAuth';
+import { useToastContext } from '../../components/ui/useToastContext';
 import { LocaleSwitcher, useI18n } from '../../i18n';
 
 const NAV_LINKS = [
@@ -38,6 +41,9 @@ export default function Navbar() {
   const { t } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [publicKey, setPublicKey] = useState<string | null>(localStorage.getItem('hazina_wallet'));
+  const [signingIn, setSigningIn] = useState(false);
+  const { isAuthenticated, signIn, signOut } = useStellarAuth();
+  const { toast } = useToastContext();
   const mobileMenuId = useId();
   const desktopWalletLabelId = useId();
 
@@ -56,16 +62,35 @@ export default function Navbar() {
       const nextPublicKey = await connectFreighter();
       setPublicKey(nextPublicKey);
       localStorage.setItem('hazina_wallet', nextPublicKey);
+
+      // After connecting, immediately run the SEP-10 sign-in so the seller is
+      // authenticated for seller-scoped endpoints. If the backend has SEP-10
+      // disabled or the wallet refuses, the connection stays (buyers need it)
+      // but the session is not created.
+      setSigningIn(true);
+      try {
+        await signIn(nextPublicKey);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Sign-in failed';
+        toast({
+          title: t('common.actions.sellerSignInFailed'),
+          description: message,
+          variant: 'error',
+        });
+      } finally {
+        setSigningIn(false);
+      }
     } catch (error) {
       console.error('Connection failed:', error);
       window.open('https://www.freighter.app/', '_blank', 'noopener,noreferrer');
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnect = useCallback(() => {
     setPublicKey(null);
     localStorage.removeItem('hazina_wallet');
-  };
+    signOut();
+  }, [signOut]);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -103,7 +128,7 @@ export default function Navbar() {
     };
 
     void verifyConnection();
-  }, [publicKey]);
+  }, [publicKey, handleDisconnect]);
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50">
@@ -148,6 +173,11 @@ export default function Navbar() {
                 <span id={desktopWalletLabelId} className="font-mono">
                   {truncateAddress(publicKey)}
                 </span>
+                {isAuthenticated && (
+                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold whitespace-nowrap">
+                    {t('common.actions.sellerSignedIn')}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={handleDisconnect}
@@ -163,10 +193,17 @@ export default function Navbar() {
               <button
                 type="button"
                 onClick={handleConnect}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-gold/30 text-gold hover:bg-gold/10 transition-all duration-200 text-sm font-medium"
+                disabled={signingIn}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-gold/30 text-gold hover:bg-gold/10 transition-all duration-200 text-sm font-medium disabled:opacity-60 disabled:cursor-wait"
               >
-                <Wallet className="w-4 h-4" aria-hidden="true" />
-                {t('common.actions.connectWallet')}
+                {signingIn ? (
+                  <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Wallet className="w-4 h-4" aria-hidden="true" />
+                )}
+                {signingIn
+                  ? t('common.actions.sellerSigningIn')
+                  : t('common.actions.connectWallet')}
               </button>
             )}
 
@@ -257,10 +294,17 @@ export default function Navbar() {
                 <button
                   type="button"
                   onClick={handleConnect}
-                  className="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-xl border border-gold/30 text-gold hover:bg-gold/10 transition-all text-sm font-medium"
+                  disabled={signingIn}
+                  className="flex items-center justify-center gap-3 w-full px-4 py-3 rounded-xl border border-gold/30 text-gold hover:bg-gold/10 transition-all text-sm font-medium disabled:opacity-60 disabled:cursor-wait"
                 >
-                  <Wallet className="w-5 h-5" aria-hidden="true" />
-                  {t('common.actions.connectWallet')}
+                  {signingIn ? (
+                    <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Wallet className="w-5 h-5" aria-hidden="true" />
+                  )}
+                  {signingIn
+                    ? t('common.actions.sellerSigningIn')
+                    : t('common.actions.connectWallet')}
                 </button>
               )}
             </div>
