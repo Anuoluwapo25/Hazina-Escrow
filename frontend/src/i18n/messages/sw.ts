@@ -339,6 +339,63 @@ export const sw: EnglishMessages = {
         '95% hutumwa kwenye wallet yako, 5% kwa jukwaa',
       ],
     },
+    subscription: {
+      toggle: 'Toa usajili',
+      help:
+        'Wanunuzi hulipa kwa kila kipindi kupata data hii kwa muda uliopangwa, ' +
+        'ukiwekwa mikataba mtandaoni. Baada ya kuchapisha, utasaini miamala moja ya Freighter kuunda mpango.',
+      priceLabel: 'Bei / kipindi (USDC)',
+      priceError: 'Bei lazima iwe zaidi ya 0',
+      seatsLabel: 'Idadi kubwa ya wateja',
+      seatsError: 'Idadi lazima iwe namba kamili angalau 1',
+      pricePresets: 'Bei za haraka:',
+      periodLabel: 'Kipindi cha malipo',
+      period: {
+        day: 'Kila siku',
+        week: 'Kila wiki',
+        month: 'Kila mwezi',
+      },
+      confirmNote:
+        'Baada ya kuchapisha utaombwa kusaini miamala ya Freighter inayounda mpango wa usajili wa ' +
+        '${price}/{period} hadi idadi uliyochagua ya wateja.',
+      previewNote: 'Usajili: ${price}/{period} · wanunuzi hadi {seats}',
+      definedSuccess: 'Mpango wa usajili umeeundwa',
+      definedFailed: 'Imechapishwa — ila mpango wa usajili haukuundwa',
+    },
+  },
+  accessPass: {
+    badge: {
+      active: 'Hai',
+      expired: 'Muda umeisha',
+      unavailable: 'Hali ya ufikiaji haipatikani',
+    },
+    card: {
+      title: 'Ufikiaji kwa usajili',
+      subscribe: 'Jiandikishe',
+      resubscribe: 'Jiandikishe tena',
+      renew: 'Pongeza muda',
+      subscribed: 'Usajili unatumika',
+      renewed: 'Usajili umepgezwa muda',
+      subscribeFailed: 'Kujiandikisha kumeshindikana',
+      renewFailed: 'Kupeza muda kumeshindikana',
+      soldOut: 'Imejaa',
+      inactive: 'Haipatikani',
+      seatsLeft: '{left} kati ya {total} viti zimebaki',
+      seatsUnknown: 'Upatikanaji wa vitihaijulikani',
+      custodyNote:
+        'Malipo hutoka kwenye wallet yako mwenyewe hadi kwenye hifadhi ya mkataba mtandaoni — Hazina kamwe haishikii fedha za wanaojiandikisha.',
+    },
+    period: {
+      day: 'kwa siku',
+      week: 'kwa wiki',
+      month: 'kwa mwezi',
+      days: 'kila {days} siku',
+    },
+    detail: {
+      includedNote: 'Usajili wako unatumika kwenye data hii.',
+      verifyPending:
+        'Inathibitisha ufikiaji wa usajili — kununua hurudi mara ukamilisho ukikamilika.',
+    },
   },
   dashboard: {
     sellerSignInBanner:
