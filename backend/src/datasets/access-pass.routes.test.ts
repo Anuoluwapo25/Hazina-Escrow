@@ -29,10 +29,9 @@ const {
 }));
 
 vi.mock('../lib/access-pass.client', async () => {
-  const actual =
-    await vi.importActual<typeof import('../lib/access-pass.client')>(
-      '../lib/access-pass.client',
-    );
+  const actual = await vi.importActual<typeof import('../lib/access-pass.client')>(
+    '../lib/access-pass.client',
+  );
   return {
     ...actual,
     hasAccess: mockHasAccess,
