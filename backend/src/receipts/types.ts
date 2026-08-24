@@ -5,12 +5,7 @@
 export type ReceiptAnchorMode = 'direct' | 'batched';
 
 export type ReceiptAnchorStatus =
-  | 'NOT_ANCHORED_YET'
-  | 'ANCHORING'
-  | 'ANCHORED'
-  | 'ANCHOR_FAILED'
-  | 'VERIFIED'
-  | 'MISMATCH';
+  'NOT_ANCHORED_YET' | 'ANCHORING' | 'ANCHORED' | 'ANCHOR_FAILED' | 'VERIFIED' | 'MISMATCH';
 
 export interface Receipt {
   id: string;

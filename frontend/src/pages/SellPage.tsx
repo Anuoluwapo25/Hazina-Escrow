@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   Upload,
   CheckCircle,
@@ -13,6 +14,7 @@ import {
   Users,
   Zap,
   Info,
+  ExternalLink,
   CalendarClock,
   ChevronDown,
 } from 'lucide-react';
@@ -37,6 +39,7 @@ interface FormState {
   description: string;
   type: string;
   pricePerQuery: string;
+  priceCurrency: 'USDC' | 'USD';
   paymentToken: 'USDC' | 'EURC' | 'XLM';
   sellerWallet: string;
   notificationEmail: string;
@@ -52,6 +55,7 @@ const INITIAL: FormState = {
   description: '',
   type: 'whale-wallets',
   pricePerQuery: '0.05',
+  priceCurrency: 'USDC',
   paymentToken: 'USDC',
   sellerWallet: '',
   notificationEmail: '',
@@ -81,13 +85,11 @@ function loadDraft(): {
     const stored: StoredDraft = JSON.parse(raw);
     const ageHours = (Date.now() - stored.timestamp) / (1000 * 60 * 60);
 
-    // Discard draft if older than 24 hours
     if (ageHours > DRAFT_EXPIRY_HOURS) {
       localStorage.removeItem(STORAGE_KEY);
       return { form: INITIAL, wasRestored: false };
     }
 
-    // Restore data but keep wallet empty for security
     const restoredForm: FormState = {
       ...INITIAL,
       ...stored.data,
@@ -104,12 +106,12 @@ function loadDraft(): {
 function saveDraft(form: FormState): void {
   try {
     const toStore: StoredDraft = {
-      // Only save non-sensitive fields
       data: {
         name: form.name,
         description: form.description,
         type: form.type,
         pricePerQuery: form.pricePerQuery,
+        priceCurrency: form.priceCurrency,
         paymentToken: form.paymentToken,
         dataText: form.dataText,
         offerSubscription: form.offerSubscription,
@@ -121,7 +123,7 @@ function saveDraft(form: FormState): void {
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
   } catch {
-    // localStorage may be unavailable in certain browser contexts
+    // ignore
   }
 }
 
@@ -150,12 +152,26 @@ export default function SellPage() {
   const [walletTouched, setWalletTouched] = useState(false);
   const [toast, setToast] = useState<ToastProps | null>(null);
 
-  // Track if we've shown the draft restored toast
   const hasShownRestoreToastRef = useRef(false);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const isFirstRenderRef = useRef(true);
 
-  // Show draft restored notification on first load
+  const needsConversion = form.priceCurrency === 'USD' && form.paymentToken !== 'USDC';
+  const priceUsdNum = parseFloat(form.pricePerQuery);
+  const priceValid = !isNaN(priceUsdNum) && priceUsdNum > 0;
+
+  const { data: convertData, isFetching: convertFetching } = useQuery({
+    queryKey: ['oracle-convert', form.priceCurrency, form.pricePerQuery, form.paymentToken],
+    queryFn: () =>
+      api.oracleConvert({
+        priceUsd: priceUsdNum,
+        paymentAsset: form.paymentToken,
+      }),
+    enabled: needsConversion && priceValid,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+
   useEffect(() => {
     if (!hasShownRestoreToastRef.current) {
       hasShownRestoreToastRef.current = true;
@@ -272,6 +288,7 @@ export default function SellPage() {
         description: form.description.trim(),
         type: form.type,
         pricePerQuery: parseFloat(form.pricePerQuery),
+        priceCurrency: form.priceCurrency,
         paymentToken: form.paymentToken,
         sellerWallet: form.sellerWallet.trim(),
         ...(form.notificationEmail.trim()
@@ -311,6 +328,13 @@ export default function SellPage() {
     }
   };
 
+  const listedPriceLabel = `${formatUSDC(Number(form.pricePerQuery), locale)} ${form.priceCurrency}`;
+  const settleLabel = convertData
+    ? `≈ ${formatUSDC(convertData.amountOut, locale)} ${form.paymentToken}`
+    : needsConversion
+      ? ''
+      : listedPriceLabel;
+
   if (success) {
     return (
       <div className="min-h-screen pt-28 pb-20 flex items-center justify-center">
@@ -325,9 +349,10 @@ export default function SellPage() {
             {t('sell.messages.listingLiveBody', { name: form.name })}
           </p>
           <p className="text-sm text-foreground-muted font-body mb-8">
-            {t('sell.messages.listingLiveRevenue', {
-              price: formatUSDC(Number(form.pricePerQuery), locale),
-            })}
+            Listed at {listedPriceLabel}
+            {settleLabel && form.priceCurrency !== form.paymentToken ? (
+              <> · settles {settleLabel}</>
+            ) : null}
           </p>
           <div className="flex gap-3 justify-center">
             <button
@@ -422,45 +447,63 @@ export default function SellPage() {
                   />
                 </div>
 
-                {/* Type + Price + Token row */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-sm font-body font-medium text-foreground-muted mb-2 flex items-center gap-2">
-                      <Zap className="w-4 h-4 text-gold" />
-                      {t('sell.form.dataType')} <span className="text-red-400">*</span>
-                    </label>
-                    <select
-                      value={form.type}
-                      onChange={set('type')}
-                      className="w-full bg-void/60 border border-border/60 rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none focus:border-gold/50 transition-colors"
-                    >
-                      {dataTypes.map(({ value, label }) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Type row */}
+                <div>
+                  <label className="text-sm font-body font-medium text-foreground-muted mb-2 flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-gold" />
+                    {t('sell.form.dataType')} <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={form.type}
+                    onChange={set('type')}
+                    className="w-full bg-void/60 border border-border/60 rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none focus:border-gold/50 transition-colors"
+                  >
+                    {dataTypes.map(({ value, label }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
+                {/* Price row */}
+                <div className="grid grid-cols-[1fr_110px_140px] gap-3 items-end">
                   <div>
                     <label className="text-sm font-body font-medium text-foreground-muted mb-2 flex items-center gap-2">
                       <DollarSign className="w-4 h-4 text-gold" />
                       {t('sell.form.pricePerQuery')} <span className="text-red-400">*</span>
                     </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      value={form.pricePerQuery}
-                      onChange={handlePriceChange}
-                      onBlur={() => setPriceTouched(true)}
-                      className={clsx(
-                        'w-full bg-void/60 border rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none transition-colors',
-                        isPriceInvalid
-                          ? 'border-red-500/50 focus:border-red-500/70'
-                          : 'border-border/60 focus:border-gold/50',
-                      )}
-                    />
+                    <div className="flex">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={form.pricePerQuery}
+                        onChange={handlePriceChange}
+                        onBlur={() => setPriceTouched(true)}
+                        className={clsx(
+                          'flex-1 bg-void/60 border rounded-l-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none transition-colors',
+                          isPriceInvalid
+                            ? 'border-red-500/50 focus:border-red-500/70'
+                            : 'border-border/60 focus:border-gold/50',
+                        )}
+                      />
+                      <select
+                        value={form.priceCurrency}
+                        onChange={e =>
+                          setForm(f => ({ ...f, priceCurrency: e.target.value as 'USDC' | 'USD' }))
+                        }
+                        className={clsx(
+                          'bg-void/60 border-y border-r rounded-r-xl px-3 py-3 text-sm font-body text-foreground focus:outline-none transition-colors',
+                          isPriceInvalid
+                            ? 'border-red-500/50 focus:border-red-500/70'
+                            : 'border-border/60 focus:border-gold/50',
+                        )}
+                      >
+                        <option value="USDC">USDC</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    </div>
                     {isPriceInvalid && (
                       <p className="text-xs text-red-400 mt-1 font-body">
                         {t('sell.form.pricePerQueryError')}
@@ -476,7 +519,7 @@ export default function SellPage() {
                     <select
                       value={form.paymentToken}
                       onChange={set('paymentToken')}
-                      className="w-full bg-void/60 border border-border/60 rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none focus:border-gold/50 transition-colors"
+                      className="w-full bg-void/60 border border-border/60 rounded-xl px-3 py-3 text-sm font-body text-foreground focus:outline-none focus:border-gold/50 transition-colors"
                     >
                       <option value="USDC">USDC</option>
                       <option value="EURC">EURC</option>
@@ -484,6 +527,49 @@ export default function SellPage() {
                     </select>
                   </div>
                 </div>
+
+                {/* Live conversion preview */}
+                {needsConversion && priceValid && (
+                  <div className="rounded-xl border border-border-gold/30 bg-gold/5 p-3">
+                    {convertFetching && !convertData ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-2 font-body">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Fetching oracle rate…
+                      </div>
+                    ) : convertData ? (
+                      <div className="space-y-1 text-sm font-body">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-2">Settlement amount</span>
+                          <span className="text-foreground font-semibold">
+                            ≈ {formatUSDC(convertData.amountOut, locale)} {form.paymentToken}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-2">
+                          <span>
+                            1 {convertData.price.base} ≈{' '}
+                            {formatUSDC(convertData.price.value, locale)} {convertData.price.quote}
+                          </span>
+                          <span>·</span>
+                          <span>Reflector, {convertData.price.ageSeconds}s old</span>
+                          <a
+                            href={`https://stellar.expert/explorer/testnet/contract/${convertData.price.sourceContract}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 text-gold hover:text-gold/80"
+                          >
+                            contract <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-red-400 font-body">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        Oracle unavailable — rate cannot be confirmed
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <p className="text-xs text-muted-2 font-body mb-2">
                     {t('sell.form.quickPricePresets')}
@@ -500,7 +586,7 @@ export default function SellPage() {
                             : 'border-border/60 text-foreground-muted hover:border-gold/40 hover:text-gold',
                         )}
                       >
-                        ${p}
+                        ${p} {form.priceCurrency}
                       </button>
                     ))}
                   </div>
@@ -801,11 +887,21 @@ export default function SellPage() {
                       <p className="text-sm text-foreground-muted font-body mb-4">
                         You are about to list{' '}
                         <span className="text-foreground font-medium">{form.name}</span> at{' '}
-                        <span className="text-gold font-semibold">
-                          ${formatUSDC(Number(form.pricePerQuery), locale)} {form.paymentToken}
-                        </span>{' '}
-                        per query. This action cannot be undone.
+                        <span className="text-gold font-semibold">{listedPriceLabel}</span> per
+                        query.
                       </p>
+                      {needsConversion && convertData && (
+                        <p className="text-xs text-muted-2 font-body mb-4 flex items-center gap-2">
+                          Settles ≈ {formatUSDC(convertData.amountOut, locale)} {form.paymentToken}{' '}
+                          · Reflector, {convertData.price.ageSeconds}s old
+                        </p>
+                      )}
+                      {needsConversion && !convertData && !convertFetching && (
+                        <p className="text-xs text-red-400 font-body mb-4 flex items-center gap-2">
+                          <AlertCircle className="w-3 h-3" />
+                          Oracle unavailable — publishing may fail
+                        </p>
+                      )}
                       {form.offerSubscription && (
                         <p className="text-xs text-amber-400 font-body mb-4 flex items-start gap-1.5">
                           <CalendarClock className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
@@ -848,9 +944,12 @@ export default function SellPage() {
                     </span>
                     <div className="text-right">
                       <p className="text-xs text-muted-2 mb-0.5">{t('common.units.perQuery')}</p>
-                      <p className="font-display font-bold text-xl text-gold">
-                        ${formatUSDC(Number(form.pricePerQuery || '0'), locale)} {form.paymentToken}
-                      </p>
+                      <p className="font-display font-bold text-xl text-gold">{listedPriceLabel}</p>
+                      {needsConversion && convertData && (
+                        <p className="text-xs text-muted-2 mt-1">
+                          ≈ {formatUSDC(convertData.amountOut, locale)} {form.paymentToken}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <h3 className="font-display font-semibold text-foreground text-lg mb-2">
@@ -868,11 +967,22 @@ export default function SellPage() {
                         : t('sell.preview.walletFallback')}
                     </span>
                   </div>
+                  {needsConversion && convertData && (
+                    <div className="mb-3 text-xs text-muted-2 font-body flex items-center justify-between">
+                      <span>Rate via Reflector · {convertData.price.ageSeconds}s old</span>
+                      <a
+                        href={`https://stellar.expert/explorer/testnet/contract/${convertData.price.sourceContract}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-0.5 text-gold hover:text-gold/80"
+                      >
+                        contract <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
                   <div className="w-full py-3 rounded-xl border border-border-gold/30 text-gold text-sm font-body font-semibold text-center">
-                    {t('sell.preview.buyLabel', {
-                      price: formatUSDC(Number(form.pricePerQuery || '0'), locale),
-                      token: form.paymentToken,
-                    })}
+                    {settleLabel || listedPriceLabel}
+                    {settleLabel && needsConversion ? ` per query` : ''}
                   </div>
                   {form.offerSubscription && (
                     <div className="mt-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs text-emerald-400 font-body">

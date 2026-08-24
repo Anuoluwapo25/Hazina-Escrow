@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import QueryModal from './QueryModal';
 import { I18nProvider } from '../../i18n';
-import { api } from '../../lib/api';
+import { api, DatasetMeta } from '../../lib/api';
 import * as env from '../../lib/env';
 import { ToastProvider } from './ToastProvider';
 
@@ -26,12 +26,14 @@ vi.mock('../../lib/stellarWallets', async () => {
   };
 });
 
-const dataset = {
+const dataset: DatasetMeta = {
   id: 'ds-query-1',
   name: 'Whale Wallet Dataset',
   description: 'Wallet and transfer intelligence',
   type: 'whale-wallets',
   pricePerQuery: 0.05,
+  priceCurrency: 'USDC',
+  paymentToken: 'USDC',
   sellerWallet: `G${'A'.repeat(55)}`,
   queriesServed: 12,
   totalEarned: 3.5,
@@ -40,7 +42,7 @@ const dataset = {
 
 function renderModal(overrides?: {
   onClose?: () => void;
-  onSuccess?: (updated: Partial<typeof dataset> & { id: string }) => void;
+  onSuccess?: (updated: Partial<DatasetMeta> & { id: string }) => void;
 }) {
   const onClose = overrides?.onClose ?? vi.fn();
   const onSuccess = overrides?.onSuccess ?? vi.fn();

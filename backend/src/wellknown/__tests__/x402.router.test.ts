@@ -43,7 +43,7 @@ describe('GET /.well-known/x402', () => {
 
   it('validates against its own published JSON Schema', async () => {
     const res = await request(buildApp()).get('/.well-known/x402');
-    const ajv = new Ajv({ strict: false });
+    const ajv = new Ajv();
     const validate = ajv.compile(x402ManifestJsonSchema);
 
     const valid = validate(res.body);
@@ -61,7 +61,7 @@ describe('GET /.well-known/x402.schema.json', () => {
 
   it('is itself a valid draft-07 JSON Schema', async () => {
     const res = await request(buildApp()).get('/.well-known/x402.schema.json');
-    const ajv = new Ajv({ strict: false });
+    const ajv = new Ajv();
     expect(() => ajv.compile(res.body)).not.toThrow();
   });
 });

@@ -27,6 +27,8 @@ const mockDataset: DatasetMeta = {
   description: 'Top 500 ETH holders with transaction patterns and risk scores',
   type: 'whale-wallets',
   pricePerQuery: 2.5,
+  priceCurrency: 'USDC',
+  paymentToken: 'USDC',
   sellerWallet: 'GAXYZ123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
   queriesServed: 1247,
   totalEarned: 2967.25,

@@ -277,6 +277,8 @@ export const DatasetMetaSchema = z.object({
   description: z.string(),
   type: z.string(),
   pricePerQuery: z.number(),
+  priceCurrency: z.enum(['USDC', 'USD']).default('USDC'),
+  paymentToken: z.enum(['USDC', 'EURC', 'XLM']).default('USDC'),
   sellerWallet: z.string().length(56),
   queriesServed: z.number(),
   totalEarned: z.number(),
@@ -640,10 +642,30 @@ export const api = {
   },
 
   initiateQuery: (id: string) =>
-    request<{ payment: { paymentAddress: string; amount: number; memo: string } }>(
-      `${getApiBaseUrl()}/query/${id}`,
-      { method: 'POST' },
-    ),
+    request<{
+      payment: {
+        paymentAddress: string;
+        amount: number;
+        amountFixed: string;
+        decimals: number;
+        currency: 'USDC' | 'XLM' | 'EURC' | 'USD';
+        memo: string;
+        expiresAt: string;
+        expiresIn: number;
+        oracle?: {
+          base: string;
+          quote: string;
+          price: number;
+          priceRaw: string;
+          decimals: number;
+          timestamp: number;
+          ageSeconds: number;
+          sourceContract: string;
+          resolvedVia: 'last' | 'twap';
+          explorerUrl: string;
+        };
+      };
+    }>(`${getApiBaseUrl()}/query/${id}`, { method: 'POST' }),
 
   getQuote: (id: string, sourceAsset: string) =>
     request<any>(
@@ -817,6 +839,7 @@ export const api = {
     description: string;
     type: string;
     pricePerQuery: number;
+    priceCurrency?: 'USDC' | 'USD';
     paymentToken?: 'USDC' | 'EURC' | 'XLM';
     sellerWallet: string;
     notificationEmail?: string;
@@ -834,6 +857,7 @@ export const api = {
       name?: string;
       description?: string;
       pricePerQuery?: number;
+      priceCurrency?: 'USDC' | 'USD';
       paymentToken?: 'USDC' | 'EURC' | 'XLM';
       notificationEmail?: string;
     },
@@ -848,6 +872,56 @@ export const api = {
     request<{ success: boolean; message: string }>(`${getApiBaseUrl()}/datasets/${id}`, {
       method: 'DELETE',
       headers: sellerAuthHeaders(),
+    }),
+
+  getOraclePrice: (params: { base: 'XLM' | 'USDC' | 'EURC' | 'USD'; quote?: 'USD' | 'USDC' }) => {
+    const searchParams = new URLSearchParams();
+    searchParams.append('base', params.base);
+    if (params.quote) searchParams.append('quote', params.quote);
+    const url = `${getApiBaseUrl()}/oracle/price?${searchParams.toString()}`;
+    return request<{
+      success: boolean;
+      base: string;
+      quote: string;
+      price: number;
+      priceRaw: string;
+      decimals: number;
+      timestamp: number;
+      ageSeconds: number;
+      sourceContract: string;
+      resolvedVia: 'lastprice' | 'twap';
+      explorerUrl: string;
+    }>(url);
+  },
+
+  oracleConvert: (params: {
+    priceUsd: number;
+    usdDecimals?: number;
+    paymentAsset: 'XLM' | 'USDC' | 'EURC' | 'USD';
+    paymentDecimals?: number;
+  }) =>
+    request<{
+      success: boolean;
+      amountIn: number;
+      amountInFixed: string;
+      amountOut: number;
+      amountOutFixed: string;
+      price: {
+        base: string;
+        quote: string;
+        value: number;
+        valueRaw: string;
+        decimals: number;
+        timestamp: number;
+        ageSeconds: number;
+        sourceContract: string;
+        resolvedVia: 'lastprice' | 'twap';
+      };
+      expiresAt: number;
+      expiresInSeconds: number;
+    }>(`${getApiBaseUrl()}/oracle/convert`, {
+      method: 'POST',
+      body: JSON.stringify(params),
     }),
 
   // ── Claimable balance payout fallback (#589) ─────────────────────────────

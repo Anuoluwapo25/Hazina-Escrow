@@ -1,0 +1,1 @@
+ALTER TABLE datasets ADD COLUMN price_currency TEXT NOT NULL DEFAULT 'USDC';

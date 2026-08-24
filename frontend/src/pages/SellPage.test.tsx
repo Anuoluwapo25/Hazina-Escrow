@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import SellPage from './SellPage';
 import { I18nProvider } from '../i18n';
 import { api } from '../lib/api';
@@ -9,6 +10,26 @@ import { ToastProvider } from '../components/ui/ToastProvider';
 vi.mock('../lib/api', () => ({
   api: {
     createDataset: vi.fn(),
+    oracleConvert: vi.fn().mockResolvedValue({
+      success: true,
+      amountIn: 0.05,
+      amountInFixed: '0.05',
+      amountOut: 0.05,
+      amountOutFixed: '0.05',
+      price: {
+        base: 'USD',
+        quote: 'USDC',
+        value: 1,
+        valueRaw: '10000000',
+        decimals: 7,
+        timestamp: Date.now() / 1000,
+        ageSeconds: 0,
+        sourceContract: 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        resolvedVia: 'lastprice' as const,
+      },
+      expiresAt: Date.now() / 1000 + 120,
+      expiresInSeconds: 120,
+    }),
   },
 }));
 
@@ -17,11 +38,16 @@ const walletError =
   'Enter a valid Stellar public key (starts with G, uses A-Z or 2-7, and is exactly 56 characters)';
 
 function renderSellPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
     <ToastProvider>
       <I18nProvider initialLocale="en">
         <MemoryRouter>
-          <SellPage />
+          <QueryClientProvider client={queryClient}>
+            <SellPage />
+          </QueryClientProvider>
         </MemoryRouter>
       </I18nProvider>
     </ToastProvider>,
@@ -160,6 +186,8 @@ describe('SellPage', () => {
       description: 'A useful dataset description',
       type: 'whale-wallets',
       pricePerQuery: 0.05,
+      priceCurrency: 'USDC',
+      paymentToken: 'USDC',
       sellerWallet: validWallet,
       queriesServed: 0,
       totalEarned: 0,
@@ -344,6 +372,8 @@ describe('SellPage', () => {
         description: 'A useful dataset description',
         type: 'whale-wallets',
         pricePerQuery: 0.05,
+        priceCurrency: 'USDC',
+        paymentToken: 'USDC',
         sellerWallet: validWallet,
         queriesServed: 0,
         totalEarned: 0,

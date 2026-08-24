@@ -107,6 +107,10 @@ export default function DatasetCard({ dataset, onBuy }: Props) {
             <p className="text-xs text-muted-2 font-body">{t('common.units.perQuery')}</p>
             <p className="text-lg font-display font-bold text-gold-gradient">
               ${formatUSDC(dataset.pricePerQuery, locale)}
+              <span className="text-xs font-medium text-2 ml-0.5 opacity-80">
+                {' '}
+                {dataset.priceCurrency ?? 'USDC'}
+              </span>
             </p>
           </div>
         </div>

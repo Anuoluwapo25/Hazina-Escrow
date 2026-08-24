@@ -39,7 +39,24 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
   const [paymentInfo, setPaymentInfo] = useState<{
     paymentAddress: string;
     amount: number;
+    amountFixed: string;
+    decimals: number;
+    currency: 'USDC' | 'XLM' | 'EURC' | 'USD';
     memo: string;
+    expiresAt: string;
+    expiresIn: number;
+    oracle?: {
+      base: string;
+      quote: string;
+      price: number;
+      priceRaw: string;
+      decimals: number;
+      timestamp: number;
+      ageSeconds: number;
+      sourceContract: string;
+      resolvedVia: 'last' | 'twap';
+      explorerUrl: string;
+    };
   } | null>(null);
   const [txHash, setTxHash] = useState('');
   const [buyerQuestion, setBuyerQuestion] = useState('');
@@ -340,7 +357,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                     {t('queryModal.details.pricePerQuery')}
                   </p>
                   <p className="font-display font-bold text-xl text-gold">
-                    ${formatUSDC(dataset.pricePerQuery, locale)} USDC
+                    ${formatUSDC(dataset.pricePerQuery, locale)} {dataset.priceCurrency ?? 'USDC'}
                   </p>
                 </div>
                 <div className="glass-card p-4">
@@ -405,12 +422,32 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
             <div>
               <div className="text-center mb-5 p-5 glass-card">
                 <p className="text-4xl font-display font-bold text-gold mb-1">
-                  {quote ? quote.source.maxAmount : formatUSDC(dataset.pricePerQuery, locale)}{' '}
-                  {sourceAsset === 'native' ? 'XLM' : sourceAsset}
+                  {sourceAsset !== 'USDC' && quote
+                    ? `${quote.source.maxAmount} ${sourceAsset === 'native' ? 'XLM' : sourceAsset}`
+                    : paymentInfo
+                      ? `${formatUSDC(paymentInfo.amount, locale)} ${paymentInfo.currency}`
+                      : `$${formatUSDC(dataset.pricePerQuery, locale)} ${dataset.priceCurrency ?? 'USDC'}`}
                 </p>
                 <p className="text-sm text-foreground-muted font-body mb-4">
                   {t('queryModal.payment.headline')}
+                  {paymentInfo?.oracle && paymentInfo?.expiresIn > 0 && (
+                    <span className="ml-1 text-xs text-muted-2">
+                      · quote pinned for {paymentInfo.expiresIn}s
+                    </span>
+                  )}
                 </p>
+                {paymentInfo?.oracle && (
+                  <a
+                    href={paymentInfo.oracle.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 mt-1.5 mb-2 text-[11px] text-muted-2 hover:text-foreground-muted"
+                  >
+                    Rate from Reflector ({paymentInfo.oracle.resolvedVia}) ·{' '}
+                    {paymentInfo.oracle.ageSeconds}s old
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
                 <div className="flex flex-col items-center justify-center gap-2 mb-2">
                   <div className="flex justify-center items-center gap-2">
                     <label className="text-xs text-muted-2">Pay with:</label>
@@ -569,7 +606,9 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                   {[
                     t('queryModal.payment.stepOne'),
                     t('queryModal.payment.stepTwo', {
-                      amount: `$${formatUSDC(dataset.pricePerQuery, locale)}`,
+                      amount: paymentInfo
+                        ? `${formatUSDC(paymentInfo.amount, locale)} ${paymentInfo.currency}`
+                        : `$${formatUSDC(dataset.pricePerQuery, locale)} ${dataset.priceCurrency ?? 'USDC'}`,
                     }),
                     t('queryModal.payment.stepThree'),
                     t('queryModal.payment.stepFour'),
@@ -757,7 +796,6 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
                 </div>
               </div>
 
-              <pre className="text-xs text-red-400 mb-3">{JSON.stringify(result, null, 2)}</pre>
               {/* AI Summary */}
               <div className="mb-5 p-4 rounded-xl bg-gradient-to-br from-gold/5 to-transparent border border-gold/15">
                 <div className="flex items-center gap-2 mb-3">

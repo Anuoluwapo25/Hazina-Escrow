@@ -152,6 +152,8 @@ export default function LandingPage() {
                 description: string;
                 type: string;
                 pricePerQuery: number;
+                priceCurrency: 'USDC' | 'USD';
+                paymentToken: 'USDC' | 'EURC' | 'XLM';
                 sellerWallet: string;
                 queriesServed: number;
                 totalEarned: number;

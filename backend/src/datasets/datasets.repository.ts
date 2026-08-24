@@ -10,6 +10,7 @@ type DatasetRow = {
   type: string;
   category: string | null;
   pricePerQuery: string;
+  priceCurrency: string | null;
   sellerWallet: string;
   notificationEmail: string | null;
   data: string;
@@ -40,6 +41,7 @@ function mapDataset(row: DatasetRow): Dataset {
     type: row.type,
     category: row.category ?? undefined,
     pricePerQuery: Number(row.pricePerQuery),
+    priceCurrency: (row.priceCurrency as 'USDC' | 'USD') ?? 'USDC',
     sellerWallet: row.sellerWallet,
     notificationEmail: row.notificationEmail ?? undefined,
     data: JSON.parse(row.data) as Record<string, unknown>,
@@ -83,6 +85,7 @@ export async function addDataset(dataset: Dataset): Promise<void> {
     type: dataset.type,
     category: dataset.category ?? 'other',
     pricePerQuery: dataset.pricePerQuery.toString(),
+    priceCurrency: dataset.priceCurrency ?? 'USDC',
     sellerWallet: dataset.sellerWallet,
     notificationEmail: dataset.notificationEmail,
     data: JSON.stringify(dataset.data),
