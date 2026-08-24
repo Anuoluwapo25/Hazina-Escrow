@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { validateEscrowConfig } from './stellar.config';
+import { validateAccessPassConfig, validateEscrowConfig } from './stellar.config';
 
 const ORIGINAL = process.env.ESCROW_CONTRACT_ID;
+const ORIGINAL_ACCESS_PASS = process.env.ACCESS_PASS_CONTRACT_ID;
 
 describe('validateEscrowConfig', () => {
   afterEach(() => {
@@ -30,5 +31,36 @@ describe('validateEscrowConfig', () => {
   it('throws when ESCROW_CONTRACT_ID is a Stellar account (G…) address instead of a contract (C…) address', () => {
     process.env.ESCROW_CONTRACT_ID = 'GBVNKDPGVZGFKGRHDUBSZ5V7PXY6PJRFYF5RYVBKAHV3BUXHQWCFXBZ';
     expect(() => validateEscrowConfig()).toThrow(/ESCROW_CONTRACT_ID/);
+  });
+});
+
+describe('validateAccessPassConfig', () => {
+  afterEach(() => {
+    if (ORIGINAL_ACCESS_PASS === undefined) {
+      delete process.env.ACCESS_PASS_CONTRACT_ID;
+    } else {
+      process.env.ACCESS_PASS_CONTRACT_ID = ORIGINAL_ACCESS_PASS;
+    }
+  });
+
+  it('does not throw when ACCESS_PASS_CONTRACT_ID is unset (subscriptions disabled)', () => {
+    delete process.env.ACCESS_PASS_CONTRACT_ID;
+    expect(() => validateAccessPassConfig()).not.toThrow();
+  });
+
+  it('does not throw when ACCESS_PASS_CONTRACT_ID is a well-formed contract address', () => {
+    process.env.ACCESS_PASS_CONTRACT_ID =
+      'CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU';
+    expect(() => validateAccessPassConfig()).not.toThrow();
+  });
+
+  it('throws when ACCESS_PASS_CONTRACT_ID is set but malformed', () => {
+    process.env.ACCESS_PASS_CONTRACT_ID = 'not-a-contract-address';
+    expect(() => validateAccessPassConfig()).toThrow(/ACCESS_PASS_CONTRACT_ID/);
+  });
+
+  it('throws when ACCESS_PASS_CONTRACT_ID is an account (G...) address instead of a contract (C...) address', () => {
+    process.env.ACCESS_PASS_CONTRACT_ID = 'GBVNKDPGVZGFKGRHDUBSZ5V7PXY6PJRFYF5RYVBKAHV3BUXHQWCFXBZ';
+    expect(() => validateAccessPassConfig()).toThrow(/ACCESS_PASS_CONTRACT_ID/);
   });
 });
