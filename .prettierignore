@@ -6,9 +6,9 @@ coverage
 *.lock
 backend/dist
 frontend/dist
-contracts/hazina-escrow/target
+contracts/*/target
 node_modules
 package-lock.json
 backend/package-lock.json
 frontend/package-lock.json
-contracts/hazina-escrow/Cargo.lock
+contracts/*/Cargo.lock

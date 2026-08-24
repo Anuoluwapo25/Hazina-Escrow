@@ -39,8 +39,9 @@ struct Vectors {
 }
 
 fn load() -> Vectors {
-    let raw = fs::read_to_string(FIXTURE)
-        .unwrap_or_else(|e| panic!("{FIXTURE} missing ({e}); run `npm run gen:fee-vectors --prefix backend`"));
+    let raw = fs::read_to_string(FIXTURE).unwrap_or_else(|e| {
+        panic!("{FIXTURE} missing ({e}); run `npm run gen:fee-vectors --prefix backend`")
+    });
     let json: Value = serde_json::from_str(&raw).expect("fee_vectors.json is not valid JSON");
 
     let rows = json["vectors"]
@@ -134,7 +135,9 @@ fn real_contract_matches_the_model_on_every_vector() {
         }
 
         let world = World::new(v.fee_bps);
-        world.client.set_max_escrow_amount(&world.admin, &amount.max(MIN_LOCK_AMOUNT));
+        world
+            .client
+            .set_max_escrow_amount(&world.admin, &amount.max(MIN_LOCK_AMOUNT));
         let escrow_id = world.lock(amount, datasets[i % datasets.len()], 3_600);
         world.client.confirm_delivery(&escrow_id, &world.buyer);
         world.client.release(&world.admin, &escrow_id);

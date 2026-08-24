@@ -1,0 +1,39 @@
+{
+  "name": "@hazina/verify",
+  "version": "0.1.0",
+  "description": "Offline verifier for Hazina verifiable delivery receipts — recomputes the commitment hashes from a delivered payload, checks the Merkle proof against the anchored root, and (optionally) checks the anchor memo on Stellar.",
+  "type": "module",
+  "bin": {
+    "hazina-verify": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "ESLINT_USE_FLAT_CONFIG=false eslint src",
+    "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint src --fix",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^13.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

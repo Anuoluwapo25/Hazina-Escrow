@@ -6,6 +6,7 @@ import {
   AGENT_REQUEST_TIMEOUT_MS,
 } from './api';
 import { initEnv } from './env';
+import { setSellerSession } from './sellerAuth';
 
 vi.mock('./env', () => ({
   getEnv: () => ({ apiUrl: 'http://localhost', apiKey: 'test', maxConcurrentRequests: 8 }),
@@ -269,5 +270,167 @@ describe('api response validation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(api.getDatasets()).rejects.toThrow('Unexpected API shape:');
+  });
+});
+
+describe('api.getReceipt', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'));
+    __resetRequestThrottleForTests();
+  });
+
+  afterEach(() => {
+    __resetRequestThrottleForTests();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('fetches and parses a receipt with merkle proof and verification', async () => {
+    const receipt = {
+      id: 'rcpt_123',
+      datasetId: 'ds-test-1',
+      buyer: `G${'A'.repeat(55)}`,
+      seller: `G${'B'.repeat(55)}`,
+      amount: 1,
+      paymentToken: 'USDC',
+      txHash: 'tx-abc',
+      leafHash: '11'.repeat(32),
+      receiptHash: '22'.repeat(32),
+      anchorMode: 'direct',
+      anchorStatus: 'ANCHORED',
+      anchorTxHash: 'tx-anchor',
+      deliveredAt: '2026-01-01T00:00:00.000Z',
+      anchoredAt: '2026-01-01T00:01:00.000Z',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+    const merkleProof = {
+      leafIndex: 0,
+      leafHash: '11'.repeat(32),
+      siblings: [null, '33'.repeat(32)],
+      root: '44'.repeat(32),
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        receipt,
+        merkleProof,
+        verification: {
+          valid: true,
+          receiptHashMatches: true,
+          merkleProofValid: true,
+          anchorVerified: true,
+          anchorTxHash: 'tx-anchor',
+          status: 'ANCHORED',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getReceipt('rcpt_123');
+
+    expect(String(fetchMock.mock.calls[0]?.[0] || '')).toContain('/api/v1/receipts/rcpt_123');
+    expect(result.receipt.id).toBe('rcpt_123');
+    expect(result.merkleProof?.root).toBe('44'.repeat(32));
+    expect(result.verification.valid).toBe(true);
+  });
+
+  it('omits the merkle proof when the receipt is not anchored', async () => {
+    const receipt = {
+      id: 'rcpt_pending',
+      datasetId: 'ds-test-1',
+      buyer: `G${'A'.repeat(55)}`,
+      seller: `G${'B'.repeat(55)}`,
+      amount: 1,
+      paymentToken: 'USDC',
+      txHash: 'tx-pending',
+      leafHash: '11'.repeat(32),
+      receiptHash: '22'.repeat(32),
+      anchorMode: 'direct',
+      anchorStatus: 'NOT_ANCHORED_YET',
+      deliveredAt: '2026-01-01T00:00:00.000Z',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        receipt,
+        verification: {
+          valid: true,
+          receiptHashMatches: true,
+          anchorVerified: false,
+          status: 'NOT_ANCHORED_YET',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getReceipt('rcpt_pending');
+
+    expect(result.merkleProof).toBeUndefined();
+    expect(result.verification.anchorVerified).toBe(false);
+  });
+});
+
+describe('api seller-scoped requests use the SEP-10 seller JWT', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'));
+    __resetRequestThrottleForTests();
+  });
+
+  afterEach(() => {
+    __resetRequestThrottleForTests();
+    setSellerSession(null);
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('attaches the seller JWT as the Authorization header when signed in', async () => {
+    const token = 'fake-seller-jwt';
+    setSellerSession({
+      token,
+      sellerWallet: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      expiresAtSec: Math.floor(Date.now() / 1000) + 3600,
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        transactions: [
+          {
+            id: 'tx-1',
+            datasetId: 'ds-1',
+            txHash: 'txh-1',
+            amount: 0.05,
+            timestamp: '2026-04-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getTransactions('ds-1');
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, { headers?: Record<string, string> }];
+    expect(String(url)).toContain('/datasets/ds-1/transactions');
+    expect(init.headers?.Authorization).toBe(`Bearer ${token}`);
+  });
+
+  it('falls back to the shared API key when no seller session exists', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      createFetchResponse({
+        success: true,
+        transactions: [],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getTransactions('ds-1');
+
+    const [, init] = fetchMock.mock.calls[0] as [string, { headers?: Record<string, string> }];
+    expect(init.headers?.Authorization).toBe('Bearer test');
   });
 });

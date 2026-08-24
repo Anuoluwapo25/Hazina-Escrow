@@ -20,8 +20,14 @@ use crate::harness::{
 const MAX_BATCH: usize = 8;
 
 const DATASET_IDS: [&str; MAX_BATCH] = [
-    "ds-multi-0", "ds-multi-1", "ds-multi-2", "ds-multi-3",
-    "ds-multi-4", "ds-multi-5", "ds-multi-6", "ds-multi-7",
+    "ds-multi-0",
+    "ds-multi-1",
+    "ds-multi-2",
+    "ds-multi-3",
+    "ds-multi-4",
+    "ds-multi-5",
+    "ds-multi-6",
+    "ds-multi-7",
 ];
 
 /// Build the `(shares, dataset_ids)` pair `lock_multi` takes, one fresh seller
@@ -29,14 +35,21 @@ const DATASET_IDS: [&str; MAX_BATCH] = [
 fn build_batch(
     world: &World,
     amounts: &[i128],
-) -> (SorobanVec<SellerShare>, SorobanVec<SorobanString>, std::vec::Vec<Address>) {
+) -> (
+    SorobanVec<SellerShare>,
+    SorobanVec<SorobanString>,
+    std::vec::Vec<Address>,
+) {
     let mut shares = SorobanVec::new(&world.env);
     let mut dataset_ids = SorobanVec::new(&world.env);
     let mut sellers = std::vec::Vec::new();
 
     for (i, amount) in amounts.iter().enumerate() {
         let seller = world.new_seller();
-        shares.push_back(SellerShare { seller: seller.clone(), amount: *amount });
+        shares.push_back(SellerShare {
+            seller: seller.clone(),
+            amount: *amount,
+        });
         dataset_ids.push_back(world.dataset(DATASET_IDS[i]));
         sellers.push(seller);
     }

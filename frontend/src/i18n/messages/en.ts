@@ -41,6 +41,9 @@ export const en = {
       copyMemo: 'Copy memo',
       connectWallet: 'Connect Wallet',
       disconnect: 'Disconnect',
+      sellerSignInFailed: 'Seller sign-in failed',
+      sellerSigningIn: 'Signing in as seller…',
+      sellerSignedIn: 'Signed in as seller',
     },
     labels: {
       price: 'Price',
@@ -255,6 +258,8 @@ export const en = {
     },
   },
   sell: {
+    sellerSignInBanner:
+      'Sign in as a seller from the navigation bar (connect your wallet) to list this dataset.',
     messages: {
       invalidJson: 'Invalid JSON — please check your data format',
       createFailed: 'Failed to create listing',
@@ -332,8 +337,66 @@ export const en = {
         '95% is sent to your wallet, 5% to the platform',
       ],
     },
+    subscription: {
+      toggle: 'Offer a subscription',
+      help:
+        'Buyers pay per period for time-boxed, on-chain enforced access to this dataset. ' +
+        'After listing you sign one Freighter transaction to create the plan.',
+      priceLabel: 'Price / period (USDC)',
+      priceError: 'Price must be greater than 0',
+      seatsLabel: 'Max seats',
+      seatsError: 'Seats must be a whole number of at least 1',
+      pricePresets: 'Quick price presets:',
+      periodLabel: 'Billing period',
+      period: {
+        day: 'Daily',
+        week: 'Weekly',
+        month: 'Monthly',
+      },
+      confirmNote:
+        'After publishing you will be asked to sign a Freighter transaction creating a ' +
+        '${price}/{period} subscription plan for up to your chosen seat count.',
+      previewNote: 'Subscription: ${price}/{period} · max {seats} subscribers',
+      definedSuccess: 'Subscription plan created',
+      definedFailed: 'Dataset listed — but the subscription plan was not created',
+    },
+  },
+  accessPass: {
+    badge: {
+      active: 'Active',
+      expired: 'Expired',
+      unavailable: 'Access status unavailable',
+    },
+    card: {
+      title: 'Subscription access',
+      subscribe: 'Subscribe',
+      resubscribe: 'Resubscribe',
+      renew: 'Renew subscription',
+      subscribed: 'Subscription active',
+      renewed: 'Subscription renewed',
+      subscribeFailed: 'Subscribing failed',
+      renewFailed: 'Renewing failed',
+      soldOut: 'Sold out',
+      inactive: 'Unavailable',
+      seatsLeft: '{left} of {total} seats left',
+      seatsUnknown: 'Seat availability unknown',
+      custodyNote:
+        'Payments move from your own wallet into on-chain contract custody — Hazina never holds subscriber funds.',
+    },
+    period: {
+      day: 'per day',
+      week: 'per week',
+      month: 'per month',
+      days: 'every {days} days',
+    },
+    detail: {
+      includedNote: 'Your active subscription covers this dataset.',
+      verifyPending: 'Verifying subscription access — purchasing reopens once the check completes.',
+    },
   },
   dashboard: {
+    sellerSignInBanner:
+      'Sign in as a seller from the navigation bar (connect your wallet) to view this dashboard.',
     eyebrow: 'Seller Hub',
     title: 'Dashboard',
     subtitle: 'Your real-time earnings and dataset performance.',

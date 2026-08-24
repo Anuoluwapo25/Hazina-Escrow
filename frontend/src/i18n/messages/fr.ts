@@ -41,6 +41,9 @@ export const fr: EnglishMessages = {
       copyMemo: 'Copier le mémo',
       connectWallet: 'Connecter le wallet',
       disconnect: 'Déconnecter',
+      sellerSignInFailed: 'Échec de la connexion vendeur',
+      sellerSigningIn: 'Connexion vendeur en cours…',
+      sellerSignedIn: 'Connecté en tant que vendeur',
     },
     labels: {
       price: 'Prix',
@@ -256,6 +259,8 @@ export const fr: EnglishMessages = {
     },
   },
   sell: {
+    sellerSignInBanner:
+      'Connectez-vous en tant que vendeur depuis la barre de navigation (connectez votre wallet) pour lister ce dataset.',
     messages: {
       invalidJson: 'JSON invalide — veuillez vérifier le format de vos données',
       createFailed: "Impossible de créer l'annonce",
@@ -334,8 +339,67 @@ export const fr: EnglishMessages = {
         '95 % sont envoyés à votre wallet, 5 % à la plateforme',
       ],
     },
+    subscription: {
+      toggle: 'Proposer un abonnement',
+      help:
+        'Les acheteurs paient par période pour un accès limité dans le temps à ce dataset, ' +
+        'appliqué on-chain. Après publication, vous signez une transaction Freighter pour créer le plan.',
+      priceLabel: 'Prix / période (USDC)',
+      priceError: 'Le prix doit être supérieur à 0',
+      seatsLabel: 'Places max.',
+      seatsError: 'Les places doivent être un nombre entier dau moins 1',
+      pricePresets: 'Prix rapides :',
+      periodLabel: 'Période de facturation',
+      period: {
+        day: 'Quotidien',
+        week: 'Hebdomadaire',
+        month: 'Mensuel',
+      },
+      confirmNote:
+        'Après publication, une transaction Freighter vous sera demandée pour créer un plan ' +
+        "d'abonnement ${price}/{period} jusqu'au nombre de places choisi.",
+      previewNote: 'Abonnement : ${price}/{period} · max {seats} abonnés',
+      definedSuccess: "Plan d'abonnement créé",
+      definedFailed: 'Dataset publié — mais le plan abonnement na pas été créé',
+    },
+  },
+  accessPass: {
+    badge: {
+      active: 'Actif',
+      expired: 'Expiré',
+      unavailable: "Statut d'accès indisponible",
+    },
+    card: {
+      title: 'Accès par abonnement',
+      subscribe: "S'abonner",
+      resubscribe: 'Ré-abonner',
+      renew: 'Renouveler',
+      subscribed: 'Abonnement actif',
+      renewed: 'Abonnement renouvelé',
+      subscribeFailed: "Échec de l'abonnement",
+      renewFailed: 'Échec du renouvellement',
+      soldOut: 'Complet',
+      inactive: 'Indisponible',
+      seatsLeft: '{left} sur {total} places restantes',
+      seatsUnknown: 'Disponibilité des places inconnue',
+      custodyNote:
+        'Les paiements vont de votre propre wallet vers la garde du contrat on-chain — Hazina ne détient jamais les fonds des abonnés.',
+    },
+    period: {
+      day: 'par jour',
+      week: 'par semaine',
+      month: 'par mois',
+      days: 'tous les {days} jours',
+    },
+    detail: {
+      includedNote: 'Votre abonnement actif couvre ce dataset.',
+      verifyPending:
+        "Vérification de l'accès par abonnement — l'achat se rouvre dès la fin de la vérification.",
+    },
   },
   dashboard: {
+    sellerSignInBanner:
+      'Connectez-vous en tant que vendeur depuis la barre de navigation (connectez votre wallet) pour voir ce tableau de bord.',
     eyebrow: 'Espace vendeur',
     title: 'Tableau de bord',
     subtitle: 'Vos revenus en temps réel et la performance de vos datasets.',

@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { logger } from '../lib/logger';
+import { isApiKeyEnabled, isSep10Enabled } from '../auth/sep10.config';
+import { verifySep10Jwt } from '../auth/sep10.jwt';
 
 const STELLAR_ADDRESS_REGEX = /^G[A-Z2-7]{55}$/;
 
@@ -157,8 +159,68 @@ function getRequestWallet(req: Request, walletField: string): string | null {
 }
 
 /**
- * Accepts either the shared API key or a seller JWT.
- * When a seller JWT is used, the wallet in the request body must match the JWT claim.
+ * The seller JWT secret for the legacy SELLER_JWT_SECRET flow, if configured.
+ */
+function getLegacySellerSecret(): string | undefined {
+  const secret = (process.env.SELLER_JWT_SECRET ?? '').trim();
+  return secret || undefined;
+}
+
+/**
+ * The SEP-10 web-auth JWT secret, used only while AUTH_MODE is sep10/both.
+ * Tokens minted by the /auth endpoints carry the same `sellerWallet` claim as
+ * legacy tokens, so the same middlewares accept either format.
+ */
+function getSep10SellerSecret(): string | undefined {
+  if (!isSep10Enabled()) return undefined;
+  const secret = (process.env.WEB_AUTH_JWT_SECRET ?? '').trim();
+  return secret || undefined;
+}
+
+/** True when any seller credential source is configured (API key or a JWT secret). */
+function hasSellerAuthConfigured(): boolean {
+  return (
+    Boolean((process.env.API_KEY ?? '').trim()) ||
+    getLegacySellerSecret() !== undefined ||
+    getSep10SellerSecret() !== undefined
+  );
+}
+
+/**
+ * Accepts a legacy SELLER_JWT_SECRET token or a SEP-10 web-auth JWT. Returns
+ * the claims (with the owning G… sellerWallet) or null when the token is
+ * invalid or signed by neither configured secret.
+ */
+function verifyAnySellerJwt(token: string): SellerJwtClaims | null {
+  const legacy = getLegacySellerSecret();
+  if (legacy) {
+    const claims = verifySellerJwt(token, legacy);
+    if (claims) return claims;
+  }
+  const sep10 = getSep10SellerSecret();
+  if (sep10) {
+    const claims = verifySep10Jwt(token, sep10, {
+      nowSec: Math.floor(Date.now() / 1000),
+    });
+    if (claims) {
+      return {
+        ...claims,
+        sellerWallet: claims.sellerWallet,
+        sub: typeof claims.sub === 'string' ? claims.sub : undefined,
+        iss: typeof claims.iss === 'string' ? claims.iss : undefined,
+        iat: typeof claims.iat === 'number' ? claims.iat : undefined,
+        exp: claims.exp,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Accepts either the shared API key (when AUTH_MODE is legacy or both) or a
+ * seller JWT (legacy SELLER_JWT_SECRET or a SEP-10 web-auth token).
+ * When a seller JWT is used, the wallet in the request body must match the
+ * JWT claim.
  */
 export function requireSellerMutationAuth(req: Request, res: Response, next: NextFunction) {
   const token = getBearerToken(req.headers.authorization);
@@ -167,22 +229,19 @@ export function requireSellerMutationAuth(req: Request, res: Response, next: Nex
   }
 
   const apiKey = process.env.API_KEY;
-  if (apiKey && token === apiKey) {
+  if (apiKey && isApiKeyEnabled() && token === apiKey) {
     return next();
   }
 
-  const secret = process.env.SELLER_JWT_SECRET;
-  if (!secret) {
-    return apiKey
-      ? res.status(403).json({ error: 'Invalid API key' })
-      : res.status(503).json({ error: 'Server misconfigured: SELLER_JWT_SECRET is not set' });
-  }
-
-  const claims = verifySellerJwt(token, secret);
+  const claims = verifyAnySellerJwt(token);
   if (!claims) {
-    return apiKey
-      ? res.status(403).json({ error: 'Invalid API key' })
-      : res.status(401).json({ error: 'Invalid or expired seller token' });
+    if (apiKey && isApiKeyEnabled()) {
+      return res.status(403).json({ error: 'Invalid API key' });
+    }
+    if (hasSellerAuthConfigured()) {
+      return res.status(401).json({ error: 'Invalid or expired seller token' });
+    }
+    return res.status(503).json({ error: 'Server misconfigured: SELLER_JWT_SECRET is not set' });
   }
 
   const requestWallet = getRequestWallet(req, 'sellerWallet');
@@ -196,21 +255,19 @@ export function requireSellerMutationAuth(req: Request, res: Response, next: Nex
 
 /**
  * For GET /:sellerWallet — accepts the shared API key (admin, no wallet scope
- * restriction) OR a seller JWT scoped to the wallet in req.params.sellerWallet.
- * In non-production, skips auth when neither API_KEY nor SELLER_JWT_SECRET is set.
+ * restriction) OR a seller JWT (legacy or SEP-10) scoped to the wallet in
+ * req.params.sellerWallet.
+ * In non-production, skips auth when no seller credential is configured.
  */
 export function requireSellerReadAuth(req: Request, res: Response, next: NextFunction) {
-  const apiKey = process.env.API_KEY;
-  const secret = process.env.SELLER_JWT_SECRET;
-
-  if (!apiKey && !secret) {
+  if (!hasSellerAuthConfigured()) {
     if (process.env.NODE_ENV === 'production') {
-      return res
-        .status(503)
-        .json({ error: 'Server misconfigured: API_KEY or SELLER_JWT_SECRET must be set' });
+      return res.status(503).json({
+        error: 'Server misconfigured: API_KEY or SELLER_JWT_SECRET must be set',
+      });
     }
     logger.warn(
-      '[auth] API_KEY and SELLER_JWT_SECRET not set — skipping read auth in non-production',
+      '[auth] no seller authentication configured — skipping read auth in non-production',
     );
     return next();
   }
@@ -220,14 +277,11 @@ export function requireSellerReadAuth(req: Request, res: Response, next: NextFun
     return res.status(401).json({ error: 'Authorization header missing or not Bearer' });
   }
 
+  const apiKey = process.env.API_KEY;
   // Shared API key — admin, can read any seller's data.
-  if (apiKey && token === apiKey) return next();
+  if (apiKey && isApiKeyEnabled() && token === apiKey) return next();
 
-  // Seller JWT — must be scoped to the wallet in the route param.
-  if (!secret) {
-    return res.status(503).json({ error: 'Server misconfigured: SELLER_JWT_SECRET is not set' });
-  }
-  const claims = verifySellerJwt(token, secret);
+  const claims = verifyAnySellerJwt(token);
   if (!claims) {
     return res.status(401).json({ error: 'Invalid or expired seller token' });
   }
@@ -246,10 +300,9 @@ export function requireSellerReadAuth(req: Request, res: Response, next: NextFun
  * seller (or a buyer with a completed purchase) may read the payloads.
  */
 export function attachSellerAuthIfPresent(req: Request, _res: Response, next: NextFunction) {
-  const secret = process.env.SELLER_JWT_SECRET;
   const token = getBearerToken(req.headers.authorization);
-  if (secret && token) {
-    const claims = verifySellerJwt(token, secret);
+  if (token) {
+    const claims = verifyAnySellerJwt(token);
     if (claims) req.sellerAuth = claims;
   }
   next();
@@ -257,8 +310,7 @@ export function attachSellerAuthIfPresent(req: Request, _res: Response, next: Ne
 
 /** Protects seller dashboard reads with a non-optional, expiring HS256 JWT. */
 export function requireSellerJwt(req: Request, res: Response, next: NextFunction) {
-  const secret = process.env.SELLER_JWT_SECRET;
-  if (!secret) {
+  if (!hasSellerAuthConfigured()) {
     return res.status(503).json({ error: 'Server misconfigured: SELLER_JWT_SECRET is not set' });
   }
 
@@ -267,7 +319,7 @@ export function requireSellerJwt(req: Request, res: Response, next: NextFunction
     return res.status(401).json({ error: 'Authorization header missing or not Bearer' });
   }
 
-  const claims = verifySellerJwt(authHeader.slice(7), secret);
+  const claims = verifyAnySellerJwt(authHeader.slice(7));
   if (!claims) {
     return res.status(401).json({ error: 'Invalid or expired seller token' });
   }

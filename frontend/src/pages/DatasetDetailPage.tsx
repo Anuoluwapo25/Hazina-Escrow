@@ -9,6 +9,7 @@ import {
   DollarSign,
   Hash,
   Radio,
+  ShieldCheck,
   ShoppingCart,
   Star,
   Loader2,
@@ -20,7 +21,10 @@ import { api, DatasetDetail, DatasetPreview } from '../lib/api';
 import { formatTimeAgo, formatUSDC, getTypeMeta, truncateAddress } from '../lib/utils';
 import QueryModal from '../components/ui/QueryModal';
 import DatasetHistory from '../components/ui/DatasetHistory';
+import ActivePassBadge from '../components/ui/ActivePassBadge';
+import SubscriptionPlanCard from '../components/ui/SubscriptionPlanCard';
 import { Skeleton } from '../components/ui/SkeletonLoader';
+import { useAccessPass } from '../hooks/useAccessPass';
 import { useI18n } from '../i18n';
 
 function Stars({ value, onSelect }: { value: number; onSelect?: (value: number) => void }) {
@@ -91,6 +95,15 @@ export default function DatasetDetailPage() {
     staleTime: 30_000,
   });
 
+  // Subscription status: fail closed — loading/unavailable deny data purchase.
+  const accessPass = useAccessPass(datasetId);
+  const { data: plansData } = useQuery({
+    queryKey: ['subscription-plans', datasetId],
+    queryFn: () => api.getSubscriptionPlans(datasetId),
+    enabled: Boolean(datasetId),
+    staleTime: 15_000,
+  });
+
   const previewJson = useMemo(() => JSON.stringify(dataset?.preview ?? {}, null, 2), [dataset]);
   const typeMeta = dataset ? getTypeMeta(dataset.type) : null;
   const ratings = dataset?.ratings ?? { score: 0, count: 0, reviews: [] };
@@ -159,6 +172,7 @@ export default function DatasetDetailPage() {
                     )}
                   </span>
                 )}
+                <ActivePassBadge status={accessPass.status} expiry={accessPass.pass?.expiry} />
               </div>
               <h1 className="font-display text-4xl md:text-5xl font-bold text-foreground mb-4">
                 {dataset.name}
@@ -300,6 +314,7 @@ export default function DatasetDetailPage() {
           </article>
 
           <aside className="space-y-6 lg:sticky lg:top-28 self-start">
+            <SubscriptionPlanCard plans={plansData?.plans ?? []} passStatus={accessPass.status} />
             <div className="glass-card p-6">
               <p className="text-sm text-muted mb-1">Seller</p>
               <p className="font-mono text-foreground mb-5">
@@ -353,13 +368,32 @@ export default function DatasetDetailPage() {
                 </div>
               )}
 
+              {accessPass.hasAccess ? (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 mb-3">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                  <p className="text-xs text-emerald-400 font-body">
+                    {t('accessPass.detail.includedNote')}
+                  </p>
+                </div>
+              ) : null}
+
               <button
                 type="button"
                 onClick={() => setShowQueryModal(true)}
-                className="btn-gold w-full py-3 flex items-center justify-center gap-2"
+                disabled={accessPass.status === 'loading' || accessPass.status === 'unavailable'}
+                className={clsx(
+                  'btn-gold w-full py-3 flex items-center justify-center gap-2',
+                  (accessPass.status === 'loading' || accessPass.status === 'unavailable') &&
+                    'opacity-50 cursor-not-allowed',
+                )}
               >
                 <ShoppingCart className="h-4 w-4" /> Buy Now
               </button>
+              {(accessPass.status === 'loading' || accessPass.status === 'unavailable') && (
+                <p className="text-[11px] text-muted-2 font-body mt-2">
+                  {t('accessPass.detail.verifyPending')}
+                </p>
+              )}
             </div>
           </aside>
         </div>

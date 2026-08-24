@@ -31,6 +31,18 @@ export function formatTimeAgo(iso: string, locale: string | SupportedLocale = 'e
   return formatter.format(-Math.floor(hours / 24), 'day');
 }
 
+/** Future-oriented relative time ("in 3 days") from unix seconds. */
+export function formatTimeUntil(unixSeconds: number, locale: string): string {
+  const diffMs = unixSeconds * 1000 - Date.now();
+  const minutes = Math.ceil(diffMs / 60_000);
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+  if (minutes < 1) return formatter.format(0, 'minute');
+  if (minutes < 60) return formatter.format(minutes, 'minute');
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return formatter.format(hours, 'hour');
+  return formatter.format(Math.round(hours / 24), 'day');
+}
+
 export const DATA_TYPE_META: Record<
   string,
   { label: string; labelKey: MessageKey; color: string; bg: string }

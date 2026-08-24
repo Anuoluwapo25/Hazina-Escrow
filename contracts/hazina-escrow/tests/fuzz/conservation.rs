@@ -173,7 +173,7 @@ proptest! {
 
     /// I3 — `claim_expired` is deliberately not symmetric with `release`: the
     /// seller is paid `amount - platform_cut` and the cut stays in the contract
-    /// for the admin to sweep via `emergency_withdraw`, rather than going to the
+    /// for the admin to sweep via `schedule_emergency_withdraw` / `execute_emergency_withdraw`, rather than going to the
     /// treasury. Value is conserved; it just does not all leave. Pinned so a
     /// future "fix" can't silently move where the fee lands.
     #[test]

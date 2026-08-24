@@ -27,6 +27,8 @@ interface VerifyResult {
   reason?: string;
   actualAmount?: number;
   memo?: string;
+  /** Source account of the matched payment op — the buyer's refund destination if delivery permanently fails. */
+  payerAddress?: string;
 }
 
 /**
@@ -120,10 +122,20 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
       getStellarTimeoutMs(),
     );
 
+    interface PaymentOpLike {
+      type: string;
+      to: string;
+      from: string;
+      asset_type: string;
+      asset_code?: string;
+      asset_issuer?: string;
+      amount: string;
+    }
+
     const paymentOps = ops.records.filter(
       op =>
-        op.type === 'payment' &&
-        (op as StellarSdk.Horizon.ServerApi.PaymentOperationRecord).to === destinationAddress,
+        (op.type === 'payment' || op.type === 'path_payment_strict_receive') &&
+        (op as unknown as PaymentOpLike).to === destinationAddress,
     );
 
     if (paymentOps.length === 0) {
@@ -139,7 +151,7 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
     // For XLM (native), check asset_type === 'native'
     // For USDC/EURC (tokens), match both asset_code and issuer
     const matchingOps = paymentOps.filter(op => {
-      const payOp = op as StellarSdk.Horizon.ServerApi.PaymentOperationRecord;
+      const payOp = op as unknown as PaymentOpLike;
 
       if (tokenCode === 'XLM') {
         return payOp.asset_type === 'native';
@@ -161,7 +173,7 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
       };
     }
 
-    const payOp = matchingOps[0] as StellarSdk.Horizon.ServerApi.PaymentOperationRecord;
+    const payOp = matchingOps[0] as unknown as PaymentOpLike;
     const actualAmount = parseFloat(payOp.amount);
     const tolerance = 0.001; // 0.001 token tolerance
 
@@ -203,6 +215,7 @@ export async function verifyStellarPayment(params: VerifyParams): Promise<Verify
       valid: true,
       actualAmount,
       memo: tx.memo || '',
+      payerAddress: payOp.from,
     };
   } catch (err: unknown) {
     if (err instanceof StellarTimeoutError) {

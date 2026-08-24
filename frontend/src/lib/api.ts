@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getEnv } from './env';
+import { getSellerToken } from './sellerAuth';
 
 const REQUEST_THROTTLE_MS = 250;
 
@@ -203,6 +204,73 @@ export interface SolvencyReport {
   checkedAt: string;
 }
 
+/** Verifiable delivery receipt — see docs/RECEIPTS.md. */
+export interface ReceiptVerification {
+  valid: boolean;
+  receiptHashMatches: boolean;
+  merkleProofValid?: boolean;
+  anchorVerified?: boolean;
+  anchorTxHash?: string;
+  status: 'NOT_ANCHORED_YET' | 'ANCHORING' | 'ANCHORED' | 'ANCHOR_FAILED' | 'VERIFIED' | 'MISMATCH';
+  error?: string;
+}
+
+export const ReceiptSchema = z.object({
+  id: z.string(),
+  datasetId: z.string(),
+  buyer: z.string(),
+  seller: z.string(),
+  amount: z.number(),
+  paymentToken: z.string(),
+  txHash: z.string(),
+  leafHash: z.string(),
+  receiptHash: z.string(),
+  anchorMode: z.enum(['direct', 'batched']),
+  anchorStatus: z.enum([
+    'NOT_ANCHORED_YET',
+    'ANCHORING',
+    'ANCHORED',
+    'ANCHOR_FAILED',
+    'VERIFIED',
+    'MISMATCH',
+  ]),
+  anchorTxHash: z.string().optional(),
+  merkleRoot: z.string().optional(),
+  merkleIndex: z.number().optional(),
+  merkleProof: z.array(z.string().nullable()).optional(),
+  deliveredAt: z.string(),
+  anchoredAt: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const ReceiptMerkleProofSchema = z.object({
+  leafIndex: z.number(),
+  leafHash: z.string(),
+  siblings: z.array(z.string().nullable()),
+  root: z.string(),
+});
+
+export const ReceiptVerificationSchema = z.object({
+  valid: z.boolean(),
+  receiptHashMatches: z.boolean(),
+  merkleProofValid: z.boolean().optional(),
+  anchorVerified: z.boolean().optional(),
+  anchorTxHash: z.string().optional(),
+  status: z.enum([
+    'NOT_ANCHORED_YET',
+    'ANCHORING',
+    'ANCHORED',
+    'ANCHOR_FAILED',
+    'VERIFIED',
+    'MISMATCH',
+  ]),
+  error: z.string().optional(),
+});
+
+export type Receipt = z.infer<typeof ReceiptSchema>;
+export type ReceiptMerkleProof = z.infer<typeof ReceiptMerkleProofSchema>;
+
 export const DatasetMetaSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -263,6 +331,56 @@ export const DatasetPreviewSchema = z.object({
   lastRefreshedAt: z.string().nullish(),
 });
 export type DatasetPreview = z.infer<typeof DatasetPreviewSchema>;
+
+/** On-chain subscription plan, as served by the backend's event index. */
+export const AccessPassPlanSchema = z.object({
+  planId: z.number(),
+  datasetId: z.string(),
+  seller: z.string(),
+  pricePerPeriodStroops: z.string(),
+  pricePerPeriod: z.number(),
+  periodSeconds: z.number(),
+  maxSeats: z.number(),
+  active: z.boolean(),
+  ledger: z.number().optional(),
+  /** Live on-chain seat usage; null when the seat lookup failed. */
+  seatsUsed: z.number().nullable().optional(),
+  seatsLeft: z.number().nullable().optional(),
+});
+export type AccessPassPlan = z.infer<typeof AccessPassPlanSchema>;
+
+/** On-chain pass record (null when the buyer holds none). */
+export const AccessPassStateSchema = z.object({
+  planId: z.number(),
+  buyer: z.string(),
+  datasetId: z.string(),
+  start: z.number(),
+  expiry: z.number(),
+  termPeriodSeconds: z.number(),
+  amountPaidStroops: z.string(),
+  amountPaid: z.number(),
+  feeBps: z.number(),
+  revoked: z.boolean(),
+});
+export type AccessPassState = z.infer<typeof AccessPassStateSchema>;
+
+/**
+ * Subscription status check. When `hasAccess` is false and `pass` is null the
+ * buyer simply holds no pass — that is a REAL answer, not an error. Errors are
+ * thrown, never encoded here (fail closed).
+ */
+export const AccessPassCheckSchema = z.object({
+  success: z.boolean(),
+  hasAccess: z.boolean(),
+  pass: AccessPassStateSchema.nullable(),
+});
+export type AccessPassCheck = z.infer<typeof AccessPassCheckSchema>;
+
+export const SubscriptionPlansSchema = z.object({
+  success: z.boolean(),
+  plans: z.array(AccessPassPlanSchema).catch([]),
+});
+export type SubscriptionPlans = z.infer<typeof SubscriptionPlansSchema>;
 
 /** One immutable version of a dataset payload (#600). Metadata only — no payload. */
 export const SnapshotMetaSchema = z.object({
@@ -349,15 +467,25 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
   return { ...headers, ...(extra as Record<string, string>) };
 }
 
+/**
+ * Bearer headers for seller-scoped endpoints. Prefers the in-memory SEP-10
+ * seller JWT when the seller has signed in; falls back to the shared API key
+ * (legacy deployments) when it has not.
+ */
+function sellerAuthHeaders(): HeadersInit {
+  const token = getSellerToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function fetchWithTimeout(url: string, options?: RequestOptions): Promise<Response> {
   const { timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...init } = options ?? {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, {
+      ...init,
       signal: controller.signal,
       headers: authHeaders(init.headers),
-      ...init,
     });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -496,6 +624,7 @@ export const api = {
   getSellerAnalytics: (wallet: string) =>
     request<{ success: boolean } & SellerAnalytics>(
       `${getApiBaseUrl()}/analytics/seller/${encodeURIComponent(wallet)}`,
+      { headers: sellerAuthHeaders() },
     ).then(r => ({
       revenueSeries: r.revenueSeries,
       queryVolumeSeries: r.queryVolumeSeries,
@@ -507,9 +636,9 @@ export const api = {
     const url = datasetId
       ? `${getApiBaseUrl()}/datasets/${datasetId}/transactions`
       : `${getApiBaseUrl()}/datasets/transactions`;
-    return request<{ success: boolean; transactions: unknown }>(url).then(r =>
-      parseApiResponse(z.array(TransactionSchema), r.transactions),
-    );
+    return request<{ success: boolean; transactions: unknown }>(url, {
+      headers: sellerAuthHeaders(),
+    }).then(r => parseApiResponse(z.array(TransactionSchema), r.transactions));
   },
 
   initiateQuery: (id: string) =>
@@ -538,6 +667,11 @@ export const api = {
       };
     }>(`${getApiBaseUrl()}/query/${id}`, { method: 'POST' }),
 
+  getQuote: (id: string, sourceAsset: string) =>
+    request<any>(
+      `${getApiBaseUrl()}/query/${id}/quote?sourceAsset=${encodeURIComponent(sourceAsset)}`,
+    ),
+
   verifyPayment: (id: string, txHash: string, buyerQuestion?: string) =>
     request<unknown>(`${getApiBaseUrl()}/verify/${id}`, {
       method: 'POST',
@@ -553,12 +687,17 @@ export const api = {
   // ── Non-custodial escrow (#547/#548) ─────────────────────────────────────
 
   /** Ask the backend to assemble an unsigned lock() transaction for the buyer. */
-  buildEscrowLock: (buyer: string, datasetId: string, amount?: number) =>
+  buildEscrowLock: (
+    buyer: string,
+    datasetId: string,
+    amount?: number,
+    quote?: Record<string, unknown>,
+  ) =>
     request<{ success: boolean; xdr: string; contractId: string; amount: number }>(
       `${getApiBaseUrl()}/payments/escrow/lock/build`,
       {
         method: 'POST',
-        body: JSON.stringify({ buyer, datasetId, amount }),
+        body: JSON.stringify({ buyer, datasetId, amount, quote }),
       },
     ),
 
@@ -598,6 +737,70 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ buyer, escrowId, evidenceHash }),
     }),
+
+  // ── Dataset subscription access passes ────────────────────────────────────
+
+  /**
+   * Cached fail-closed subscription status for a buyer on a dataset.
+   * A thrown error means verification is unavailable — callers must treat it
+   * as DENY (see docs/ACCESS_PASS_PLAN.md §7).
+   */
+  getAccessPass: (id: string, buyer: string) =>
+    request<unknown>(
+      `${getApiBaseUrl()}/datasets/${id}/access-pass?buyer=${encodeURIComponent(buyer)}`,
+    ).then(r => parseApiResponse(AccessPassCheckSchema, r)),
+
+  /** Subscription plans offered on a dataset (off-chain event index). */
+  getSubscriptionPlans: (id: string) =>
+    request<unknown>(`${getApiBaseUrl()}/datasets/${id}/plans`).then(r =>
+      parseApiResponse(SubscriptionPlansSchema, r),
+    ),
+
+  /** Build an unsigned define_plan() transaction for the seller to sign. */
+  buildDefinePlanTx: (
+    datasetId: string,
+    seller: string,
+    pricePerPeriod: number,
+    periodSeconds: number,
+    maxSeats: number,
+  ) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/define-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ seller, pricePerPeriod, periodSeconds, maxSeats }),
+      },
+    ),
+
+  /** Build an unsigned subscribe() transaction for the buyer to sign. */
+  buildSubscribeTx: (datasetId: string, buyer: string, planId: number) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/subscribe-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, planId }),
+      },
+    ),
+
+  /** Build an unsigned renew() transaction for the buyer to sign. */
+  buildRenewTx: (datasetId: string, buyer: string) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/renew-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer }),
+      },
+    ),
+
+  /** Relay a wallet-signed access-pass transaction (define/subscribe/renew). */
+  submitSignedAccessTx: (datasetId: string, signedXdr: string) =>
+    request<{ success: boolean; txHash: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/submit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ signedXdr }),
+      },
+    ),
 
   submitRating: (id: string, txHash: string, score: number, comment?: string) =>
     request<{ success: boolean; ratings: unknown }>(`${getApiBaseUrl()}/datasets/${id}/ratings`, {
@@ -644,7 +847,7 @@ export const api = {
   }) =>
     request<{ success: boolean; dataset: DatasetMeta }>(`${getApiBaseUrl()}/datasets`, {
       method: 'POST',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
       body: JSON.stringify(payload),
     }).then(r => r.dataset),
 
@@ -661,14 +864,14 @@ export const api = {
   ) =>
     request<{ success: boolean; dataset: DatasetMeta }>(`${getApiBaseUrl()}/datasets/${id}`, {
       method: 'PATCH',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
       body: JSON.stringify(payload),
     }).then(r => r.dataset),
 
   deleteDataset: (id: string) =>
     request<{ success: boolean; message: string }>(`${getApiBaseUrl()}/datasets/${id}`, {
       method: 'DELETE',
-      headers: authHeaders(),
+      headers: sellerAuthHeaders(),
     }),
 
   getOraclePrice: (params: { base: 'XLM' | 'USDC' | 'EURC' | 'USD'; quote?: 'USD' | 'USDC' }) => {
@@ -727,6 +930,7 @@ export const api = {
   getSellerClaimables: (wallet: string) =>
     request<{ success: boolean; claimables: ClaimableBalanceItem[] }>(
       `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claimables`,
+      { headers: sellerAuthHeaders() },
     ).then(r => r.claimables),
 
   /** Sponsor-signed (not seller-signed) claim XDR — the seller's wallet must still sign it. */
@@ -735,6 +939,7 @@ export const api = {
       `${getApiBaseUrl()}/sellers/${encodeURIComponent(wallet)}/claim-tx`,
       {
         method: 'POST',
+        headers: sellerAuthHeaders(),
         body: JSON.stringify({ balanceId }),
       },
     ),
@@ -764,6 +969,23 @@ export const api = {
       openEscrowCount: r.openEscrowCount,
       lastCheckedLedger: r.lastCheckedLedger,
       checkedAt: r.checkedAt,
+    })),
+
+  // ── Receipt verification (#594) ────────────────────────────────────────────
+
+  /** Public: fetch a delivery receipt with its merkle proof and verification. */
+  getReceipt: (id: string) =>
+    request<{
+      success: boolean;
+      receipt: unknown;
+      merkleProof?: unknown;
+      verification: unknown;
+    }>(`${getApiBaseUrl()}/receipts/${encodeURIComponent(id)}`).then(r => ({
+      receipt: parseApiResponse(ReceiptSchema, r.receipt),
+      merkleProof: r.merkleProof
+        ? parseApiResponse(ReceiptMerkleProofSchema, r.merkleProof)
+        : undefined,
+      verification: parseApiResponse(ReceiptVerificationSchema, r.verification),
     })),
 };
 
