@@ -33,7 +33,7 @@
   "devDependencies": {
     "@eslint/js": "^9.16.0",
     "@stellar/stellar-sdk": "^17.0.0",
-    "concurrently": "^8.2.2",
+    "concurrently": "^10.0.5",
     "eslint": "^9.16.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-react": "^7.37.2",
