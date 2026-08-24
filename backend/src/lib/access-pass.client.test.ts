@@ -59,6 +59,7 @@ import {
   hasAccess,
   getPass,
   getPlan,
+  getSeatsUsed,
   decodePlanRecord,
   decodePassRecord,
   buildDefinePlanTx,
@@ -286,6 +287,17 @@ describe('access-pass.client', () => {
         maxSeats: 25,
         active: true,
       });
+    });
+
+    it('reads the live seat count as an unsigned integer', async () => {
+      mockSimulate.mockResolvedValue(simOk(StellarSdk.nativeToScVal(24, { type: 'u32' })));
+      await expect(getSeatsUsed(3)).resolves.toBe(24);
+    });
+
+    it('fails closed when the seat count decodes to garbage', async () => {
+      mockSimulate.mockResolvedValue(simOk(StellarSdk.nativeToScVal('NaN', { type: 'string' })));
+      const err: Error = await getSeatsUsed(3).catch(e => e);
+      expect(err).toBeInstanceOf(AccessCheckUnavailableError);
     });
 
     it('exposes decoders that agree with their async wrappers', () => {

@@ -13,6 +13,7 @@ vi.mock('../common/storage', () => ({
 const {
   mockHasAccess,
   mockGetPass,
+  mockGetSeatsUsed,
   mockBuildDefinePlanTx,
   mockBuildSubscribeTx,
   mockBuildRenewTx,
@@ -20,6 +21,7 @@ const {
 } = vi.hoisted(() => ({
   mockHasAccess: vi.fn(),
   mockGetPass: vi.fn(),
+  mockGetSeatsUsed: vi.fn(),
   mockBuildDefinePlanTx: vi.fn(),
   mockBuildSubscribeTx: vi.fn(),
   mockBuildRenewTx: vi.fn(),
@@ -27,13 +29,15 @@ const {
 }));
 
 vi.mock('../lib/access-pass.client', async () => {
-  const actual = await vi.importActual<typeof import('../lib/access-pass.client')>(
-    '../lib/access-pass.client',
-  );
+  const actual =
+    await vi.importActual<typeof import('../lib/access-pass.client')>(
+      '../lib/access-pass.client',
+    );
   return {
     ...actual,
     hasAccess: mockHasAccess,
     getPass: mockGetPass,
+    getSeatsUsed: mockGetSeatsUsed,
     buildDefinePlanTx: mockBuildDefinePlanTx,
     buildSubscribeTx: mockBuildSubscribeTx,
     buildRenewTx: mockBuildRenewTx,
@@ -111,10 +115,13 @@ describe('access-pass routes', () => {
     vi.mocked(getDataset).mockReset();
     mockHasAccess.mockReset();
     mockGetPass.mockReset();
+    mockGetSeatsUsed.mockReset();
     mockBuildDefinePlanTx.mockReset();
     mockBuildSubscribeTx.mockReset();
     mockBuildRenewTx.mockReset();
     mockSubmitSignedAccessTx.mockReset();
+    // Default: seat lookups succeed with a plausible count.
+    mockGetSeatsUsed.mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -196,6 +203,34 @@ describe('access-pass routes', () => {
         maxSeats: 25,
         active: true,
       });
+    });
+
+    it('decorates plans with live seat counts (seatsUsed + seatsLeft)', async () => {
+      ingestPlanEvent(planNewEvent(0, 'ds-subs'));
+      mockGetSeatsUsed.mockResolvedValue(24);
+
+      const res = await request(app).get('/api/v1/datasets/ds-subs/plans');
+
+      expect(mockGetSeatsUsed).toHaveBeenCalledWith(0);
+      expect(res.body.plans[0]).toMatchObject({ seatsUsed: 24, seatsLeft: 1 });
+    });
+
+    it('clamps seatsLeft at zero when the plan is overbooked by stale seats', async () => {
+      ingestPlanEvent(planNewEvent(0, 'ds-subs'));
+      mockGetSeatsUsed.mockResolvedValue(25);
+
+      const res = await request(app).get('/api/v1/datasets/ds-subs/plans');
+      expect(res.body.plans[0]).toMatchObject({ seatsUsed: 25, seatsLeft: 0 });
+    });
+
+    it('degrades a failed seat lookup to null instead of failing the listing', async () => {
+      ingestPlanEvent(planNewEvent(0, 'ds-subs'));
+      const { AccessCheckUnavailableError } = await import('../lib/access-pass.client');
+      mockGetSeatsUsed.mockRejectedValue(new AccessCheckUnavailableError());
+
+      const res = await request(app).get('/api/v1/datasets/ds-subs/plans');
+      expect(res.status).toBe(200);
+      expect(res.body.plans[0]).toMatchObject({ seatsUsed: null, seatsLeft: null });
     });
 
     it('returns an empty list (not an error) when nothing is indexed yet', async () => {

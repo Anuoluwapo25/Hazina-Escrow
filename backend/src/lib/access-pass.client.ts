@@ -290,6 +290,21 @@ export async function getPlan(planId: number): Promise<PlanState> {
   return decodePlanRecord(retval);
 }
 
+/**
+ * Live seat count for a plan straight from the contract. Throws (fail closed)
+ * on infrastructure errors; callers that merely decorate listings should
+ * degrade gracefully rather than fail the whole listing.
+ */
+export async function getSeatsUsed(planId: number): Promise<number> {
+  const retval = await simulateRead('get_seats_used', [u64ToScVal(planId)]);
+  const native = StellarSdk.scValToNative(retval);
+  const count = Number(native);
+  if (!Number.isInteger(count) || count < 0) {
+    throw new AccessCheckUnavailableError('seat count returned an unexpected value');
+  }
+  return count;
+}
+
 /** Decode a contract PlanRecord ScVal into a PlanState. */
 export function decodePlanRecord(retval: StellarSdk.xdr.ScVal): PlanState {
   const raw = StellarSdk.scValToNative(retval) as Record<string, unknown>;

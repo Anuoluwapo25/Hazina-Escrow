@@ -23,6 +23,7 @@ import {
   AccessPassError,
   getPass,
   hasAccess,
+  getSeatsUsed,
   buildDefinePlanTx,
   buildRenewTx,
   buildSubscribeTx,
@@ -122,12 +123,26 @@ accessPassRouter.get('/:id/access-pass', async (req: Request, res: Response) => 
   }
 });
 
-// GET /:id/plans — plans for this dataset from the off-chain event index
+// GET /:id/plans — plans for this dataset from the off-chain event index,
+// each decorated with the live on-chain seat count so buyers see availability.
+// A failed seat lookup degrades to `seatsUsed: null` — the listing stays up.
 accessPassRouter.get('/:id/plans', async (req: Request, res: Response) => {
   if (!ensureContract(res)) return;
   const { id: datasetId } = req.params;
   if (!datasetId) return res.status(400).json({ error: 'Missing dataset id' });
-  return res.json({ success: true, plans: getIndexedPlans(datasetId) });
+
+  const plans = getIndexedPlans(datasetId);
+  const seats = await Promise.allSettled(plans.map(plan => getSeatsUsed(plan.planId)));
+  const enriched = plans.map((plan, i) => {
+    const seat = seats[i];
+    const used = seat && seat.status === 'fulfilled' ? seat.value : null;
+    return {
+      ...plan,
+      seatsUsed: used,
+      seatsLeft: used === null ? null : Math.max(plan.maxSeats - used, 0),
+    };
+  });
+  return res.json({ success: true, plans: enriched });
 });
 
 // POST /:id/plans/define-tx — assemble an unsigned define_plan() XDR for the seller
