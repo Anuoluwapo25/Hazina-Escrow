@@ -1,6 +1,8 @@
 name: Contract Fuzz
 
-# Property-based invariant suite for every contract under contracts/.
+# Property-based invariant suite for the contract crates under contracts/.
+# Gate tests cover every crate; the property suite runs where a fuzz target
+# exists (hazina-escrow, hazina-access-pass).
 # Specification: docs/INVARIANTS.md. Runbook: docs/FUZZING.md.
 
 on:
@@ -36,25 +38,31 @@ env:
 jobs:
   # ── Deterministic gate ────────────────────────────────────────────────────────
   gate:
-    name: Contract Gate Tests (${{ matrix.contract }})
+    name: Contract Gate Tests (${{ matrix.contract.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        contract: [hazina-escrow, hazina-access-pass]
+        contract:
+          - name: hazina-escrow
+            dir: contracts/hazina-escrow
+          - name: hazina-seller-bond
+            dir: contracts/hazina-seller-bond
+          - name: hazina-access-pass
+            dir: contracts/hazina-access-pass
     defaults:
       run:
-        working-directory: contracts/${{ matrix.contract }}
+        working-directory: ${{ matrix.contract.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: contracts
+          workspaces: ${{ matrix.contract.dir }}
 
       # No feature flag: the fuzz target declares `required-features`, so this
       # does not even build it. Sub-second, never flaky.
-      - name: Example tests
+      - name: Gate tests
         run: cargo test --locked
 
       - name: Release build
@@ -62,21 +70,25 @@ jobs:
 
   # ── Property suite ────────────────────────────────────────────────────────────
   fuzz:
-    name: Invariant Suite (${{ matrix.contract }})
+    name: Invariant Suite (${{ matrix.contract.name }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        contract: [hazina-escrow, hazina-access-pass]
+        contract:
+          - name: hazina-escrow
+            dir: contracts/hazina-escrow
+          - name: hazina-access-pass
+            dir: contracts/hazina-access-pass
     defaults:
       run:
-        working-directory: contracts/${{ matrix.contract }}
+        working-directory: ${{ matrix.contract.dir }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: contracts/hazina-escrow
+          workspaces: ${{ matrix.contract.dir }}
 
       # Fixed budget so a run is reproducible and its cost is predictable.
       # 512 takes ~100s; the nightly schedule and manual dispatch go deeper.
@@ -116,8 +128,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: proptest-regressions-${{ matrix.contract }}-${{ github.run_id }}
-          path: contracts/${{ matrix.contract }}/proptest-regressions/
+          name: proptest-regressions-${{ matrix.contract.name }}-${{ github.run_id }}
+          path: ${{ matrix.contract.dir }}/proptest-regressions/
           if-no-files-found: ignore
           retention-days: 30
 
