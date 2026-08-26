@@ -169,11 +169,14 @@ a deeper run by hand from the Actions tab; the `cases` input sets the budget.
 
 ## Known limits
 
-- **`i128` overflow is out of scope.** The properties bound amounts to what the
-  circuit breaker allows. `release_one` computes `amount * fee_bps` before
-  dividing, which would overflow above roughly `i128::MAX / 2_000` — far above
-  any reachable balance, and `overflow-checks = true` in the release profile
-  turns it into a panic rather than a wrap.
+- **`i128` overflow in `release_one` is out of scope.** `release_one` computes
+  `amount * fee_bps` before dividing, which would overflow above roughly
+  `i128::MAX / 2_000` — far above any reachable balance. `lock_multi`'s
+  *summation* accumulator is a different case and is deliberately probed by
+  `lock_multi_sums_rejects_overflow`: with `overflow-checks = true` (release
+  profile and the test env) it traps before the transfer and the batch rejects
+  atomically rather than wrapping. Both overflow paths are panics, never silently
+  wrapped values.
 - **Token contract behaviour is assumed.** Every property uses Soroban's
   Stellar-asset contract. A non-standard token that reverts or takes a transfer
   fee is not modelled.
