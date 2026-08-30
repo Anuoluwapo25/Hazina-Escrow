@@ -1,6 +1,6 @@
 import { initializeDatadog } from './common/datadog';
 import { initializeSentry, Sentry } from './common/sentry';
-import { validateEscrowConfig } from './lib/stellar.config';
+import { validateEscrowConfig, validateAccessPassConfig } from './lib/stellar.config';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -11,6 +11,9 @@ dotenv.config();
 // (rather than inside the uncaughtException handler's scope further down)
 // so a bad value crashes startup instead of being swallowed and logged.
 validateEscrowConfig();
+// Same fail-fast rule for ACCESS_PASS_CONTRACT_ID: a malformed id would break
+// every subscription read/build the first time it's hit.
+validateAccessPassConfig();
 // Fail fast on a misconfigured AUTH_MODE: SEP-10 enabled without its secrets
 // (or with an invalid WEB_AUTH_DOMAIN) would 500 the first sign-in instead.
 validateSep10Config();
@@ -28,6 +31,8 @@ import http from 'http';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { datasetsRouter } from './datasets/datasets.router';
+import { accessPassRouter } from './datasets/access-pass.routes';
+import { startPlanIndexerWorker, stopPlanIndexerWorker } from './datasets/access-pass.plans';
 import {
   paymentsRouter,
   startDeliveryRetryWorker,
@@ -315,6 +320,10 @@ const v1Router = express.Router();
 
 v1Router.use('/datasets', datasetsRouter);
 v1Router.use('/datasets', snapshotsRouter);
+// Access-pass subscription routes share the /datasets prefix (e.g.
+// /api/v1/datasets/:id/access-pass) and self-guard with 503 when the
+// ACCESS_PASS_CONTRACT_ID is unset.
+v1Router.use('/datasets', accessPassRouter);
 v1Router.use('/agent', requireApiKey, agentRouter);
 v1Router.use('/webhooks', webhooksRouter);
 v1Router.use('/payments', requireApiKey, paymentsRouter);
@@ -357,6 +366,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 // Routes
 app.use('/api/datasets', datasetsRouter);
 app.use('/api/datasets', snapshotsRouter);
+app.use('/api/datasets', accessPassRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);
 app.use('/api', bundleRouter);
@@ -410,6 +420,8 @@ startSnapshotCompactionWorker();
 startClaimableSweepWorker();
 startAnchorWorker();
 startSep10NonceSweeper();
+// No-op unless ACCESS_PASS_CONTRACT_ID is set (see startPlanIndexerWorker).
+startPlanIndexerWorker();
 
 // Give every pre-existing dataset a first snapshot so history starts now rather
 // than at its next refresh (#600). Idempotent, so a restart is free; skipped in
@@ -463,6 +475,7 @@ process.on('SIGTERM', () => {
   stopSnapshotCompactionWorker();
   stopAnchorWorker();
   stopSep10NonceSweeper();
+  stopPlanIndexerWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');
@@ -479,6 +492,7 @@ process.on('SIGINT', () => {
   stopSnapshotCompactionWorker();
   stopAnchorWorker();
   stopSep10NonceSweeper();
+  stopPlanIndexerWorker();
   wsServer.shutdown();
   server.close(() => {
     logger.info('[Server] HTTP server closed');

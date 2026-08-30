@@ -131,9 +131,13 @@ jobs:
   contract:
     name: Smart Contract (Build + Test)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        contract: [hazina-escrow, hazina-access-pass]
     defaults:
       run:
-        working-directory: contracts/hazina-escrow
+        working-directory: contracts/${{ matrix.contract }}
     steps:
       - uses: actions/checkout@v4
 
@@ -157,9 +161,13 @@ jobs:
     # Without this the job inherits GitHub's 6-hour default, so a wedged step
     # burns most of a day of runner time before anyone sees a red check.
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        contract: [hazina-escrow, hazina-access-pass]
     defaults:
       run:
-        working-directory: contracts/hazina-escrow
+        working-directory: contracts/${{ matrix.contract }}
     steps:
       - uses: actions/checkout@v4
 
@@ -170,6 +178,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: contracts
+
+      - name: Resolve artifact names
+        run: echo "WASM_NAME=$(echo "${{ matrix.contract }}" | tr '-' '_')" >> "$GITHUB_ENV"
 
       - name: Build release WASM
         run: cargo build --release --target wasm32v1-none
@@ -193,15 +204,15 @@ jobs:
       - name: Extract contract spec to JSON
         run: >
           stellar contract info interface
-          --wasm target/wasm32v1-none/release/hazina_escrow.wasm
+          --wasm target/wasm32v1-none/release/${{ env.WASM_NAME }}.wasm
           --output json > spec.json
 
       - name: Upload contract artifacts
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: soroban-contract-artifacts
+          name: soroban-contract-artifacts-${{ matrix.contract }}
           path: |
-            contracts/hazina-escrow/target/wasm32v1-none/release/hazina_escrow.wasm
-            contracts/hazina-escrow/spec.json
+            contracts/${{ matrix.contract }}/target/wasm32v1-none/release/${{ env.WASM_NAME }}.wasm
+            contracts/${{ matrix.contract }}/spec.json
           retention-days: 90

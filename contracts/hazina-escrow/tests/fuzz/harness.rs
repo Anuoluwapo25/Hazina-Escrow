@@ -110,7 +110,9 @@ impl World {
         let buyer = Address::generate(&env);
         let seller = Address::generate(&env);
 
-        let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_address = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         StellarAssetClient::new(&env, &token_address).mint(&buyer, &BUYER_FLOAT);
         let token = TokenClient::new(&env, &token_address);
 
@@ -149,7 +151,7 @@ impl World {
         }
     }
 
-        /// The timelock delay, in ledgers, between proposing a sensitive action and
+    /// The timelock delay, in ledgers, between proposing a sensitive action and
     /// executing it.
     pub fn get_timelock_delay(&self) -> u32 {
         self.client.get_timelock_delay()

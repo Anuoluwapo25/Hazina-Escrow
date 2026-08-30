@@ -1,6 +1,6 @@
 [package]
-name = "hazina-escrow"
-version = "0.2.0"
+name = "hazina-access-pass"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
@@ -12,27 +12,21 @@ soroban-sdk = { version = "22.0.0", features = ["alloc"] }
 [dev-dependencies]
 soroban-sdk = { version = "22.0.0", features = ["testutils", "alloc"] }
 proptest     = { version = "1", default-features = false, features = ["std"] }
-dotenvy      = "0.15"
-serde_json   = "1.0"
-ethnum = "1.5.3"
-
+# Path dependency (dev-only) so tests register a REAL escrow contract and
+# exercise the cross-contract fee lookup end to end instead of mocking it.
+# Never built into the release WASM artifact.
+hazina-escrow = { path = "../hazina-escrow" }
 
 [features]
 fuzz-tests = []
-integration-tests = []
 
-# Property-based invariant suite (docs/INVARIANTS.md). `required-features`
-# keeps it out of the default `cargo test` gate entirely rather than relying on
-# a `#![cfg]` that still has to compile.
+# Property-based lifecycle suite. `required-features` keeps it out of the
+# default `cargo test` gate entirely rather than relying on a `#![cfg]` that
+# still has to compile. Mirrors the hazina-escrow wiring.
 [[test]]
 name = "fuzz"
 path = "tests/fuzz/main.rs"
 required-features = ["fuzz-tests"]
-
-[[test]]
-name = "integration"
-path = "tests/integration.rs"
-required-features = ["integration-tests"]
 
 [profile.release]
 opt-level = "z"
@@ -47,4 +41,3 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
- 

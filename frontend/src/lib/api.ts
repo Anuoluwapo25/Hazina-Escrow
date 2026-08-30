@@ -430,6 +430,56 @@ export const DatasetPreviewSchema = z.object({
 });
 export type DatasetPreview = z.infer<typeof DatasetPreviewSchema>;
 
+/** On-chain subscription plan, as served by the backend's event index. */
+export const AccessPassPlanSchema = z.object({
+  planId: z.number(),
+  datasetId: z.string(),
+  seller: z.string(),
+  pricePerPeriodStroops: z.string(),
+  pricePerPeriod: z.number(),
+  periodSeconds: z.number(),
+  maxSeats: z.number(),
+  active: z.boolean(),
+  ledger: z.number().optional(),
+  /** Live on-chain seat usage; null when the seat lookup failed. */
+  seatsUsed: z.number().nullable().optional(),
+  seatsLeft: z.number().nullable().optional(),
+});
+export type AccessPassPlan = z.infer<typeof AccessPassPlanSchema>;
+
+/** On-chain pass record (null when the buyer holds none). */
+export const AccessPassStateSchema = z.object({
+  planId: z.number(),
+  buyer: z.string(),
+  datasetId: z.string(),
+  start: z.number(),
+  expiry: z.number(),
+  termPeriodSeconds: z.number(),
+  amountPaidStroops: z.string(),
+  amountPaid: z.number(),
+  feeBps: z.number(),
+  revoked: z.boolean(),
+});
+export type AccessPassState = z.infer<typeof AccessPassStateSchema>;
+
+/**
+ * Subscription status check. When `hasAccess` is false and `pass` is null the
+ * buyer simply holds no pass — that is a REAL answer, not an error. Errors are
+ * thrown, never encoded here (fail closed).
+ */
+export const AccessPassCheckSchema = z.object({
+  success: z.boolean(),
+  hasAccess: z.boolean(),
+  pass: AccessPassStateSchema.nullable(),
+});
+export type AccessPassCheck = z.infer<typeof AccessPassCheckSchema>;
+
+export const SubscriptionPlansSchema = z.object({
+  success: z.boolean(),
+  plans: z.array(AccessPassPlanSchema).catch([]),
+});
+export type SubscriptionPlans = z.infer<typeof SubscriptionPlansSchema>;
+
 /** One immutable version of a dataset payload (#600). Metadata only — no payload. */
 export const SnapshotMetaSchema = z.object({
   id: z.string(),

@@ -174,6 +174,8 @@ fee is computed **per escrow**, not on the batch total (these differ once
 truncation is in play).
 
 > `lock_multi::lock_multi_total_equals_sum_of_shares`,
+> `lock_multi::lock_multi_sums`,
+> `lock_multi::lock_multi_sums_just_under_i128`,
 > `lock_multi::releasing_a_batch_conserves_the_batch_total`,
 > `lock_multi::refunding_a_batch_returns_the_exact_total`
 
@@ -183,7 +185,8 @@ truncation is in play).
 `first_id .. first_id + shares.len()` with no gaps, and `EscrowCount` advances
 by exactly `shares.len()`. A second batch continues the sequence.
 
-> `lock_multi::lock_multi_assigns_contiguous_ids`
+> `lock_multi::lock_multi_assigns_contiguous_ids`,
+> `lock_multi::lock_multi_sums`
 
 ### I14 — the batch is atomic
 
@@ -194,7 +197,8 @@ whole call: no tokens move, no records exist, the counter does not advance.
 
 > `lock_multi::lock_multi_is_atomic_when_a_share_is_invalid`,
 > `lock_multi::lock_multi_rejects_length_mismatch`,
-> `lock_multi::lock_multi_rejects_empty_batch`
+> `lock_multi::lock_multi_rejects_empty_batch`,
+> `lock_multi::lock_multi_sums_rejects_overflow`
 
 ---
 

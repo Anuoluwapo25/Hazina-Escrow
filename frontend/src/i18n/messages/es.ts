@@ -340,6 +340,63 @@ export const es: EnglishMessages = {
         'El 95 % va a tu wallet y el 5 % a la plataforma',
       ],
     },
+    subscription: {
+      toggle: 'Ofrecer una suscripción',
+      help:
+        'Los compradores pagan por período para acceder a este dataset por tiempo limitado, ' +
+        'aplicado on-chain. Tras publicar, firmas una transacción con Freighter para crear el plan.',
+      priceLabel: 'Precio / período (USDC)',
+      priceError: 'El precio debe ser mayor que 0',
+      seatsLabel: 'Plazas máximas',
+      seatsError: 'Las plazas deben ser un número entero de al menos 1',
+      pricePresets: 'Precios rápidos:',
+      periodLabel: 'Período de facturación',
+      period: {
+        day: 'Diario',
+        week: 'Semanal',
+        month: 'Mensual',
+      },
+      confirmNote:
+        'Tras publicar se te pedirá firmar una transacción de Freighter que crea un plan de ' +
+        'suscripción de ${price}/{period} hasta el número de plazas elegido.',
+      previewNote: 'Suscripción: ${price}/{period} · máx. {seats} suscriptores',
+      definedSuccess: 'Plan de suscripción creado',
+      definedFailed: 'Dataset publicado — pero el plan de suscripción no se creó',
+    },
+  },
+  accessPass: {
+    badge: {
+      active: 'Activa',
+      expired: 'Caducada',
+      unavailable: 'Estado de acceso no disponible',
+    },
+    card: {
+      title: 'Acceso por suscripción',
+      subscribe: 'Suscribirse',
+      resubscribe: 'Volver a suscribirse',
+      renew: 'Renovar suscripción',
+      subscribed: 'Suscripción activa',
+      renewed: 'Suscripción renovada',
+      subscribeFailed: 'Error al suscribirse',
+      renewFailed: 'Error al renovar',
+      soldOut: 'Completo',
+      inactive: 'No disponible',
+      seatsLeft: '{left} de {total} plazas libres',
+      seatsUnknown: 'Disponibilidad de plazas desconocida',
+      custodyNote:
+        'Los pagos van de tu propia wallet a la custodia del contrato on-chain — Hazina nunca retiene fondos de suscriptores.',
+    },
+    period: {
+      day: 'por día',
+      week: 'por semana',
+      month: 'por mes',
+      days: 'cada {days} días',
+    },
+    detail: {
+      includedNote: 'Tu suscripción activa cubre este dataset.',
+      verifyPending:
+        'Verificando el acceso por suscripción — la compra se reactiva al completar la comprobación.',
+    },
   },
   dashboard: {
     sellerSignInBanner:

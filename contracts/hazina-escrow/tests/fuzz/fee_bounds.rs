@@ -46,8 +46,16 @@ fn plant_escrow(world: &World, amount: i128, fee_bps: u32, confirmed: bool) -> u
     };
 
     world.env.as_contract(&world.contract, || {
-        world.env.storage().persistent().set(&EscrowKey::Record(0), &record);
-        world.env.storage().instance().set(&DataKey::EscrowCount, &1u64);
+        world
+            .env
+            .storage()
+            .persistent()
+            .set(&EscrowKey::Record(0), &record);
+        world
+            .env
+            .storage()
+            .instance()
+            .set(&DataKey::EscrowCount, &1u64);
     });
     0
 }
