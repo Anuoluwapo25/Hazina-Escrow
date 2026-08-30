@@ -24,12 +24,12 @@ test('browse the marketplace and search for a dataset', async ({ page }) => {
 
   // Type filters are disabled while a search query is active (the semantic
   // search endpoint doesn't support them yet) — clear the query to return to
-  // browse mode before exercising the type filter.
-  const browseResponse = page.waitForResponse(
-    response => response.url().includes('/api/v1/datasets') && response.request().method() === 'GET',
-  );
-  await page.getByLabel(/reset search/i).click();
-  await browseResponse;
+  // browse mode before exercising the type filter. Resetting lands back on
+  // the exact same query key as the initial load, so react-query may serve
+  // it from its 5-minute cache instead of firing a new request — assert the
+  // resulting UI state (filters re-enabled) rather than a network call.
+  await page.getByRole('button', { name: /reset search/i }).click();
+  await expect(page.getByRole('button', { name: /filter by yield data/i })).toBeEnabled();
 
   const filterResponse = page.waitForResponse(
     response => response.url().includes('/api/v1/datasets') && response.url().includes('type=yield-data'),
