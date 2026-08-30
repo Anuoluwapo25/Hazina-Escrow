@@ -15,9 +15,11 @@ import {
   RotateCcw,
   Radio,
 } from 'lucide-react';
-import { api, DatasetMeta, PaginatedDatasets } from '../lib/api';
+import { api, Bundle, DatasetMeta, PaginatedDatasets } from '../lib/api';
 import { DATA_TYPE_META } from '../lib/utils';
 import DatasetCard from '../components/ui/DatasetCard';
+import BundleCard from '../components/ui/BundleCard';
+import BundlePurchaseModal from '../components/ui/BundlePurchaseModal';
 import QueryModal from '../components/ui/QueryModal';
 import { DatasetCardSkeleton, Skeleton } from '../components/ui/SkeletonLoader';
 import clsx from 'clsx';
@@ -50,6 +52,7 @@ export default function MarketplacePage() {
     setSearchParams(updatedParams);
   };
   const [selectedDataset, setSelectedDataset] = useState<DatasetMeta | null>(null);
+  const [selectedBundle, setSelectedBundle] = useState<Bundle | null>(null);
   const requestedPageSize = 12;
 
   // Debounce: only update the query key 400 ms after the user stops typing.
@@ -162,10 +165,21 @@ export default function MarketplacePage() {
       }),
   });
 
-  const datasets = data?.data || [];
+  const datasets = useMemo(() => data?.data ?? [], [data]);
   const total = data?.total || 0;
   const pageSize = requestedPageSize;
   const totalPages = data?.totalPages || 1;
+
+  // Composed bundles (#615) — shown as their own showcase row, independent of
+  // the dataset grid's search/filter/pagination state.
+  const { data: bundles = [] } = useQuery<Bundle[]>({
+    queryKey: ['bundles'],
+    queryFn: () => api.getBundles(),
+  });
+  const datasetNames = useMemo(
+    () => Object.fromEntries(datasets.map((d: DatasetMeta) => [d.id, d.name])),
+    [datasets],
+  );
 
   // WebSocket connection for real-time updates
   const { connected: wsConnected, error: wsError } = useTransactionWebSocket(
@@ -292,6 +306,31 @@ export default function MarketplacePage() {
           </div>
           <p className="text-foreground-muted font-body text-lg">{t('marketplace.subtitle')}</p>
         </div>
+
+        {/* Bundles (#615) — visually distinct from single-dataset cards */}
+        {bundles.length > 0 && (
+          <div className="mb-10">
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-violet-300 text-sm font-body font-medium tracking-widest uppercase">
+                {t('bundles.eyebrow')}
+              </p>
+            </div>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">
+              {t('bundles.title')}
+            </h2>
+            <p className="text-foreground-muted font-body text-sm mb-5">{t('bundles.subtitle')}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {bundles.map(bundle => (
+                <BundleCard
+                  key={bundle.id}
+                  bundle={bundle}
+                  datasetNames={datasetNames}
+                  onBuy={setSelectedBundle}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Category tabs + live toggle */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
@@ -600,6 +639,10 @@ export default function MarketplacePage() {
             setSelectedDataset(null);
           }}
         />
+      )}
+
+      {selectedBundle && (
+        <BundlePurchaseModal bundle={selectedBundle} onClose={() => setSelectedBundle(null)} />
       )}
     </div>
   );

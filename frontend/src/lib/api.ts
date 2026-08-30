@@ -191,6 +191,96 @@ export interface SellerAnalytics {
   topBuyers: { wallet: string; count: number }[];
 }
 
+// ── Composed data bundles (#615) ─────────────────────────────────────────────
+
+export const BundleComponentSchema = z.object({
+  id: z.string(),
+  bundleId: z.string(),
+  datasetId: z.string(),
+  shareBps: z.number(),
+  position: z.number(),
+  createdAt: z.string(),
+});
+export type BundleComponent = z.infer<typeof BundleComponentSchema>;
+
+export const BundleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  curatorWallet: z.string(),
+  totalPrice: z.number(),
+  paymentToken: z.string().optional(),
+  curatorFeeBps: z.number(),
+  active: z.boolean().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  components: z.array(BundleComponentSchema),
+  degraded: z.boolean(),
+  degradedReason: z.string().optional(),
+});
+export type Bundle = z.infer<typeof BundleSchema>;
+
+export const BundlePurchaseComponentSchema = z.object({
+  id: z.string(),
+  purchaseId: z.string(),
+  datasetId: z.string(),
+  role: z.enum(['dataset', 'curator']),
+  escrowId: z.number(),
+  sellerWallet: z.string(),
+  amount: z.number(),
+  buyerConfirmed: z.boolean(),
+  deliveryStatus: z.enum(['pending', 'delivered', 'failed']),
+  deliveryError: z.string().optional(),
+  deliveryAttempts: z.number(),
+  createdAt: z.string(),
+});
+export type BundlePurchaseComponent = z.infer<typeof BundlePurchaseComponentSchema>;
+
+export const BundlePurchaseSchema = z.object({
+  id: z.string(),
+  bundleId: z.string(),
+  buyerWallet: z.string(),
+  firstEscrowId: z.number(),
+  escrowIds: z.array(z.number()),
+  totalAmount: z.number(),
+  paymentToken: z.string().optional(),
+  status: z.enum([
+    'locked',
+    'delivering',
+    'delivered',
+    'released',
+    'refunding',
+    'refunded',
+    'failed',
+  ]),
+  lockTxHash: z.string().optional(),
+  releaseTxHash: z.string().optional(),
+  aiSummary: z.string().optional(),
+  failureReason: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type BundlePurchase = z.infer<typeof BundlePurchaseSchema>;
+
+export const CuratorBundleEarningsSchema = z.object({
+  bundleId: z.string(),
+  bundleName: z.string(),
+  active: z.boolean(),
+  totalPurchases: z.number(),
+  releasedPurchases: z.number(),
+  totalEarned: z.number(),
+});
+export type CuratorBundleEarnings = z.infer<typeof CuratorBundleEarningsSchema>;
+
+export const SellerBundleEarningsSchema = z.object({
+  bundleId: z.string(),
+  bundleName: z.string(),
+  datasetId: z.string(),
+  totalEarned: z.number(),
+  purchaseCount: z.number(),
+});
+export type SellerBundleEarnings = z.infer<typeof SellerBundleEarningsSchema>;
+
 /** Sentinel's public transparency endpoint — see docs/MONITORING.md. */
 export interface SolvencyReport {
   tokens: {
@@ -205,6 +295,16 @@ export interface SolvencyReport {
 }
 
 /** Verifiable delivery receipt — see docs/RECEIPTS.md. */
+/** Cross-asset payment quote — mirrors backend/src/payments/quote.service.ts's Quote. */
+export interface QuoteResponse {
+  source: { asset: string; maxAmount: string };
+  destination: { asset: string; amount: string };
+  path: string[];
+  slippageBps: number;
+  signature?: string;
+  expiresAt?: string;
+}
+
 export interface ReceiptVerification {
   valid: boolean;
   receiptHashMatches: boolean;
@@ -646,7 +746,7 @@ export const api = {
     ),
 
   getQuote: (id: string, sourceAsset: string) =>
-    request<any>(
+    request<QuoteResponse>(
       `${getApiBaseUrl()}/query/${id}/quote?sourceAsset=${encodeURIComponent(sourceAsset)}`,
     ),
 
@@ -715,6 +815,97 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ buyer, escrowId, evidenceHash }),
     }),
+
+  // ── Composed data bundles (#615) ──────────────────────────────────────────
+
+  getBundles: () =>
+    request<{ success: boolean; bundles: unknown }>(`${getApiBaseUrl()}/bundles`).then(r =>
+      parseApiResponse(z.array(BundleSchema), r.bundles),
+    ),
+
+  getBundle: (id: string) =>
+    request<{ success: boolean; bundle: unknown }>(`${getApiBaseUrl()}/bundles/${id}`).then(r =>
+      parseApiResponse(BundleSchema, r.bundle),
+    ),
+
+  createBundle: (payload: {
+    name: string;
+    description: string;
+    curatorWallet: string;
+    totalPrice: number;
+    paymentToken?: 'USDC' | 'EURC' | 'XLM';
+    curatorFeeBps: number;
+    components: { datasetId: string; shareBps: number }[];
+  }) =>
+    request<{ success: boolean; bundle: unknown }>(`${getApiBaseUrl()}/bundles`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    }).then(r =>
+      parseApiResponse(BundleSchema.omit({ degraded: true, degradedReason: true }), r.bundle),
+    ),
+
+  /** Ask the backend to assemble an unsigned lock_multi() transaction for the buyer. */
+  buildBundlePurchase: (bundleId: string, buyer: string) =>
+    request<{
+      success: boolean;
+      xdr: string;
+      contractId: string;
+      bundleId: string;
+      componentCount: number;
+      totalPrice: number;
+    }>(`${getApiBaseUrl()}/bundles/${bundleId}/purchase/build`, {
+      method: 'POST',
+      body: JSON.stringify({ buyer }),
+    }),
+
+  /** Relay a buyer-signed lock_multi() transaction — locks funds and begins delivery. */
+  submitBundlePurchase: (bundleId: string, buyer: string, signedXdr: string) =>
+    request<{ success: boolean; purchase: unknown }>(
+      `${getApiBaseUrl()}/bundles/${bundleId}/purchase/submit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, signedXdr }),
+      },
+    ).then(r => parseApiResponse(BundlePurchaseSchema, r.purchase)),
+
+  getBundlePurchase: (purchaseId: string) =>
+    request<{ success: boolean; purchase: unknown; components: unknown }>(
+      `${getApiBaseUrl()}/bundles/purchases/${purchaseId}`,
+    ).then(r => ({
+      purchase: parseApiResponse(BundlePurchaseSchema, r.purchase),
+      components: parseApiResponse(z.array(BundlePurchaseComponentSchema), r.components),
+    })),
+
+  /** Build one confirm_delivery() XDR per not-yet-confirmed escrow leg, for the buyer to sign. */
+  buildBundleConfirmations: (purchaseId: string, buyer: string) =>
+    request<{ success: boolean; confirmations: { escrowId: number; xdr: string }[] }>(
+      `${getApiBaseUrl()}/bundles/purchases/${purchaseId}/confirm/build`,
+      { method: 'POST', body: JSON.stringify({ buyer }) },
+    ).then(r => r.confirmations),
+
+  /** Relay one buyer-signed confirm_delivery() leg. Once every leg is confirmed, the backend auto-releases. */
+  submitBundleConfirmation: (purchaseId: string, escrowId: number, signedXdr: string) =>
+    request<{ success: boolean; purchase: unknown }>(
+      `${getApiBaseUrl()}/bundles/purchases/${purchaseId}/confirm/submit`,
+      { method: 'POST', body: JSON.stringify({ escrowId, signedXdr }) },
+    ).then(r => parseApiResponse(BundlePurchaseSchema, r.purchase)),
+
+  getCuratorBundleEarnings: (curatorWallet: string) =>
+    request<{ success: boolean; bundles: unknown }>(
+      `${getApiBaseUrl()}/bundles/dashboard/curator/${encodeURIComponent(curatorWallet)}`,
+    ).then(r => parseApiResponse(z.array(CuratorBundleEarningsSchema), r.bundles)),
+
+  getSellerBundleDashboard: (sellerWallet: string) =>
+    request<{ success: boolean; bundles: unknown; earnings: unknown }>(
+      `${getApiBaseUrl()}/bundles/dashboard/seller/${encodeURIComponent(sellerWallet)}`,
+    ).then(r => ({
+      bundles: parseApiResponse(
+        z.array(BundleSchema.omit({ degraded: true, degradedReason: true })),
+        r.bundles,
+      ),
+      earnings: parseApiResponse(z.array(SellerBundleEarningsSchema), r.earnings),
+    })),
 
   // ── Dataset subscription access passes ────────────────────────────────────
 

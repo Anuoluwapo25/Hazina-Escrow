@@ -9,6 +9,7 @@ import {
   Bot,
   Wallet,
   LogOut,
+  Layers,
   Loader2,
 } from 'lucide-react';
 import { useEffect, useId, useCallback, useState } from 'react';
@@ -28,6 +29,7 @@ const NAV_LINKS = [
   },
   { to: '/agent', key: 'nav.agent', icon: Bot, dataTour: 'agent-link' },
   { to: '/sell', key: 'nav.sell', icon: Upload, dataTour: 'sell-link' },
+  { to: '/curate', key: 'nav.curate', icon: Layers, dataTour: 'curate-link' },
   {
     to: '/dashboard',
     key: 'nav.dashboard',

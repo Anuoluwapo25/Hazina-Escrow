@@ -44,3 +44,38 @@ export function arrayToScVal(values: StellarSdk.xdr.ScVal[]): StellarSdk.xdr.ScV
 export function scValToNative<T = unknown>(scVal: StellarSdk.xdr.ScVal): T {
   return StellarSdk.scValToNative(scVal) as T;
 }
+
+/** One payee in a `lock_multi` call — mirrors the contract's `SellerShare` struct. */
+export interface SellerShareInput {
+  seller: string;
+  /** Exact stroop amount for this seller — not a basis-points share. */
+  amount: number | bigint;
+}
+
+/**
+ * Encode a single `SellerShare { seller: Address, amount: i128 }` struct.
+ * Field order in the input object doesn't matter — `nativeToScVal` sorts map
+ * entries by the symbol key, not by insertion order, matching how the
+ * contract's `#[contracttype]` struct is serialized on-chain.
+ */
+export function sellerShareToScVal(share: SellerShareInput): StellarSdk.xdr.ScVal {
+  return StellarSdk.nativeToScVal(
+    { seller: share.seller, amount: share.amount },
+    { type: { seller: ['symbol', 'address'], amount: ['symbol', 'i128'] } },
+  );
+}
+
+/** Encode a Soroban `Vec<SellerShare>` argument for `lock_multi`. */
+export function sellerSharesToScVal(shares: SellerShareInput[]): StellarSdk.xdr.ScVal {
+  return StellarSdk.xdr.ScVal.scvVec(shares.map(sellerShareToScVal));
+}
+
+/** Encode a Soroban `Vec<String>` argument (e.g. `lock_multi`'s dataset ids). */
+export function stringsToScVal(values: string[]): StellarSdk.xdr.ScVal {
+  return StellarSdk.xdr.ScVal.scvVec(values.map(stringToScVal));
+}
+
+/** Encode a Soroban `Vec<u64>` argument (e.g. `release_multi`'s escrow ids). */
+export function u64sToScVal(values: Array<number | bigint>): StellarSdk.xdr.ScVal {
+  return StellarSdk.xdr.ScVal.scvVec(values.map(u64ToScVal));
+}

@@ -217,41 +217,61 @@ function verifyAnySellerJwt(token: string): SellerJwtClaims | null {
 }
 
 /**
+ * Factory behind {@link requireSellerMutationAuth} and
+ * {@link requireCuratorMutationAuth} (#615). Accepts either the shared API key
+ * (when AUTH_MODE is legacy or both) or a seller JWT (legacy SELLER_JWT_SECRET
+ * or a SEP-10 web-auth token) — every wallet on the marketplace (seller or
+ * curator) is the same identity, scoped by the same `sellerWallet` JWT claim.
+ * When a JWT is used, `walletField` in the request body must match the JWT's
+ * wallet claim, so a curator can only build a bundle they can prove ownership of.
+ */
+function makeWalletMutationAuth(walletField: string) {
+  return function requireWalletMutationAuth(req: Request, res: Response, next: NextFunction) {
+    const token = getBearerToken(req.headers.authorization);
+    if (!token) {
+      return res.status(401).json({ error: 'Authorization header missing or not Bearer' });
+    }
+
+    const apiKey = process.env.API_KEY;
+    if (apiKey && isApiKeyEnabled() && token === apiKey) {
+      return next();
+    }
+
+    const claims = verifyAnySellerJwt(token);
+    if (!claims) {
+      if (apiKey && isApiKeyEnabled()) {
+        return res.status(403).json({ error: 'Invalid API key' });
+      }
+      if (hasSellerAuthConfigured()) {
+        return res.status(401).json({ error: 'Invalid or expired seller token' });
+      }
+      return res.status(503).json({ error: 'Server misconfigured: SELLER_JWT_SECRET is not set' });
+    }
+
+    const requestWallet = getRequestWallet(req, walletField);
+    if (requestWallet && requestWallet !== claims.sellerWallet) {
+      return res.status(403).json({ error: 'Authenticated wallet does not match request body' });
+    }
+
+    req.sellerAuth = claims;
+    next();
+  };
+}
+
+/**
  * Accepts either the shared API key (when AUTH_MODE is legacy or both) or a
  * seller JWT (legacy SELLER_JWT_SECRET or a SEP-10 web-auth token).
  * When a seller JWT is used, the wallet in the request body must match the
  * JWT claim.
  */
-export function requireSellerMutationAuth(req: Request, res: Response, next: NextFunction) {
-  const token = getBearerToken(req.headers.authorization);
-  if (!token) {
-    return res.status(401).json({ error: 'Authorization header missing or not Bearer' });
-  }
+export const requireSellerMutationAuth = makeWalletMutationAuth('sellerWallet');
 
-  const apiKey = process.env.API_KEY;
-  if (apiKey && isApiKeyEnabled() && token === apiKey) {
-    return next();
-  }
-
-  const claims = verifyAnySellerJwt(token);
-  if (!claims) {
-    if (apiKey && isApiKeyEnabled()) {
-      return res.status(403).json({ error: 'Invalid API key' });
-    }
-    if (hasSellerAuthConfigured()) {
-      return res.status(401).json({ error: 'Invalid or expired seller token' });
-    }
-    return res.status(503).json({ error: 'Server misconfigured: SELLER_JWT_SECRET is not set' });
-  }
-
-  const requestWallet = getRequestWallet(req, 'sellerWallet');
-  if (requestWallet && requestWallet !== claims.sellerWallet) {
-    return res.status(403).json({ error: 'Authenticated wallet does not match request body' });
-  }
-
-  req.sellerAuth = claims;
-  next();
-}
+/**
+ * Protects bundle creation (#615) — same trust model as
+ * {@link requireSellerMutationAuth}, scoped to the `curatorWallet` field
+ * instead of `sellerWallet` so a curator proves ownership of their own wallet.
+ */
+export const requireCuratorMutationAuth = makeWalletMutationAuth('curatorWallet');
 
 /**
  * For GET /:sellerWallet — accepts the shared API key (admin, no wallet scope

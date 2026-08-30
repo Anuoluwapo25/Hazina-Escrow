@@ -7,6 +7,7 @@ import LandingPage from './pages/LandingPage';
 import MarketplacePage from './pages/MarketplacePage';
 import DatasetDetailPage from './pages/DatasetDetailPage';
 import SellPage from './pages/SellPage';
+import CuratorBundlePage from './pages/CuratorBundlePage';
 import DashboardPage from './pages/DashboardPage';
 import AgentPage from './pages/AgentPage';
 import TermsPage from './pages/TermsPage';
@@ -78,6 +79,14 @@ export default function App() {
               element={
                 <RouteBoundary label="Sell">
                   <SellPage />
+                </RouteBoundary>
+              }
+            />
+            <Route
+              path="/curate"
+              element={
+                <RouteBoundary label="Curate">
+                  <CuratorBundlePage />
                 </RouteBoundary>
               }
             />
