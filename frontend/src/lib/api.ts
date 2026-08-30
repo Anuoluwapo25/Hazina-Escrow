@@ -907,6 +907,70 @@ export const api = {
       earnings: parseApiResponse(z.array(SellerBundleEarningsSchema), r.earnings),
     })),
 
+  // ── Dataset subscription access passes ────────────────────────────────────
+
+  /**
+   * Cached fail-closed subscription status for a buyer on a dataset.
+   * A thrown error means verification is unavailable — callers must treat it
+   * as DENY (see docs/ACCESS_PASS_PLAN.md §7).
+   */
+  getAccessPass: (id: string, buyer: string) =>
+    request<unknown>(
+      `${getApiBaseUrl()}/datasets/${id}/access-pass?buyer=${encodeURIComponent(buyer)}`,
+    ).then(r => parseApiResponse(AccessPassCheckSchema, r)),
+
+  /** Subscription plans offered on a dataset (off-chain event index). */
+  getSubscriptionPlans: (id: string) =>
+    request<unknown>(`${getApiBaseUrl()}/datasets/${id}/plans`).then(r =>
+      parseApiResponse(SubscriptionPlansSchema, r),
+    ),
+
+  /** Build an unsigned define_plan() transaction for the seller to sign. */
+  buildDefinePlanTx: (
+    datasetId: string,
+    seller: string,
+    pricePerPeriod: number,
+    periodSeconds: number,
+    maxSeats: number,
+  ) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/define-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ seller, pricePerPeriod, periodSeconds, maxSeats }),
+      },
+    ),
+
+  /** Build an unsigned subscribe() transaction for the buyer to sign. */
+  buildSubscribeTx: (datasetId: string, buyer: string, planId: number) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/subscribe-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, planId }),
+      },
+    ),
+
+  /** Build an unsigned renew() transaction for the buyer to sign. */
+  buildRenewTx: (datasetId: string, buyer: string) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/renew-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer }),
+      },
+    ),
+
+  /** Relay a wallet-signed access-pass transaction (define/subscribe/renew). */
+  submitSignedAccessTx: (datasetId: string, signedXdr: string) =>
+    request<{ success: boolean; txHash: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/submit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ signedXdr }),
+      },
+    ),
+
   submitRating: (id: string, txHash: string, score: number, comment?: string) =>
     request<{ success: boolean; ratings: unknown }>(`${getApiBaseUrl()}/datasets/${id}/ratings`, {
       method: 'POST',
