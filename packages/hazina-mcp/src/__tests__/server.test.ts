@@ -13,9 +13,9 @@ import type { HazinaApiClientLike } from '../apiClient.js';
 import type {
   Dataset,
   DatasetDetail,
-  PaginatedDatasets,
   QueryResult,
   QuotePayload,
+  SearchResponse,
 } from '../types.js';
 
 function makeDataset(overrides: Partial<Dataset> = {}): Dataset {
@@ -76,8 +76,18 @@ function makeQueryResult(hash: string): QueryResult {
 class FakeApiClient implements HazinaApiClientLike {
   demoCallCount = 0;
 
-  async searchDatasets(): Promise<PaginatedDatasets> {
-    return { data: [makeDataset()], total: 1, page: 1, pageSize: 20, totalPages: 1 };
+  async searchDatasets(): Promise<SearchResponse> {
+    const dataset = makeDataset();
+    return {
+      success: true,
+      query: 'whale',
+      results: [{ ...dataset, score: 0.9, matchedBecause: 'Matches keywords: whale' }],
+      total: 1,
+      page: 1,
+      limit: 20,
+      mode: 'hybrid',
+      reranked: false,
+    };
   }
 
   async getDataset(id: string): Promise<DatasetDetail> {
@@ -178,7 +188,9 @@ describe('Hazina MCP server (in-memory transport)', () => {
     const text = toolText(result);
     const parsed = JSON.parse(text);
     expect(parsed.total).toBe(1);
+    expect(parsed.mode).toBe('hybrid');
     expect(parsed.datasets[0].id).toBe('ds-1');
+    expect(parsed.datasets[0].matchedBecause).toBe('Matches keywords: whale');
   });
 
   it('get_dataset returns dataset detail', async () => {

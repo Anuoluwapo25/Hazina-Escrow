@@ -13,7 +13,7 @@ import {
   Zap,
   Star,
 } from 'lucide-react';
-import { api, DatasetMeta, QueryResult } from '../../lib/api';
+import { api, DatasetMeta, QueryResult, QuoteResponse } from '../../lib/api';
 import { useToastContext } from './useToastContext';
 import { formatUSDC, getTypeMeta, truncateAddress } from '../../lib/utils';
 import WalletConnectButton from './WalletConnectButton';
@@ -56,16 +56,8 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [isSubmittingRating, setIsSubmittingRating] = useState(false);
 
-  interface QuotePreview {
-    source: { asset: string; maxAmount: string };
-    destination: { asset: string; amount: string };
-    path: string[];
-    slippageBps: number;
-    signature?: string;
-    expiresAt?: string;
-  }
   const [sourceAsset, setSourceAsset] = useState('USDC');
-  const [quote, setQuote] = useState<QuotePreview | null>(null);
+  const [quote, setQuote] = useState<QuoteResponse | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
 
   const [buyerAddress, setBuyerAddress] = useState<string | null>(null);
@@ -160,7 +152,7 @@ export default function QueryModal({ dataset, onClose, onSuccess, isOpen = true 
     } else {
       setQuote(null);
     }
-  }, [step, sourceAsset, dataset.id]);
+  }, [step, sourceAsset, dataset.id, toastError]);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);

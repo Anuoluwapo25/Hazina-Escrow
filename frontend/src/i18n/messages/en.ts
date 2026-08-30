@@ -235,6 +235,12 @@ export const en = {
     resultsCount: '{count} datasets found',
     noResultsTitle: 'No datasets found',
     noResultsBody: 'Try adjusting your filters',
+    search: {
+      noResultsTitle: 'No matches for your search',
+      noResultsBody: 'Try rephrasing it — semantic search looks for meaning, not just exact words.',
+      filtersUnavailable:
+        "Type, live-only, min-queries, and sort filters don't apply while searching.",
+    },
     live: {
       badge: 'LIVE',
       updated: 'Updated {time}',

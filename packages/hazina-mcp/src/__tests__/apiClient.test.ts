@@ -21,20 +21,29 @@ describe('HazinaApiClient', () => {
   });
 
   it('searches datasets and builds the right query string', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        jsonResponse(200, { data: [], total: 0, page: 1, pageSize: 20, totalPages: 0 }),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        success: true,
+        query: 'yield',
+        results: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        mode: 'hybrid',
+        reranked: false,
+      }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const client = new HazinaApiClient({ apiUrl: 'http://api.test' });
     await client.searchDatasets({ query: 'yield', category: 'defi', maxPrice: 2 });
 
     const [url] = firstCall(fetchMock);
-    expect(String(url)).toContain('search=yield');
+    expect(String(url)).toContain('/api/v1/search');
+    expect(String(url)).toContain('q=yield');
     expect(String(url)).toContain('category=defi');
     expect(String(url)).toContain('maxPrice=2');
+    expect(String(url)).toContain('explain=true');
   });
 
   it('maps a 404 on get_dataset to a clear HazinaApiError', async () => {

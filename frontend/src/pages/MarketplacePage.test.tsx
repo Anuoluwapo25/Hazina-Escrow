@@ -10,6 +10,7 @@ import { api } from '../lib/api';
 vi.mock('../lib/api', () => ({
   api: {
     getDatasets: vi.fn(),
+    search: vi.fn(),
   },
 }));
 
@@ -62,10 +63,23 @@ function renderMarketplacePage(initialEntries: string[] = ['/marketplace']) {
   );
 }
 
+type SearchResponse = Awaited<ReturnType<typeof api.search>>;
+
+const emptySearchResponse: SearchResponse = {
+  query: 'whale',
+  results: [],
+  total: 0,
+  page: 1,
+  limit: 12,
+  mode: 'hybrid',
+  reranked: false,
+};
+
 describe('MarketplacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api.getDatasets).mockResolvedValue(defaultDatasets);
+    vi.mocked(api.search).mockResolvedValue(emptySearchResponse);
   });
 
   it('shows dataset skeletons while the initial fetch is pending', async () => {
@@ -91,6 +105,85 @@ describe('MarketplacePage', () => {
     await waitFor(() => {
       expect(api.getDatasets).toHaveBeenCalledWith(expect.objectContaining({ page: 2, limit: 12 }));
     });
+  });
+
+  it('calls api.getDatasets (not api.search) when there is no search term', async () => {
+    renderMarketplacePage(['/marketplace']);
+
+    await waitFor(() => {
+      expect(api.getDatasets).toHaveBeenCalled();
+    });
+    expect(api.search).not.toHaveBeenCalled();
+  });
+
+  it('calls api.search (not api.getDatasets) when a search term is present in the URL', async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      ...emptySearchResponse,
+      results: [
+        {
+          id: 'ds-whale',
+          name: 'Whale Wallet Movements',
+          description: 'Tracks large transfers',
+          type: 'whale-wallets',
+          pricePerQuery: 1,
+          queriesServed: 5,
+          score: 0.82,
+          matchedBecause: 'Semantically related to "large holder activity"',
+        },
+      ],
+      total: 1,
+    });
+
+    renderMarketplacePage(['/marketplace?q=large%20holder%20activity']);
+
+    await waitFor(() => {
+      expect(api.search).toHaveBeenCalledWith(
+        expect.objectContaining({ q: 'large holder activity', explain: true }),
+      );
+    });
+    expect(api.getDatasets).not.toHaveBeenCalled();
+  });
+
+  it('renders matchedBecause on a card when the search result includes it', async () => {
+    vi.mocked(api.search).mockResolvedValue({
+      ...emptySearchResponse,
+      results: [
+        {
+          id: 'ds-whale',
+          name: 'Whale Wallet Movements',
+          description: 'Tracks large transfers',
+          type: 'whale-wallets',
+          pricePerQuery: 1,
+          queriesServed: 5,
+          score: 0.82,
+          matchedBecause: 'Semantically related to "large holder activity"',
+        },
+      ],
+      total: 1,
+    });
+
+    renderMarketplacePage(['/marketplace?q=large%20holder%20activity']);
+
+    await screen.findByText('Whale Wallet Movements');
+    expect(screen.getByText('Semantically related to "large holder activity"')).toBeTruthy();
+  });
+
+  it('shows the honest search empty state (not the generic filter empty state) when a search returns nothing', async () => {
+    vi.mocked(api.search).mockResolvedValue(emptySearchResponse);
+
+    renderMarketplacePage(['/marketplace?q=nonexistent%20query']);
+
+    await screen.findByText('No matches for your search');
+    expect(screen.queryByText('No datasets found')).toBeNull();
+  });
+
+  it('shows the generic filter empty state (not the search empty state) when browsing with no results', async () => {
+    vi.mocked(api.getDatasets).mockResolvedValue({ data: [], total: 0, page: 1, totalPages: 1 });
+
+    renderMarketplacePage(['/marketplace']);
+
+    await screen.findByText('No datasets found');
+    expect(screen.queryByText('No matches for your search')).toBeNull();
   });
 
   it.skip('updates the page query string when the user navigates pages', async () => {

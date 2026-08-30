@@ -236,6 +236,13 @@ export const es: EnglishMessages = {
     resultsCount: '{count} datasets encontrados',
     noResultsTitle: 'No se encontraron datasets',
     noResultsBody: 'Prueba ajustando tus filtros',
+    search: {
+      noResultsTitle: 'Sin coincidencias para tu búsqueda',
+      noResultsBody:
+        'Prueba reformularla — la búsqueda semántica busca significado, no solo palabras exactas.',
+      filtersUnavailable:
+        'Los filtros de tipo, solo en vivo, consultas mín. y orden no se aplican durante la búsqueda.',
+    },
     live: {
       badge: 'EN VIVO',
       updated: 'Actualizado {time}',

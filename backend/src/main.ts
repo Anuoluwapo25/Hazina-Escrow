@@ -31,6 +31,7 @@ import http from 'http';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import { datasetsRouter } from './datasets/datasets.router';
+import { searchRouter } from './search/search.router';
 import { accessPassRouter } from './datasets/access-pass.routes';
 import { startPlanIndexerWorker, stopPlanIndexerWorker } from './datasets/access-pass.plans';
 import {
@@ -319,6 +320,7 @@ const v1Router = express.Router();
 
 v1Router.use('/datasets', datasetsRouter);
 v1Router.use('/datasets', snapshotsRouter);
+v1Router.use('/', searchRouter);
 // Access-pass subscription routes share the /datasets prefix (e.g.
 // /api/v1/datasets/:id/access-pass) and self-guard with 503 when the
 // ACCESS_PASS_CONTRACT_ID is unset.
@@ -362,6 +364,7 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 // Routes
 app.use('/api/datasets', datasetsRouter);
 app.use('/api/datasets', snapshotsRouter);
+app.use('/api', searchRouter);
 app.use('/api/datasets', accessPassRouter);
 app.use('/api', paymentsRouter);
 app.use('/api', escrowRouter);

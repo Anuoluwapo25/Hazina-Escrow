@@ -326,11 +326,16 @@ describe('access-pass.client', () => {
         invokeArgs: () =>
           // tx.operations[0] is the high-level wrapper; go through the raw
           // envelope for the xdr accessors, then into the INVOKE_CONTRACT arm.
-          captured!
-            .toEnvelope()
-            .v1()
-            .tx()
-            .operations()[0]!
+          // Length is asserted by every caller before this runs, so the
+          // indexed accesses below are safe; `as` casts satisfy
+          // noUncheckedIndexedAccess without the banned `!` assertion.
+          (
+            (captured as StellarSdk.Transaction)
+              .toEnvelope()
+              .v1()
+              .tx()
+              .operations()[0] as StellarSdk.xdr.Operation
+          )
             .body()
             .invokeHostFunctionOp()
             .hostFunction()
@@ -357,11 +362,11 @@ describe('access-pass.client', () => {
       const opArgs = args.args();
       expect(opArgs.length).toBe(5);
       // Length asserted above; non-null assertions are safe.
-      expect(StellarSdk.scValToNative(opArgs[0]!)).toBe(SELLER);
-      expect(StellarSdk.scValToNative(opArgs[1]!)).toBe('ds-abc');
-      expect(StellarSdk.scValToNative(opArgs[2]!)).toBe(5_000_000n); // 0.5 in stroops
-      expect(StellarSdk.scValToNative(opArgs[3]!)).toBe(2_592_000n);
-      expect(StellarSdk.scValToNative(opArgs[4]!)).toBe(50);
+      expect(StellarSdk.scValToNative(opArgs[0] as StellarSdk.xdr.ScVal)).toBe(SELLER);
+      expect(StellarSdk.scValToNative(opArgs[1] as StellarSdk.xdr.ScVal)).toBe('ds-abc');
+      expect(StellarSdk.scValToNative(opArgs[2] as StellarSdk.xdr.ScVal)).toBe(5_000_000n); // 0.5 in stroops
+      expect(StellarSdk.scValToNative(opArgs[3] as StellarSdk.xdr.ScVal)).toBe(2_592_000n);
+      expect(StellarSdk.scValToNative(opArgs[4] as StellarSdk.xdr.ScVal)).toBe(50);
       spy.mockRestore();
     });
 
@@ -375,9 +380,9 @@ describe('access-pass.client', () => {
       expect(args.functionName().toString()).toBe('subscribe');
       const opArgs = args.args();
       expect(opArgs.length).toBe(3);
-      expect(StellarSdk.scValToNative(opArgs[0]!)).toBe(BUYER);
-      expect(StellarSdk.scValToNative(opArgs[1]!)).toBe('ds-abc');
-      expect(StellarSdk.scValToNative(opArgs[2]!)).toBe(7n);
+      expect(StellarSdk.scValToNative(opArgs[0] as StellarSdk.xdr.ScVal)).toBe(BUYER);
+      expect(StellarSdk.scValToNative(opArgs[1] as StellarSdk.xdr.ScVal)).toBe('ds-abc');
+      expect(StellarSdk.scValToNative(opArgs[2] as StellarSdk.xdr.ScVal)).toBe(7n);
       spy.mockRestore();
     });
 
@@ -390,8 +395,8 @@ describe('access-pass.client', () => {
       expect(args.functionName().toString()).toBe('renew');
       const opArgs = args.args();
       expect(opArgs.length).toBe(2);
-      expect(StellarSdk.scValToNative(opArgs[0]!)).toBe(BUYER);
-      expect(StellarSdk.scValToNative(opArgs[1]!)).toBe('ds-abc');
+      expect(StellarSdk.scValToNative(opArgs[0] as StellarSdk.xdr.ScVal)).toBe(BUYER);
+      expect(StellarSdk.scValToNative(opArgs[1] as StellarSdk.xdr.ScVal)).toBe('ds-abc');
       spy.mockRestore();
     });
 

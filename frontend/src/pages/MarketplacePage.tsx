@@ -15,7 +15,7 @@ import {
   RotateCcw,
   Radio,
 } from 'lucide-react';
-import { api, DatasetMeta, PaginatedDatasets } from '../lib/api';
+import { api, DatasetMeta, SearchResultItem } from '../lib/api';
 import { DATA_TYPE_META } from '../lib/utils';
 import DatasetCard from '../components/ui/DatasetCard';
 import QueryModal from '../components/ui/QueryModal';
@@ -24,6 +24,40 @@ import clsx from 'clsx';
 import { useI18n } from '../i18n';
 import { useTransactionWebSocket } from '../hooks/useTransactionWebSocket';
 import { WebSocketStatus } from '../components/ui/WebSocketStatus';
+
+/** A dataset as rendered on the marketplace grid, plus the optional search explanation. */
+type MarketplaceListItem = DatasetMeta & { matchedBecause?: string };
+
+interface MarketplaceResults {
+  datasets: MarketplaceListItem[];
+  total: number;
+  totalPages: number;
+}
+
+/**
+ * GET /api/v1/search results don't carry seller/earnings/creation metadata —
+ * that data isn't part of the search index. We degrade those fields to safe
+ * defaults rather than fabricating values; DatasetCard renders them but they
+ * don't drive any purchase or trust decision.
+ */
+function searchResultToListItem(item: SearchResultItem): MarketplaceListItem {
+  return {
+    id: item.id,
+    name: item.name,
+    description: item.description,
+    type: item.type,
+    pricePerQuery: item.pricePerQuery,
+    sellerWallet: '',
+    queriesServed: item.queriesServed,
+    totalEarned: 0,
+    createdAt: item.lastRefreshedAt ?? new Date().toISOString(),
+    category: item.category,
+    live: item.live,
+    lastRefreshedAt: item.lastRefreshedAt,
+    tags: item.tags,
+    matchedBecause: item.matchedBecause,
+  };
+}
 
 export default function MarketplacePage() {
   const { locale, t } = useI18n();
@@ -130,25 +164,51 @@ export default function MarketplacePage() {
     setSearchParams,
   ]);
 
+  // The new semantic search endpoint (GET /api/v1/search) only accepts
+  // q/category/minPrice/maxPrice/page/limit server-side. When there's an
+  // active search term we route to it instead of the browse endpoint; the
+  // type/live/minQueries/sort filters are left inert (disabled, with a
+  // note) in that mode since the backend doesn't support them there.
+  const isSearchMode = search.trim().length > 0;
+
   const {
     data,
     isLoading: loading,
     refetch,
-  } = useQuery<PaginatedDatasets>({
-    queryKey: [
-      'datasets',
-      page,
-      search,
-      selectedTypes,
-      minPrice,
-      maxPrice,
-      minQueries,
-      sort,
-      category,
-      liveOnly,
-    ],
-    queryFn: () =>
-      api.getDatasets({
+  } = useQuery<MarketplaceResults>({
+    queryKey: isSearchMode
+      ? ['search', page, search, category, minPrice, maxPrice]
+      : [
+          'datasets',
+          page,
+          search,
+          selectedTypes,
+          minPrice,
+          maxPrice,
+          minQueries,
+          sort,
+          category,
+          liveOnly,
+        ],
+    queryFn: async () => {
+      if (isSearchMode) {
+        const result = await api.search({
+          q: search,
+          category: category || undefined,
+          minPrice: minPrice ? Number(minPrice) : undefined,
+          maxPrice: maxPrice ? Number(maxPrice) : undefined,
+          page,
+          limit: requestedPageSize,
+          explain: true,
+        });
+        return {
+          datasets: result.results.map(searchResultToListItem),
+          total: result.total,
+          totalPages: Math.max(1, Math.ceil(result.total / (result.limit || requestedPageSize))),
+        };
+      }
+
+      const result = await api.getDatasets({
         page,
         limit: requestedPageSize,
         search,
@@ -159,10 +219,12 @@ export default function MarketplacePage() {
         maxPrice: maxPrice ? Number(maxPrice) : undefined,
         minQueries: minQueries ? Number(minQueries) : undefined,
         sort,
-      }),
+      });
+      return { datasets: result.data, total: result.total, totalPages: result.totalPages };
+    },
   });
 
-  const datasets = data?.data || [];
+  const datasets = data?.datasets || [];
   const total = data?.total || 0;
   const pageSize = requestedPageSize;
   const totalPages = data?.totalPages || 1;
@@ -327,9 +389,12 @@ export default function MarketplacePage() {
           <button
             type="button"
             onClick={() => setLiveOnly(current => !current)}
+            disabled={isSearchMode}
             aria-pressed={liveOnly}
+            title={isSearchMode ? t('marketplace.search.filtersUnavailable') : undefined}
             className={clsx(
               'ml-auto inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-body font-medium transition-all duration-200',
+              isSearchMode && 'opacity-40 cursor-not-allowed',
               liveOnly
                 ? 'bg-emerald-400/15 border border-emerald-400/40 text-emerald-400'
                 : 'bg-void/60 border border-border/60 text-foreground-muted hover:text-foreground hover:border-emerald-400/30',
@@ -367,6 +432,11 @@ export default function MarketplacePage() {
                 >
                   <X className="w-4 h-4" />
                 </button>
+              )}
+              {isSearchMode && (
+                <p className="mt-2 text-xs font-body text-foreground-muted">
+                  {t('marketplace.search.filtersUnavailable')}
+                </p>
               )}
             </div>
 
@@ -408,7 +478,12 @@ export default function MarketplacePage() {
                   placeholder={t('marketplace.filters.minQueries')}
                   value={minQueries}
                   onChange={e => setMinQueries(e.target.value)}
-                  className="w-full bg-void/60 border border-border/60 rounded-xl pl-9 pr-3 py-3 text-sm font-body text-foreground placeholder:text-muted focus:outline-none focus:border-gold/40 transition-colors"
+                  disabled={isSearchMode}
+                  title={isSearchMode ? t('marketplace.search.filtersUnavailable') : undefined}
+                  className={clsx(
+                    'w-full bg-void/60 border border-border/60 rounded-xl pl-9 pr-3 py-3 text-sm font-body text-foreground placeholder:text-muted focus:outline-none focus:border-gold/40 transition-colors',
+                    isSearchMode && 'opacity-40 cursor-not-allowed',
+                  )}
                 />
               </label>
             </div>
@@ -419,7 +494,12 @@ export default function MarketplacePage() {
               <select
                 value={sort}
                 onChange={e => setSort(e.target.value)}
-                className="bg-void/60 border border-border/60 rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none focus:border-gold/40 transition-colors"
+                disabled={isSearchMode}
+                title={isSearchMode ? t('marketplace.search.filtersUnavailable') : undefined}
+                className={clsx(
+                  'bg-void/60 border border-border/60 rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none focus:border-gold/40 transition-colors',
+                  isSearchMode && 'opacity-40 cursor-not-allowed',
+                )}
               >
                 {sortOptions.map(o => (
                   <option key={o.value} value={o.value}>
@@ -439,11 +519,14 @@ export default function MarketplacePage() {
                 return (
                   <button
                     key={value}
-                    onClick={() => toggleTypeFilter(value)}
+                    onClick={() => !isSearchMode && toggleTypeFilter(value)}
+                    disabled={isSearchMode}
                     aria-label={t('marketplace.filterBy', { type: label })}
                     aria-pressed={isSelected}
+                    title={isSearchMode ? t('marketplace.search.filtersUnavailable') : undefined}
                     className={clsx(
                       'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-body font-medium transition-all duration-200',
+                      isSearchMode && 'opacity-40 cursor-not-allowed',
                       isSelected
                         ? 'bg-gold text-void'
                         : `${meta?.bg || ''} ${meta?.color || ''} hover:opacity-80`,
@@ -521,17 +604,26 @@ export default function MarketplacePage() {
               <Search className="w-8 h-8 text-muted" />
             </div>
             <h3 className="font-display text-xl text-foreground mb-2">
-              {t('marketplace.noResultsTitle')}
+              {isSearchMode
+                ? t('marketplace.search.noResultsTitle')
+                : t('marketplace.noResultsTitle')}
             </h3>
             <p className="text-foreground-muted font-body text-sm">
-              {t('marketplace.noResultsBody')}
+              {isSearchMode
+                ? t('marketplace.search.noResultsBody')
+                : t('marketplace.noResultsBody')}
             </p>
           </div>
         ) : (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {datasets.map((ds: DatasetMeta) => (
-                <DatasetCard key={ds.id} dataset={ds} onBuy={setSelectedDataset} />
+              {datasets.map((ds: MarketplaceListItem) => (
+                <DatasetCard
+                  key={ds.id}
+                  dataset={ds}
+                  onBuy={setSelectedDataset}
+                  matchedBecause={ds.matchedBecause}
+                />
               ))}
             </div>
 

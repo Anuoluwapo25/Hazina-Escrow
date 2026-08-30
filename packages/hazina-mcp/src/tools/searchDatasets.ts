@@ -14,9 +14,11 @@ export const searchDatasetsInputShape = {
 };
 
 export const searchDatasetsDescription =
-  'Free — does not spend money. Search the live Hazina dataset marketplace by ' +
-  'text query, category, and/or max price per query (USDC). Returns id, name, ' +
-  'description, category, price, and freshness for each match.';
+  'Free — does not spend money. Semantically search the live Hazina dataset marketplace ' +
+  'by natural-language query, category, and/or max price per query (USDC) — matches ' +
+  'go beyond keyword overlap (e.g. "large holder activity" finds a dataset titled ' +
+  '"Whale Wallet Movements"). Returns id, name, description, category, price, freshness, ' +
+  'and a one-line reason each result matched.';
 
 export function createSearchDatasetsHandler(api: HazinaApiClientLike) {
   return async (args: {
@@ -28,18 +30,20 @@ export function createSearchDatasetsHandler(api: HazinaApiClientLike) {
       const result = await api.searchDatasets(args);
       return jsonResult({
         total: result.total,
-        datasets: result.data.map(d => ({
-          id: d.id,
-          name: d.name,
-          description: d.description,
-          type: d.type,
-          category: d.category,
-          pricePerQuery: d.pricePerQuery,
-          currency: d.paymentToken ?? 'USDC',
-          queriesServed: d.queriesServed,
-          live: d.live ?? false,
-          lastRefreshedAt: d.lastRefreshedAt,
-          tags: d.tags,
+        mode: result.mode,
+        datasets: result.results.map(r => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          type: r.type,
+          category: r.category,
+          pricePerQuery: r.pricePerQuery,
+          currency: r.paymentToken ?? 'USDC',
+          queriesServed: r.queriesServed,
+          live: r.live ?? false,
+          lastRefreshedAt: r.lastRefreshedAt,
+          tags: r.tags,
+          matchedBecause: r.matchedBecause,
         })),
       });
     });

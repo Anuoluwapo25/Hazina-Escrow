@@ -19,6 +19,9 @@ import { requireSellerJwt, requireSellerMutationAuth } from '../common/auth.midd
 import { domainMetrics } from '../common/datadog';
 import { notifySeller } from '../webhooks/webhook.service';
 import { recordDatasetSnapshot } from '../snapshots/snapshots.service';
+import { indexDatasetInBackground } from '../search/indexer';
+import { getVectorStore } from '../search/vector-store';
+import { logger } from '../lib/logger';
 
 const MAX_DATA_KB = 500;
 const MAX_DATA_BYTES = MAX_DATA_KB * 1024;
@@ -771,6 +774,10 @@ datasetsRouter.post(
     // the payload it launched with rather than with its first refresh (#600).
     await recordDatasetSnapshot(dataset.id, dataset.data, { at: now, providerRunId: 'create' });
 
+    // Index for semantic search. Fire-and-forget: publishing must not wait on
+    // (or fail because of) embedding generation.
+    indexDatasetInBackground(dataset);
+
     // Track dataset creation
     domainMetrics.datasetCreated({
       datasetType: type,
@@ -876,6 +883,10 @@ datasetsRouter.patch(
     const updated = await updateDataset(id, updates);
     if (!updated) return res.status(404).json({ error: 'Dataset not found' });
 
+    // Re-index (a no-op embedding call if name/description are unchanged —
+    // see indexer.ts's content-hash cache).
+    indexDatasetInBackground(updated);
+
     const { data: _d, ...meta } = updated;
     return res.json({ success: true, dataset: meta });
   },
@@ -913,5 +924,15 @@ datasetsRouter.delete('/:id', requireSellerMutationAuth, async (req: Request, re
   }
 
   await updateDataset(id, { active: false });
+  // Drop the search index entry — search.service.ts already excludes
+  // inactive datasets, but this avoids the vector store growing unbounded
+  // with dead rows.
+  getVectorStore()
+    .delete(id)
+    .catch((err: unknown) => {
+      logger.error(
+        `[Search] Failed to remove index entry for deactivated dataset ${id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   return res.json({ success: true, message: 'Dataset deactivated' });
 });

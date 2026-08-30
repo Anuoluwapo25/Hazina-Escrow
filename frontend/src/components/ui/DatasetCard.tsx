@@ -1,7 +1,17 @@
 import { useState } from 'react';
 
 import { Link } from 'react-router-dom';
-import { ShoppingCart, TrendingUp, User, Zap, Clock, ImageOff, Star, Radio } from 'lucide-react';
+import {
+  ShoppingCart,
+  TrendingUp,
+  User,
+  Zap,
+  Clock,
+  ImageOff,
+  Star,
+  Radio,
+  Sparkles,
+} from 'lucide-react';
 
 import clsx from 'clsx';
 import { DatasetMeta } from '../../lib/api';
@@ -12,9 +22,11 @@ import { useI18n } from '../../i18n';
 interface Props {
   dataset: DatasetMeta;
   onBuy?: (dataset: DatasetMeta) => void;
+  /** Why this result matched a semantic search query — only set in search-result mode. */
+  matchedBecause?: string;
 }
 
-export default function DatasetCard({ dataset, onBuy }: Props) {
+export default function DatasetCard({ dataset, onBuy, matchedBecause }: Props) {
   const [hovered, setHovered] = useState(false);
   const [imageError, setImageError] = useState(false);
   const { locale, t } = useI18n();
@@ -184,6 +196,15 @@ export default function DatasetCard({ dataset, onBuy }: Props) {
             />
           </div>
         </div>
+
+        {matchedBecause && (
+          <div className="flex items-start gap-1.5 mb-5 -mt-2 px-3 py-2 rounded-lg bg-gold/5 border border-gold/10">
+            <Sparkles className="w-3 h-3 text-gold flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <span className="text-[11px] leading-snug font-body text-foreground-muted line-clamp-2">
+              {matchedBecause}
+            </span>
+          </div>
+        )}
 
         {/* Buy button */}
         <button

@@ -33,9 +33,45 @@ export async function setupApiMocks(page: Page): Promise<void> {
         };
     };
 
+    const searchResponseFor = (requestUrl: string) => {
+        const url = new URL(requestUrl);
+        const q = url.searchParams.get('q')?.toLowerCase() ?? '';
+        const results = datasetList
+            .filter(
+                dataset =>
+                    dataset.name.toLowerCase().includes(q) ||
+                    dataset.description.toLowerCase().includes(q),
+            )
+            .map(dataset => ({
+                id: dataset.id,
+                name: dataset.name,
+                description: dataset.description,
+                type: dataset.type,
+                pricePerQuery: dataset.pricePerQuery,
+                queriesServed: dataset.queriesServed,
+                score: 1,
+            }));
+
+        return {
+            query: url.searchParams.get('q') ?? '',
+            results,
+            total: results.length,
+            page: Number(url.searchParams.get('page') ?? '1'),
+            limit: Number(url.searchParams.get('limit') ?? '20'),
+            mode: 'keyword-only' as const,
+            reranked: false,
+        };
+    };
+
     // Stats
     await page.route('**/api/v1/datasets/stats', route =>
         route.fulfill({ json: stats }),
+    );
+
+    // Semantic search (GET /api/v1/search?q=...) — separate endpoint from
+    // the datasets list, used by the marketplace when a search term is active.
+    await page.route('**/api/v1/search?**', route =>
+        route.fulfill({ json: searchResponseFor(route.request().url()) }),
     );
 
     // Datasets list

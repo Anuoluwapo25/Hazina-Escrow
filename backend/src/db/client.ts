@@ -13,6 +13,7 @@ import {
   claimableBalancesSqlite,
   sentinelCursorSqlite,
   sentinelAlertsSqlite,
+  datasetEmbeddingsSqlite,
   receiptsSqlite,
   sep10NoncesSqlite,
 } from './schema';
@@ -41,6 +42,7 @@ const db = (() => {
         claimableBalances: claimableBalancesSqlite,
         sentinelCursor: sentinelCursorSqlite,
         sentinelAlerts: sentinelAlertsSqlite,
+        datasetEmbeddings: datasetEmbeddingsSqlite,
         receipts: receiptsSqlite,
         sep10Nonces: sep10NoncesSqlite,
       },

@@ -36,6 +36,38 @@ export const PaginatedDatasetsSchema = z.object({
 });
 export type PaginatedDatasets = z.infer<typeof PaginatedDatasetsSchema>;
 
+/** A single GET /api/search result — mirrors backend/src/search/search.service.ts's SearchResultItem. */
+export const SearchResultSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  type: z.string(),
+  category: z.string().optional(),
+  pricePerQuery: z.number(),
+  paymentToken: z.string().optional(),
+  queriesServed: z.number(),
+  live: z.boolean().optional(),
+  lastRefreshedAt: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  score: z.number(),
+  /** One-line reason this result matched — present when the request set explain=true. */
+  matchedBecause: z.string().optional(),
+});
+export type SearchResult = z.infer<typeof SearchResultSchema>;
+
+/** GET /api/search response — hybrid (keyword + embedding) search, mirrors backend/src/search/search.router.ts. */
+export const SearchResponseSchema = z.object({
+  success: z.literal(true),
+  query: z.string(),
+  results: z.array(SearchResultSchema),
+  total: z.number(),
+  page: z.number(),
+  limit: z.number(),
+  mode: z.enum(['hybrid', 'keyword-only']),
+  reranked: z.boolean(),
+});
+export type SearchResponse = z.infer<typeof SearchResponseSchema>;
+
 export const DatasetDetailSchema = DatasetSchema.extend({
   metadata: z.object({
     type: z.string(),

@@ -236,6 +236,13 @@ export const sw: EnglishMessages = {
     resultsCount: 'dataset {count} zimepatikana',
     noResultsTitle: 'Hakuna dataset zilizopatikana',
     noResultsBody: 'Jaribu kurekebisha vichujio vyako',
+    search: {
+      noResultsTitle: 'Hakuna matokeo ya utafutaji wako',
+      noResultsBody:
+        'Jaribu kuandika tofauti — utafutaji wa kisemantiki hutafuta maana, si maneno kamili tu.',
+      filtersUnavailable:
+        'Vichujio vya aina, moja kwa moja pekee, maswali ya chini, na mpangilio havitumiki wakati wa utafutaji.',
+    },
     live: {
       badge: 'MOJA KWA MOJA',
       updated: 'Imesasishwa {time}',

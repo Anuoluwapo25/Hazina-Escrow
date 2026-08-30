@@ -269,7 +269,7 @@ export async function getPass(buyer: string, datasetId: string): Promise<AccessP
       stringToScVal(datasetId),
     ]);
     const native = StellarSdk.scValToNative(retval);
-    value = native == null ? null : decodePassRecord(retval);
+    value = native === null || native === undefined ? null : decodePassRecord(retval);
   } catch (err) {
     if (err instanceof AccessCheckUnavailableError) throw err;
     logger.error(

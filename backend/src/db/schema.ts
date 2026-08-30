@@ -152,6 +152,31 @@ export const datasetSnapshots = pgTable(
   }),
 );
 
+/**
+ * Semantic search index (#611): one row per dataset holding its current
+ * embedding vector plus the content hash it was computed from, so a
+ * re-index of unchanged content is a cache hit rather than a re-embed.
+ * Vectors are L2-normalized on write so cosine similarity reduces to a dot
+ * product at query time.
+ */
+export const datasetEmbeddings = pgTable(
+  'dataset_embeddings',
+  {
+    datasetId: text('dataset_id').primaryKey(),
+    contentHash: text('content_hash').notNull(),
+    model: text('model').notNull(),
+    dims: integer('dims').notNull(),
+    // JSON-encoded array of floats — matches the JSON-as-text convention already
+    // used for `tags`/`ratings`/`data` in this schema; brute-force cosine
+    // similarity over this catalogue size doesn't need a binary/vector column.
+    vector: text('vector').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  table => ({
+    contentHashIdx: index('dataset_embeddings_content_hash_idx').on(table.contentHash),
+  }),
+);
+
 export const sentinelCursor = pgTable('sentinel_cursor', {
   id: text('id').primaryKey(),
   cursor: text('cursor'),
@@ -375,6 +400,22 @@ export const datasetSnapshotsSqlite = sqliteTable(
     ),
     contentHashIdx: sqliteIndex('dataset_snapshots_content_hash_idx').on(table.contentHash),
     currentIdx: sqliteIndex('dataset_snapshots_current_idx').on(table.datasetId, table.validTo),
+  }),
+);
+
+/** SQLite mirror of {@link datasetEmbeddings}. */
+export const datasetEmbeddingsSqlite = sqliteTable(
+  'dataset_embeddings',
+  {
+    datasetId: sqliteText('dataset_id').primaryKey(),
+    contentHash: sqliteText('content_hash').notNull(),
+    model: sqliteText('model').notNull(),
+    dims: sqliteInteger('dims').notNull(),
+    vector: sqliteText('vector').notNull(),
+    updatedAt: sqliteText('updated_at').notNull(),
+  },
+  table => ({
+    contentHashIdx: sqliteIndex('dataset_embeddings_content_hash_idx').on(table.contentHash),
   }),
 );
 
