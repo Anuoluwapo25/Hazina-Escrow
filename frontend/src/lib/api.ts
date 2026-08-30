@@ -340,6 +340,56 @@ export const DatasetPreviewSchema = z.object({
 });
 export type DatasetPreview = z.infer<typeof DatasetPreviewSchema>;
 
+/** On-chain subscription plan, as served by the backend's event index. */
+export const AccessPassPlanSchema = z.object({
+  planId: z.number(),
+  datasetId: z.string(),
+  seller: z.string(),
+  pricePerPeriodStroops: z.string(),
+  pricePerPeriod: z.number(),
+  periodSeconds: z.number(),
+  maxSeats: z.number(),
+  active: z.boolean(),
+  ledger: z.number().optional(),
+  /** Live on-chain seat usage; null when the seat lookup failed. */
+  seatsUsed: z.number().nullable().optional(),
+  seatsLeft: z.number().nullable().optional(),
+});
+export type AccessPassPlan = z.infer<typeof AccessPassPlanSchema>;
+
+/** On-chain pass record (null when the buyer holds none). */
+export const AccessPassStateSchema = z.object({
+  planId: z.number(),
+  buyer: z.string(),
+  datasetId: z.string(),
+  start: z.number(),
+  expiry: z.number(),
+  termPeriodSeconds: z.number(),
+  amountPaidStroops: z.string(),
+  amountPaid: z.number(),
+  feeBps: z.number(),
+  revoked: z.boolean(),
+});
+export type AccessPassState = z.infer<typeof AccessPassStateSchema>;
+
+/**
+ * Subscription status check. When `hasAccess` is false and `pass` is null the
+ * buyer simply holds no pass — that is a REAL answer, not an error. Errors are
+ * thrown, never encoded here (fail closed).
+ */
+export const AccessPassCheckSchema = z.object({
+  success: z.boolean(),
+  hasAccess: z.boolean(),
+  pass: AccessPassStateSchema.nullable(),
+});
+export type AccessPassCheck = z.infer<typeof AccessPassCheckSchema>;
+
+export const SubscriptionPlansSchema = z.object({
+  success: z.boolean(),
+  plans: z.array(AccessPassPlanSchema).catch([]),
+});
+export type SubscriptionPlans = z.infer<typeof SubscriptionPlansSchema>;
+
 /** One immutable version of a dataset payload (#600). Metadata only — no payload. */
 export const SnapshotMetaSchema = z.object({
   id: z.string(),
@@ -729,6 +779,70 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ buyer, escrowId, evidenceHash }),
     }),
+
+  // ── Dataset subscription access passes ────────────────────────────────────
+
+  /**
+   * Cached fail-closed subscription status for a buyer on a dataset.
+   * A thrown error means verification is unavailable — callers must treat it
+   * as DENY (see docs/ACCESS_PASS_PLAN.md §7).
+   */
+  getAccessPass: (id: string, buyer: string) =>
+    request<unknown>(
+      `${getApiBaseUrl()}/datasets/${id}/access-pass?buyer=${encodeURIComponent(buyer)}`,
+    ).then(r => parseApiResponse(AccessPassCheckSchema, r)),
+
+  /** Subscription plans offered on a dataset (off-chain event index). */
+  getSubscriptionPlans: (id: string) =>
+    request<unknown>(`${getApiBaseUrl()}/datasets/${id}/plans`).then(r =>
+      parseApiResponse(SubscriptionPlansSchema, r),
+    ),
+
+  /** Build an unsigned define_plan() transaction for the seller to sign. */
+  buildDefinePlanTx: (
+    datasetId: string,
+    seller: string,
+    pricePerPeriod: number,
+    periodSeconds: number,
+    maxSeats: number,
+  ) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/define-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ seller, pricePerPeriod, periodSeconds, maxSeats }),
+      },
+    ),
+
+  /** Build an unsigned subscribe() transaction for the buyer to sign. */
+  buildSubscribeTx: (datasetId: string, buyer: string, planId: number) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/subscribe-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer, planId }),
+      },
+    ),
+
+  /** Build an unsigned renew() transaction for the buyer to sign. */
+  buildRenewTx: (datasetId: string, buyer: string) =>
+    request<{ success: boolean; xdr: string; contractId: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/renew-tx`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ buyer }),
+      },
+    ),
+
+  /** Relay a wallet-signed access-pass transaction (define/subscribe/renew). */
+  submitSignedAccessTx: (datasetId: string, signedXdr: string) =>
+    request<{ success: boolean; txHash: string }>(
+      `${getApiBaseUrl()}/datasets/${datasetId}/plans/submit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ signedXdr }),
+      },
+    ),
 
   submitRating: (id: string, txHash: string, score: number, comment?: string) =>
     request<{ success: boolean; ratings: unknown }>(`${getApiBaseUrl()}/datasets/${id}/ratings`, {

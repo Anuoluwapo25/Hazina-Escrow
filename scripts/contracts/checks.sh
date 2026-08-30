@@ -5,7 +5,7 @@ set -eu
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 
 # All contract crates to lint, test, and build.
-CONTRACT_CRATES="hazina-escrow hazina-seller-bond"
+CONTRACT_CRATES="hazina-escrow hazina-seller-bond hazina-access-pass"
 
 if ! rustup target list --installed | grep -q '^wasm32v1-none$'; then
   echo "Missing Rust target wasm32v1-none. Install it with: rustup target add wasm32v1-none" >&2

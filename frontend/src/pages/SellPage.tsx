@@ -10,11 +10,15 @@ import {
   FileJson,
   User,
   Mail,
+  Users,
   Zap,
   Info,
+  CalendarClock,
+  ChevronDown,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatUSDC, getTypeMeta, DATA_TYPE_META } from '../lib/utils';
+import { definePlanForDataset } from '../lib/accessPass';
 import clsx from 'clsx';
 import { useStellarAuth } from '../hooks/useStellarAuth';
 import { getCatalog, useI18n } from '../i18n';
@@ -22,6 +26,9 @@ import { useToastContext } from '../components/ui/useToastContext';
 import { Toast, ToastProps } from '../components/ui/Toast';
 
 const PRICE_PRESETS = [0.01, 0.02, 0.05, 0.1, 0.25, 0.5];
+const SUBSCRIPTION_PRICE_PRESETS = [0.01, 0.05, 0.1, 0.5];
+const PERIOD_SECONDS = { day: 86_400, week: 604_800, month: 2_592_000 } as const;
+type SubscriptionPeriod = keyof typeof PERIOD_SECONDS;
 
 type Tab = 'form' | 'preview';
 
@@ -34,6 +41,10 @@ interface FormState {
   sellerWallet: string;
   notificationEmail: string;
   dataText: string;
+  offerSubscription: boolean;
+  subscriptionPrice: string;
+  subscriptionPeriod: SubscriptionPeriod;
+  maxSeats: string;
 }
 
 const INITIAL: FormState = {
@@ -45,6 +56,10 @@ const INITIAL: FormState = {
   sellerWallet: '',
   notificationEmail: '',
   dataText: '',
+  offerSubscription: false,
+  subscriptionPrice: '0.05',
+  subscriptionPeriod: 'week',
+  maxSeats: '25',
 };
 
 const STORAGE_KEY = 'hazina_sell_form_draft';
@@ -97,6 +112,10 @@ function saveDraft(form: FormState): void {
         pricePerQuery: form.pricePerQuery,
         paymentToken: form.paymentToken,
         dataText: form.dataText,
+        offerSubscription: form.offerSubscription,
+        subscriptionPrice: form.subscriptionPrice,
+        subscriptionPeriod: form.subscriptionPeriod,
+        maxSeats: form.maxSeats,
       },
       timestamp: Date.now(),
     };
@@ -222,6 +241,13 @@ export default function SellPage() {
     form.notificationEmail.trim().length > 0 &&
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.notificationEmail.trim());
 
+  const subPriceInvalid =
+    form.offerSubscription &&
+    (form.subscriptionPrice.trim() === '' || parseFloat(form.subscriptionPrice) <= 0);
+  const seatsInvalid =
+    form.offerSubscription &&
+    (!Number.isInteger(Number(form.maxSeats)) || Number(form.maxSeats) < 1);
+
   const isValid =
     form.name.trim() &&
     form.description.trim() &&
@@ -231,7 +257,9 @@ export default function SellPage() {
     isValidStellarAddress(form.sellerWallet) &&
     !isNotificationEmailInvalid &&
     form.dataText.trim() &&
-    !jsonError;
+    !jsonError &&
+    !subPriceInvalid &&
+    !seatsInvalid;
 
   const handleSubmitConfirmed = async () => {
     setShowConfirm(false);
@@ -239,7 +267,7 @@ export default function SellPage() {
     setSubmitting(true);
     setError('');
     try {
-      await api.createDataset({
+      const dataset = await api.createDataset({
         name: form.name.trim(),
         description: form.description.trim(),
         type: form.type,
@@ -252,6 +280,26 @@ export default function SellPage() {
         data: JSON.parse(form.dataText),
       });
       clearDraft();
+
+      // Optional follow-on: define the subscription plan on-chain with the
+      // seller's own wallet. The dataset is already live — a failed plan
+      // definition must NOT roll it back or block the success screen.
+      if (form.offerSubscription) {
+        try {
+          await definePlanForDataset(dataset.id, {
+            pricePerPeriod: parseFloat(form.subscriptionPrice),
+            periodSeconds: PERIOD_SECONDS[form.subscriptionPeriod],
+            maxSeats: Number(form.maxSeats),
+          });
+          toastSuccess(t('sell.subscription.definedSuccess'), dataset.name);
+        } catch (planErr: unknown) {
+          toastError(
+            t('sell.subscription.definedFailed'),
+            planErr instanceof Error ? planErr.message : String(planErr),
+          );
+        }
+      }
+
       setSuccess(true);
       toastSuccess(t('sell.messages.listingLive'), form.name.trim());
     } catch (err: unknown) {
@@ -458,6 +506,137 @@ export default function SellPage() {
                   </div>
                 </div>
 
+                {/* Offer a subscription (dataset access pass) */}
+                <div className="rounded-xl border border-border/60 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm(f => ({ ...f, offerSubscription: !f.offerSubscription }))
+                    }
+                    aria-expanded={form.offerSubscription}
+                    className="w-full flex items-center justify-between p-4 bg-void/40 hover:bg-void/60 transition-colors"
+                  >
+                    <span className="flex items-center gap-2 text-sm font-body font-medium text-foreground">
+                      <CalendarClock className="w-4 h-4 text-gold" />
+                      {t('sell.subscription.toggle')}
+                    </span>
+                    <ChevronDown
+                      className={clsx(
+                        'w-4 h-4 text-muted transition-transform',
+                        form.offerSubscription && 'rotate-180',
+                      )}
+                    />
+                  </button>
+
+                  {form.offerSubscription && (
+                    <div className="p-4 space-y-4 bg-void/20 border-t border-border/40">
+                      <p className="text-xs text-foreground-muted font-body flex items-start gap-1.5">
+                        <Info className="w-3 h-3 mt-0.5 flex-shrink-0 text-gold" />
+                        {t('sell.subscription.help')}
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-sm font-body font-medium text-foreground-muted mb-2 flex items-center gap-2">
+                            <DollarSign className="w-4 h-4 text-gold" />
+                            {t('sell.subscription.priceLabel')}{' '}
+                            <span className="text-red-400">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={form.subscriptionPrice}
+                            onChange={set('subscriptionPrice')}
+                            className={clsx(
+                              'w-full bg-void/60 border rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none transition-colors',
+                              subPriceInvalid
+                                ? 'border-red-500/50 focus:border-red-500/70'
+                                : 'border-border/60 focus:border-gold/50',
+                            )}
+                          />
+                          {subPriceInvalid && (
+                            <p className="text-xs text-red-400 mt-1 font-body">
+                              {t('sell.subscription.priceError')}
+                            </p>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="text-sm font-body font-medium text-foreground-muted mb-2 flex items-center gap-2">
+                            <Users className="w-4 h-4 text-gold" />
+                            {t('sell.subscription.seatsLabel')}{' '}
+                            <span className="text-red-400">*</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={form.maxSeats}
+                            onChange={set('maxSeats')}
+                            className={clsx(
+                              'w-full bg-void/60 border rounded-xl px-4 py-3 text-sm font-body text-foreground focus:outline-none transition-colors',
+                              seatsInvalid
+                                ? 'border-red-500/50 focus:border-red-500/70'
+                                : 'border-border/60 focus:border-gold/50',
+                            )}
+                          />
+                          {seatsInvalid && (
+                            <p className="text-xs text-red-400 mt-1 font-body">
+                              {t('sell.subscription.seatsError')}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-xs text-muted-2 font-body mb-2">
+                          {t('sell.subscription.pricePresets')}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {SUBSCRIPTION_PRICE_PRESETS.map(p => (
+                            <button
+                              key={p}
+                              onClick={() => setForm(f => ({ ...f, subscriptionPrice: String(p) }))}
+                              className={clsx(
+                                'px-3 py-1.5 rounded-lg text-xs font-body font-medium border transition-all duration-150',
+                                parseFloat(form.subscriptionPrice) === p
+                                  ? 'bg-gold text-void border-gold'
+                                  : 'border-border/60 text-foreground-muted hover:border-gold/40 hover:text-gold',
+                              )}
+                            >
+                              ${p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-sm font-body font-medium text-foreground-muted mb-2 block">
+                          {t('sell.subscription.periodLabel')}
+                        </label>
+                        <div className="flex gap-2">
+                          {(Object.keys(PERIOD_SECONDS) as SubscriptionPeriod[]).map(period => (
+                            <button
+                              key={period}
+                              type="button"
+                              onClick={() => setForm(f => ({ ...f, subscriptionPeriod: period }))}
+                              className={clsx(
+                                'flex-1 px-3 py-2 rounded-lg text-xs font-body font-medium border transition-all duration-150',
+                                form.subscriptionPeriod === period
+                                  ? 'bg-gold text-void border-gold'
+                                  : 'border-border/60 text-foreground-muted hover:border-gold/40 hover:text-gold',
+                              )}
+                            >
+                              {t(`sell.subscription.period.${period}`)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Stellar wallet */}
                 <div>
                   <label className="text-sm font-body font-medium text-foreground-muted mb-2 flex items-center gap-2">
@@ -619,7 +798,7 @@ export default function SellPage() {
                       >
                         Publish dataset?
                       </h3>
-                      <p className="text-sm text-foreground-muted font-body mb-6">
+                      <p className="text-sm text-foreground-muted font-body mb-4">
                         You are about to list{' '}
                         <span className="text-foreground font-medium">{form.name}</span> at{' '}
                         <span className="text-gold font-semibold">
@@ -627,6 +806,15 @@ export default function SellPage() {
                         </span>{' '}
                         per query. This action cannot be undone.
                       </p>
+                      {form.offerSubscription && (
+                        <p className="text-xs text-amber-400 font-body mb-4 flex items-start gap-1.5">
+                          <CalendarClock className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                          {t('sell.subscription.confirmNote', {
+                            price: formatUSDC(Number(form.subscriptionPrice || '0'), locale),
+                            period: t(`sell.subscription.period.${form.subscriptionPeriod}`),
+                          })}
+                        </p>
+                      )}
                       <div className="flex gap-3">
                         <button
                           onClick={() => setShowConfirm(false)}
@@ -686,6 +874,16 @@ export default function SellPage() {
                       token: form.paymentToken,
                     })}
                   </div>
+                  {form.offerSubscription && (
+                    <div className="mt-3 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs text-emerald-400 font-body">
+                      <CalendarClock className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />
+                      {t('sell.subscription.previewNote', {
+                        price: formatUSDC(Number(form.subscriptionPrice || '0'), locale),
+                        period: t(`sell.subscription.period.${form.subscriptionPeriod}`),
+                        seats: form.maxSeats,
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

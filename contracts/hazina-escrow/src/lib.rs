@@ -5,9 +5,6 @@ use soroban_sdk::{
     Address, BytesN, Env, String, Vec,
 };
 
- 
-
-
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 // These are `pub` on purpose: the property-based invariant suite in
@@ -265,16 +262,14 @@ impl HazinaEscrow {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events()
-            .publish((symbol_short!("paused"),), admin);
+        env.events().publish((symbol_short!("paused"),), admin);
     }
 
     pub fn unpause(env: Env, admin: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events()
-            .publish((symbol_short!("unpaused"),), admin);
+        env.events().publish((symbol_short!("unpaused"),), admin);
     }
 
     pub fn is_paused(env: Env) -> bool {
@@ -381,7 +376,7 @@ impl HazinaEscrow {
     pub fn schedule_set_timelock_delay(env: Env, admin: Address, delay: u32) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
-        if delay < MIN_TIMELOCK_DELAY_LEDGERS || delay > MAX_TIMELOCK_DELAY_LEDGERS {
+        if !(MIN_TIMELOCK_DELAY_LEDGERS..=MAX_TIMELOCK_DELAY_LEDGERS).contains(&delay) {
             panic_with_error!(&env, HazinaEscrowError::InvalidTimelockDelay);
         }
         let execute_after = Self::propose_with_current_delay(&env);
@@ -405,7 +400,8 @@ impl HazinaEscrow {
         env.storage()
             .instance()
             .set(&DataKey::TimelockDelay, &pending.delay);
-        env.events().publish((symbol_short!("tl_exec"),), (pending.delay,));
+        env.events()
+            .publish((symbol_short!("tl_exec"),), (pending.delay,));
     }
 
     pub fn cancel_set_timelock_delay(env: Env, admin: Address) {
@@ -443,7 +439,8 @@ impl HazinaEscrow {
         Self::remove_pending(&env, &DataKey::PendingUpgrade);
         env.events()
             .publish((symbol_short!("up_exec"),), (pending.wasm_hash.clone(),));
-        env.deployer().update_current_contract_wasm(pending.wasm_hash);
+        env.deployer()
+            .update_current_contract_wasm(pending.wasm_hash);
     }
 
     pub fn cancel_upgrade(env: Env, admin: Address) {
@@ -465,12 +462,7 @@ impl HazinaEscrow {
             .publish((symbol_short!("wl_mode"),), (admin, enforced));
     }
 
-    pub fn set_address_whitelisted(
-        env: Env,
-        admin: Address,
-        address: Address,
-        whitelisted: bool,
-    ) {
+    pub fn set_address_whitelisted(env: Env, admin: Address, address: Address, whitelisted: bool) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage()
@@ -480,12 +472,7 @@ impl HazinaEscrow {
             .publish((symbol_short!("addr_wl"),), (address, whitelisted));
     }
 
-    pub fn set_address_blacklisted(
-        env: Env,
-        admin: Address,
-        address: Address,
-        blacklisted: bool,
-    ) {
+    pub fn set_address_blacklisted(env: Env, admin: Address, address: Address, blacklisted: bool) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
         env.storage()
@@ -518,7 +505,6 @@ impl HazinaEscrow {
             can_transact: !blacklisted && (!whitelist_enforced || whitelisted),
         }
     }
-
 
     // ─── Circuit-breaker config ───────────────────────────────────────────────
 
@@ -563,7 +549,6 @@ impl HazinaEscrow {
     }
 
     // ─── Escrow lifecycle ─────────────────────────────────────────────────────
-
 
     pub fn lock(
         env: Env,
@@ -616,9 +601,6 @@ impl HazinaEscrow {
             disputed: false,
             dispute_deadline: Some(env.ledger().sequence() as u64 + DISPUTE_WINDOW_LEDGERS as u64),
         };
-
-
-
 
         env.storage()
             .persistent()
@@ -729,7 +711,6 @@ impl HazinaEscrow {
         first_id
     }
 
-
     pub fn set_arbitrator(env: Env, admin: Address, arbitrator: Address) {
         admin.require_auth();
         Self::assert_admin(&env, &admin);
@@ -772,10 +753,9 @@ impl HazinaEscrow {
             .persistent()
             .get(&DataKey::OpenDisputesBySeller(seller.clone()))
             .unwrap_or(0);
-        env.storage().persistent().set(
-            &DataKey::OpenDisputesBySeller(seller),
-            &(prev + 1),
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::OpenDisputesBySeller(seller), &(prev + 1));
 
         env.events().publish(
             (soroban_sdk::symbol_short!("disp_up"),),
@@ -877,7 +857,7 @@ impl HazinaEscrow {
     }
 
     fn refund_one(env: &Env, escrow_id: u64) {
-        Self::assert_not_paused(&env);
+        Self::assert_not_paused(env);
 
         env.storage().persistent().extend_ttl(
             &EscrowKey::Record(escrow_id),
@@ -916,10 +896,9 @@ impl HazinaEscrow {
                 .get(&DataKey::OpenDisputesBySeller(seller.clone()))
                 .unwrap_or(0);
             if prev > 0 {
-                env.storage().persistent().set(
-                    &DataKey::OpenDisputesBySeller(seller),
-                    &(prev - 1),
-                );
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::OpenDisputesBySeller(seller), &(prev - 1));
             }
         }
 
@@ -927,7 +906,9 @@ impl HazinaEscrow {
             (symbol_short!("refunded"),),
             (escrow_id, record.buyer, record.amount),
         );
-    }    fn release_disputed_one(env: &Env, admin: &Address, escrow_id: u64) {
+    }
+
+    fn release_disputed_one(env: &Env, admin: &Address, escrow_id: u64) {
         let mut record = Self::read_escrow(env, escrow_id);
         record.disputed = false;
         // Arbitrator's decision overrides the buyer-confirmation requirement —
@@ -946,10 +927,9 @@ impl HazinaEscrow {
             .get(&DataKey::OpenDisputesBySeller(seller.clone()))
             .unwrap_or(0);
         if prev > 0 {
-            env.storage().persistent().set(
-                &DataKey::OpenDisputesBySeller(seller),
-                &(prev - 1),
-            );
+            env.storage()
+                .persistent()
+                .set(&DataKey::OpenDisputesBySeller(seller), &(prev - 1));
         }
 
         Self::release_one(env, admin, escrow_id);
@@ -958,49 +938,47 @@ impl HazinaEscrow {
     /// Seller claims funds after the escrow deadline has passed without release.
     /// The platform fee is withheld in the contract (admin recovers via emergency_withdraw).
     pub fn claim_expired(env: Env, escrow_id: u64, seller: Address) {
-    seller.require_auth();
-    let mut record = Self::read_escrow(&env, escrow_id);
-    if record.seller != seller {
-        panic_with_error!(&env, HazinaEscrowError::NotSeller);
-    }
-    if record.released {
-        panic_with_error!(&env, HazinaEscrowError::AlreadyReleased);
-    }
-    if record.refunded {
-        panic_with_error!(&env, HazinaEscrowError::AlreadyRefunded);
-    }
-    // --- ADD THE DISPUTE CHECK HERE ---
-    if record.disputed {
-        panic_with_error!(&env, HazinaEscrowError::DisputedEscrow);
-    }
-    // ---------------------------------
-    if env.ledger().timestamp() <= record.deadline {
-        panic_with_error!(&env, HazinaEscrowError::NotExpired);
-    }
+        seller.require_auth();
+        let mut record = Self::read_escrow(&env, escrow_id);
+        if record.seller != seller {
+            panic_with_error!(&env, HazinaEscrowError::NotSeller);
+        }
+        if record.released {
+            panic_with_error!(&env, HazinaEscrowError::AlreadyReleased);
+        }
+        if record.refunded {
+            panic_with_error!(&env, HazinaEscrowError::AlreadyRefunded);
+        }
+        // --- ADD THE DISPUTE CHECK HERE ---
+        if record.disputed {
+            panic_with_error!(&env, HazinaEscrowError::DisputedEscrow);
+        }
+        // ---------------------------------
+        if env.ledger().timestamp() <= record.deadline {
+            panic_with_error!(&env, HazinaEscrowError::NotExpired);
+        }
 
-    let calculated_cut =
-        record.amount * record.platform_fee_bps as i128 / MAX_BASIS_POINTS as i128;
-    let platform_cut =
-        if calculated_cut == 0 && record.amount > 0 && record.platform_fee_bps > 0 {
-            1
-        } else {
-            calculated_cut
-        };
-    let seller_cut = record.amount - platform_cut;
+        let calculated_cut =
+            record.amount * record.platform_fee_bps as i128 / MAX_BASIS_POINTS as i128;
+        let platform_cut =
+            if calculated_cut == 0 && record.amount > 0 && record.platform_fee_bps > 0 {
+                1
+            } else {
+                calculated_cut
+            };
+        let seller_cut = record.amount - platform_cut;
 
-    let token_client = token::Client::new(&env, &record.token);
-    token_client.transfer(&env.current_contract_address(), &record.seller, &seller_cut);
+        let token_client = token::Client::new(&env, &record.token);
+        token_client.transfer(&env.current_contract_address(), &record.seller, &seller_cut);
 
-    record.released = true;
-    env.storage()
-        .persistent()
-        .set(&EscrowKey::Record(escrow_id), &record);
+        record.released = true;
+        env.storage()
+            .persistent()
+            .set(&EscrowKey::Record(escrow_id), &record);
 
-    env.events().publish(
-        (symbol_short!("claimed"),),
-        (escrow_id, seller, seller_cut),
-    );
-}
+        env.events()
+            .publish((symbol_short!("claimed"),), (escrow_id, seller, seller_cut));
+    }
 
     // ─── Timelocked emergency withdrawal ─────────────────────────────────────
 
@@ -1044,8 +1022,10 @@ impl HazinaEscrow {
                 execute_after,
             },
         );
-        env.events()
-            .publish((symbol_short!("em_sched"),), (token, to, amount, execute_after));
+        env.events().publish(
+            (symbol_short!("em_sched"),),
+            (token, to, amount, execute_after),
+        );
     }
 
     /// Anyone may execute the proposed sweep once the timelock has elapsed and
@@ -1056,7 +1036,11 @@ impl HazinaEscrow {
         Self::assert_paused(&env);
         Self::remove_pending(&env, &DataKey::PendingWithdrawal);
         let token_client = token::Client::new(&env, &pending.token);
-        token_client.transfer(&env.current_contract_address(), &pending.to, &pending.amount);
+        token_client.transfer(
+            &env.current_contract_address(),
+            &pending.to,
+            &pending.amount,
+        );
         env.events().publish(
             (symbol_short!("em_exec"),),
             (pending.token, pending.to, pending.amount),
@@ -1064,7 +1048,7 @@ impl HazinaEscrow {
     }
 
     pub fn cancel_emergency_withdraw(env: Env, admin: Address) {
-                admin.require_auth();
+        admin.require_auth();
         Self::assert_admin(&env, &admin);
         Self::remove_pending(&env, &DataKey::PendingWithdrawal);
         env.events().publish((symbol_short!("em_canc"),), ());
@@ -1103,7 +1087,8 @@ impl HazinaEscrow {
         Self::assert_executable(&env, pending.execute_after);
         Self::remove_pending(&env, &DataKey::PendingAdminChange);
         env.storage().instance().set(&DataKey::Admin, &candidate);
-        env.events().publish((symbol_short!("adm_exec"),), (candidate,));
+        env.events()
+            .publish((symbol_short!("adm_exec"),), (candidate,));
     }
 
     pub fn cancel_admin_change(env: Env, admin: Address) {
@@ -1135,13 +1120,15 @@ impl HazinaEscrow {
     }
 
     pub fn execute_set_treasury(env: Env) {
-        let pending: PendingTreasuryChange = Self::read_pending(&env, DataKey::PendingTreasuryChange);
+        let pending: PendingTreasuryChange =
+            Self::read_pending(&env, DataKey::PendingTreasuryChange);
         Self::assert_executable(&env, pending.execute_after);
         Self::remove_pending(&env, &DataKey::PendingTreasuryChange);
         env.storage()
             .instance()
             .set(&DataKey::Treasury, &pending.treasury);
-        env.events().publish((symbol_short!("trs_exec"),), (pending.treasury,));
+        env.events()
+            .publish((symbol_short!("trs_exec"),), (pending.treasury,));
     }
 
     pub fn cancel_set_treasury(env: Env, admin: Address) {
@@ -1166,7 +1153,9 @@ impl HazinaEscrow {
     }
 
     pub fn get_pending_treasury_change(env: Env) -> Option<PendingTreasuryChange> {
-        env.storage().instance().get(&DataKey::PendingTreasuryChange)
+        env.storage()
+            .instance()
+            .get(&DataKey::PendingTreasuryChange)
     }
 
     pub fn get_pending_timelock_delay(env: Env) -> Option<PendingDelayChange> {
@@ -1202,7 +1191,6 @@ impl HazinaEscrow {
 
     // ─── Private helpers ─────────────────────────────────────────────────────
 
-
     fn assert_admin(env: &Env, caller: &Address) {
         let admin = Self::get_admin(env);
         if admin != *caller {
@@ -1235,7 +1223,11 @@ impl HazinaEscrow {
         env.ledger().sequence() as u64 + Self::timelock_delay(env) as u64
     }
 
-    fn store_pending<T: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: DataKey, payload: &T) {
+    fn store_pending<T: soroban_sdk::IntoVal<Env, soroban_sdk::Val>>(
+        env: &Env,
+        key: DataKey,
+        payload: &T,
+    ) {
         if env.storage().instance().has(&key) {
             panic_with_error!(env, HazinaEscrowError::PendingActionExists);
         }
@@ -1387,7 +1379,6 @@ impl HazinaEscrow {
             .unwrap_or_else(|| panic_with_error!(env, HazinaEscrowError::EscrowNotFound))
     }
 
-
     fn check_amount_circuit_breaker(env: &Env, amount: i128) {
         let max: i128 = env
             .storage()
@@ -1448,7 +1439,7 @@ impl HazinaEscrow {
 mod tests {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Events as _, Ledger as _},
+        testutils::{Address as _, Ledger as _},
         token::{Client as TokenClient, StellarAssetClient},
         Address, Env, String, Vec,
     };
@@ -1765,14 +1756,28 @@ mod tests {
     #[should_panic(expected = "Error(Contract, #5)")]
     fn test_lock_rejects_invalid_amount() {
         let (env, client, _admin, buyer, seller, usdc) = setup();
-        client.lock(&buyer, &seller, &usdc, &0, &dataset_id(&env, "ds-invalid"), &3600);
+        client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &0,
+            &dataset_id(&env, "ds-invalid"),
+            &3600,
+        );
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #11)")]
     fn test_lock_rejects_empty_dataset_id() {
         let (env, client, _admin, buyer, seller, usdc) = setup();
-        client.lock(&buyer, &seller, &usdc, &1_000_000, &dataset_id(&env, ""), &3600);
+        client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &1_000_000,
+            &dataset_id(&env, ""),
+            &3600,
+        );
     }
 
     #[test]
@@ -1898,8 +1903,14 @@ mod tests {
         let token_client = TokenClient::new(&env, &usdc);
         let amount: i128 = 5_000_000;
 
-        let escrow_id =
-            client.lock(&buyer, &seller, &usdc, &amount, &dataset_id(&env, "ds-refund"), &3600);
+        let escrow_id = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &amount,
+            &dataset_id(&env, "ds-refund"),
+            &3600,
+        );
         client.refund(&admin, &escrow_id);
 
         let record = client.get_escrow(&escrow_id);
@@ -2028,178 +2039,189 @@ mod tests {
     }
 
     // ── Multi-lock / multi-release ────────────────────────────────────────────
-#[test]
-fn test_fee_floor() {
-    let (env, client, admin, buyer, seller, usdc) = setup();
-    let token_client = TokenClient::new(&env, &usdc);
-    
-    // Test 1: Fee = 0 bps
-    client.set_default_fee(&admin, &0);
-    
-    let amount1: i128 = 1_000_000;
-    let escrow_id1 = client.lock(
-        &buyer,
-        &seller,
-        &usdc,
-        &amount1,
-        &dataset_id(&env, "ds-zero-fee"),
-        &3600,
-    );
-    
-    // Verify escrow state before confirmation
-    let record_before = client.get_escrow(&escrow_id1);
-    assert!(!record_before.buyer_confirmed);
-    assert!(!record_before.released);
-    
-    // Confirm and release
-    client.confirm_delivery(&escrow_id1, &buyer);
-    
-    // Verify escrow state after confirmation
-    let record_after = client.get_escrow(&escrow_id1);
-    assert!(record_after.buyer_confirmed);
-    assert!(!record_after.released);
-    
-    client.release(&admin, &escrow_id1);
-    
-    // With 0 bps, all amount should go to seller
-    assert_eq!(token_client.balance(&seller), amount1);
-    assert_eq!(token_client.balance(&admin), 0);
-    
-    // Test 2: Fee = 1 bps
-    client.set_default_fee(&admin, &1);
-    
-    let amount2: i128 = MIN_LOCK_AMOUNT;
-    let escrow_id2 = client.lock(
-        &buyer,
-        &seller,
-        &usdc,
-        &amount2,
-        &dataset_id(&env, "ds-min-fee"),
-        &3600,
-    );
-    
-    // Verify the fee was snapshotted correctly
-    let record = client.get_escrow(&escrow_id2);
-    assert_eq!(record.platform_fee_bps, 1);
-    assert!(!record.buyer_confirmed);
-    
-    // Confirm and release
-    client.confirm_delivery(&escrow_id2, &buyer);
-    
-    // Verify confirmation worked
-    let record_confirmed = client.get_escrow(&escrow_id2);
-    assert!(record_confirmed.buyer_confirmed);
-    
-    client.release(&admin, &escrow_id2);
-    
-    // With 1 bps on MIN_LOCK_AMOUNT, fee = 1 token
-    let expected_fee = 1;
-    let expected_seller_balance = amount1 + (amount2 - expected_fee);
-    let expected_admin_balance = expected_fee;
-    
-    assert_eq!(token_client.balance(&seller), expected_seller_balance);
-    assert_eq!(token_client.balance(&admin), expected_admin_balance);
-}
+    #[test]
+    fn test_fee_floor() {
+        let (env, client, admin, buyer, seller, usdc) = setup();
+        let token_client = TokenClient::new(&env, &usdc);
 
-     
-#[test]
-fn test_lock_multi_and_release_multi() {
-    let (env, client, admin, buyer, _seller, usdc) = setup();
-    let token_client = TokenClient::new(&env, &usdc);
+        // Test 1: Fee = 0 bps
+        client.set_default_fee(&admin, &0);
 
-    let seller_1 = Address::generate(&env);
-    let seller_2 = Address::generate(&env);
-    let seller_3 = Address::generate(&env);
-    let seller_4 = Address::generate(&env);
-    let amounts: [i128; 4] = [1_000_000, 2_000_000, 3_000_000, 4_000_000];
-    let total: i128 = 10_000_000;
+        let amount1: i128 = 1_000_000;
+        let escrow_id1 = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &amount1,
+            &dataset_id(&env, "ds-zero-fee"),
+            &3600,
+        );
 
-    let mut shares = Vec::new(&env);
-    shares.push_back(SellerShare { seller: seller_1.clone(), amount: amounts[0] });
-    shares.push_back(SellerShare { seller: seller_2.clone(), amount: amounts[1] });
-    shares.push_back(SellerShare { seller: seller_3.clone(), amount: amounts[2] });
-    shares.push_back(SellerShare { seller: seller_4.clone(), amount: amounts[3] });
+        // Verify escrow state before confirmation
+        let record_before = client.get_escrow(&escrow_id1);
+        assert!(!record_before.buyer_confirmed);
+        assert!(!record_before.released);
 
-    let mut ds_ids = Vec::new(&env);
-    ds_ids.push_back(String::from_str(&env, "ds-001"));
-    ds_ids.push_back(String::from_str(&env, "ds-002"));
-    ds_ids.push_back(String::from_str(&env, "ds-003"));
-    ds_ids.push_back(String::from_str(&env, "ds-004"));
+        // Confirm and release
+        client.confirm_delivery(&escrow_id1, &buyer);
 
-    let first_id = client.lock_multi(&buyer, &usdc, &shares, &ds_ids);
-    assert_eq!(first_id, 0);
-    assert_eq!(token_client.balance(&buyer), INITIAL_BUYER_BALANCE - total);
+        // Verify escrow state after confirmation
+        let record_after = client.get_escrow(&escrow_id1);
+        assert!(record_after.buyer_confirmed);
+        assert!(!record_after.released);
 
-    // Verify all escrows were created and not confirmed
-    for i in 0..4 {
-        let record = client.get_escrow(&(first_id + i));
-        assert_eq!(record.escrow_id, first_id + i);
+        client.release(&admin, &escrow_id1);
+
+        // With 0 bps, all amount should go to seller
+        assert_eq!(token_client.balance(&seller), amount1);
+        assert_eq!(token_client.balance(&admin), 0);
+
+        // Test 2: Fee = 1 bps
+        client.set_default_fee(&admin, &1);
+
+        let amount2: i128 = MIN_LOCK_AMOUNT;
+        let escrow_id2 = client.lock(
+            &buyer,
+            &seller,
+            &usdc,
+            &amount2,
+            &dataset_id(&env, "ds-min-fee"),
+            &3600,
+        );
+
+        // Verify the fee was snapshotted correctly
+        let record = client.get_escrow(&escrow_id2);
+        assert_eq!(record.platform_fee_bps, 1);
         assert!(!record.buyer_confirmed);
-        assert!(!record.released);
+
+        // Confirm and release
+        client.confirm_delivery(&escrow_id2, &buyer);
+
+        // Verify confirmation worked
+        let record_confirmed = client.get_escrow(&escrow_id2);
+        assert!(record_confirmed.buyer_confirmed);
+
+        client.release(&admin, &escrow_id2);
+
+        // With 1 bps on MIN_LOCK_AMOUNT, fee = 1 token
+        let expected_fee = 1;
+        let expected_seller_balance = amount1 + (amount2 - expected_fee);
+        let expected_admin_balance = expected_fee;
+
+        assert_eq!(token_client.balance(&seller), expected_seller_balance);
+        assert_eq!(token_client.balance(&admin), expected_admin_balance);
     }
 
-    // Confirm delivery for ALL escrows
-    for i in 0..4 {
-        client.confirm_delivery(&(first_id + i), &buyer);
+    #[test]
+    fn test_lock_multi_and_release_multi() {
+        let (env, client, admin, buyer, _seller, usdc) = setup();
+        let token_client = TokenClient::new(&env, &usdc);
+
+        let seller_1 = Address::generate(&env);
+        let seller_2 = Address::generate(&env);
+        let seller_3 = Address::generate(&env);
+        let seller_4 = Address::generate(&env);
+        let amounts: [i128; 4] = [1_000_000, 2_000_000, 3_000_000, 4_000_000];
+        let total: i128 = 10_000_000;
+
+        let mut shares = Vec::new(&env);
+        shares.push_back(SellerShare {
+            seller: seller_1.clone(),
+            amount: amounts[0],
+        });
+        shares.push_back(SellerShare {
+            seller: seller_2.clone(),
+            amount: amounts[1],
+        });
+        shares.push_back(SellerShare {
+            seller: seller_3.clone(),
+            amount: amounts[2],
+        });
+        shares.push_back(SellerShare {
+            seller: seller_4.clone(),
+            amount: amounts[3],
+        });
+
+        let mut ds_ids = Vec::new(&env);
+        ds_ids.push_back(String::from_str(&env, "ds-001"));
+        ds_ids.push_back(String::from_str(&env, "ds-002"));
+        ds_ids.push_back(String::from_str(&env, "ds-003"));
+        ds_ids.push_back(String::from_str(&env, "ds-004"));
+
+        let first_id = client.lock_multi(&buyer, &usdc, &shares, &ds_ids);
+        assert_eq!(first_id, 0);
+        assert_eq!(token_client.balance(&buyer), INITIAL_BUYER_BALANCE - total);
+
+        // Verify all escrows were created and not confirmed
+        for i in 0..4 {
+            let record = client.get_escrow(&(first_id + i));
+            assert_eq!(record.escrow_id, first_id + i);
+            assert!(!record.buyer_confirmed);
+            assert!(!record.released);
+        }
+
+        // Confirm delivery for ALL escrows
+        for i in 0..4 {
+            client.confirm_delivery(&(first_id + i), &buyer);
+        }
+
+        // Verify all escrows are now confirmed
+        for i in 0..4 {
+            let record = client.get_escrow(&(first_id + i));
+            assert!(record.buyer_confirmed);
+            assert!(!record.released);
+        }
+
+        // Release all escrows
+        let mut escrow_ids = Vec::new(&env);
+        for i in 0..4 {
+            escrow_ids.push_back(first_id + i);
+        }
+        client.release_multi(&admin, &escrow_ids);
+
+        // Verify all escrows are released
+        for i in 0..4 {
+            let record = client.get_escrow(&(first_id + i));
+            assert!(record.released);
+        }
+
+        let fee_bps: i128 = 500;
+        // Calculate fee per escrow (with floor of 1 token when fee > 0)
+        let fee_floor = 1i128;
+
+        let s1_fee = if amounts[0] * fee_bps / 10_000 == 0 && fee_bps > 0 {
+            fee_floor.min(amounts[0])
+        } else {
+            amounts[0] * fee_bps / 10_000
+        };
+        let s2_fee = if amounts[1] * fee_bps / 10_000 == 0 && fee_bps > 0 {
+            fee_floor.min(amounts[1])
+        } else {
+            amounts[1] * fee_bps / 10_000
+        };
+        let s3_fee = if amounts[2] * fee_bps / 10_000 == 0 && fee_bps > 0 {
+            fee_floor.min(amounts[2])
+        } else {
+            amounts[2] * fee_bps / 10_000
+        };
+        let s4_fee = if amounts[3] * fee_bps / 10_000 == 0 && fee_bps > 0 {
+            fee_floor.min(amounts[3])
+        } else {
+            amounts[3] * fee_bps / 10_000
+        };
+
+        let s1_expected = amounts[0] - s1_fee;
+        let s2_expected = amounts[1] - s2_fee;
+        let s3_expected = amounts[2] - s3_fee;
+        let s4_expected = amounts[3] - s4_fee;
+        let admin_expected = total - s1_expected - s2_expected - s3_expected - s4_expected;
+
+        assert_eq!(token_client.balance(&seller_1), s1_expected);
+        assert_eq!(token_client.balance(&seller_2), s2_expected);
+        assert_eq!(token_client.balance(&seller_3), s3_expected);
+        assert_eq!(token_client.balance(&seller_4), s4_expected);
+        assert_eq!(token_client.balance(&admin), admin_expected);
     }
-
-    // Verify all escrows are now confirmed
-    for i in 0..4 {
-        let record = client.get_escrow(&(first_id + i));
-        assert!(record.buyer_confirmed);
-        assert!(!record.released);
-    }
-
-    // Release all escrows
-    let mut escrow_ids = Vec::new(&env);
-    for i in 0..4 {
-        escrow_ids.push_back(first_id + i);
-    }
-    client.release_multi(&admin, &escrow_ids);
-
-    // Verify all escrows are released
-    for i in 0..4 {
-        let record = client.get_escrow(&(first_id + i));
-        assert!(record.released);
-    }
-
-    let fee_bps: i128 = 500;
-    // Calculate fee per escrow (with floor of 1 token when fee > 0)
-    let fee_floor = 1i128;
-    
-    let s1_fee = if amounts[0] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
-        fee_floor.min(amounts[0]) 
-    } else { 
-        amounts[0] * fee_bps / 10_000 
-    };
-    let s2_fee = if amounts[1] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
-        fee_floor.min(amounts[1]) 
-    } else { 
-        amounts[1] * fee_bps / 10_000 
-    };
-    let s3_fee = if amounts[2] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
-        fee_floor.min(amounts[2]) 
-    } else { 
-        amounts[2] * fee_bps / 10_000 
-    };
-    let s4_fee = if amounts[3] * fee_bps / 10_000 == 0 && fee_bps > 0 { 
-        fee_floor.min(amounts[3]) 
-    } else { 
-        amounts[3] * fee_bps / 10_000 
-    };
-    
-    let s1_expected = amounts[0] - s1_fee;
-    let s2_expected = amounts[1] - s2_fee;
-    let s3_expected = amounts[2] - s3_fee;
-    let s4_expected = amounts[3] - s4_fee;
-    let admin_expected = total - s1_expected - s2_expected - s3_expected - s4_expected;
-
-    assert_eq!(token_client.balance(&seller_1), s1_expected);
-    assert_eq!(token_client.balance(&seller_2), s2_expected);
-    assert_eq!(token_client.balance(&seller_3), s3_expected);
-    assert_eq!(token_client.balance(&seller_4), s4_expected);
-    assert_eq!(token_client.balance(&admin), admin_expected);
-}
 
     #[test]
     #[should_panic(expected = "Error(Contract, #8)")]
@@ -2316,14 +2338,14 @@ mod fuzz_tests {
     };
 
     // Use the parent module's functions
-    use super::tests::{setup, dataset_id};
+    use super::tests::{dataset_id, setup};
 
     #[test]
     #[should_panic(expected = "Error(Contract, #12)")]
     fn test_lock_multi_fails_when_paused() {
         let (env, client, admin, buyer, _seller, usdc) = setup();
         client.pause(&admin);
-        
+
         let mut shares = SorobanVec::new(&env);
         shares.push_back(SellerShare {
             seller: Address::generate(&env),
@@ -2399,7 +2421,8 @@ mod fuzz_tests {
         assert!(rejected.is_err());
         assert_eq!(client.get_escrow_count(), ids.len() as u64);
 
-        env.ledger().set_sequence_number(env.ledger().sequence() + 1);
+        env.ledger()
+            .set_sequence_number(env.ledger().sequence() + 1);
 
         let escrow_id = client.lock(
             &buyer,
@@ -2428,7 +2451,8 @@ mod fuzz_tests {
         // The treasury is unset in this world, so the only valid recipient of
         // an emergency sweep is the admin (the `unwrap_or(admin)` fallback).
         client.schedule_emergency_withdraw(&admin, &usdc, &admin, &100_000);
-        env.ledger().set_sequence_number(env.ledger().sequence() + client.get_timelock_delay());
+        env.ledger()
+            .set_sequence_number(env.ledger().sequence() + client.get_timelock_delay());
         client.execute_emergency_withdraw();
         assert_eq!(token_client.balance(&admin), 100_000);
     }
@@ -2547,7 +2571,7 @@ mod fuzz_tests {
             let balance_delta = contract_before - contract_after;
 
             prop_assert_eq!(succeeded, 1, "exactly one settlement call must succeed");
-            
+
             let expected_delta = if first_success == Some(2) {
                 let fee = if amount * 500 / 10_000 == 0 && amount > 0 && 500 > 0 {
                     1
@@ -2560,7 +2584,7 @@ mod fuzz_tests {
             } else {
                 amount
             };
-            
+
             prop_assert!(
                 balance_delta == expected_delta,
                 "contract balance should change by exactly {} (was {})",

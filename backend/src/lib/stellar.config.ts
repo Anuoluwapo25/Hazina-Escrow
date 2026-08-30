@@ -65,6 +65,48 @@ export function validateEscrowConfig(): void {
   }
 }
 
+// ── Access-pass contract ─────────────────────────────────────────────────────
+
+/** True when the dataset subscription access-pass contract is configured. */
+export function isAccessPassConfigured(): boolean {
+  return (process.env.ACCESS_PASS_CONTRACT_ID ?? '').trim().length > 0;
+}
+
+/**
+ * Returns the configured access-pass contract ID or throws. Use at the call
+ * site so the failure names the missing env var instead of surfacing a cryptic
+ * RPC error.
+ */
+export function getAccessPassContractId(): string {
+  const id = (process.env.ACCESS_PASS_CONTRACT_ID ?? '').trim();
+  if (!id) {
+    throw new Error(
+      'ACCESS_PASS_CONTRACT_ID is not configured — the dataset subscription flow ' +
+        'requires the deployed access-pass contract address.',
+    );
+  }
+  return id;
+}
+
+/**
+ * Call once at application startup, alongside validateEscrowConfig(). Opt-in
+ * like escrow mode (unset → subscription routes self-guard with 503), but a
+ * malformed value must fail fast here rather than surface as a cryptic RPC
+ * error on the first buyer's request.
+ */
+export function validateAccessPassConfig(): void {
+  const id = (process.env.ACCESS_PASS_CONTRACT_ID ?? '').trim();
+  if (!id) {
+    return;
+  }
+  if (!StrKey.isValidContract(id)) {
+    throw new Error(
+      `[AccessPassConfig] ACCESS_PASS_CONTRACT_ID "${id}" is not a valid Soroban ` +
+        'contract address (expected a C… strkey). Check the value in your environment configuration.',
+    );
+  }
+}
+
 // ── Multi-token support ──────────────────────────────────────────────────────
 
 export interface StellarToken {
