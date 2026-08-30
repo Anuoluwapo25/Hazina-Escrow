@@ -16,11 +16,20 @@ test('browse the marketplace and search for a dataset', async ({ page }) => {
   await expect(page.getByPlaceholder(/search/i)).toBeVisible();
 
   const searchResponse = page.waitForResponse(
-    response => response.url().includes('/api/v1/datasets') && response.url().includes('search=Yield'),
+    response => response.url().includes('/api/v1/search') && response.url().includes('q=Yield'),
   );
   await page.getByPlaceholder(/search/i).fill('Yield');
   await searchResponse;
   await expect(page.getByText('DeFi Yield Aggregator')).toBeVisible();
+
+  // Type filters are disabled while a search query is active (the semantic
+  // search endpoint doesn't support them yet) — clear the query to return to
+  // browse mode before exercising the type filter.
+  const browseResponse = page.waitForResponse(
+    response => response.url().includes('/api/v1/datasets') && response.request().method() === 'GET',
+  );
+  await page.getByLabel(/reset search/i).click();
+  await browseResponse;
 
   const filterResponse = page.waitForResponse(
     response => response.url().includes('/api/v1/datasets') && response.url().includes('type=yield-data'),
