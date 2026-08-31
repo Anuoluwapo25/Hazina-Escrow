@@ -29,6 +29,7 @@ import {
   getEscrow,
   harness,
   hasTrustline,
+  platformFeeRecipient,
   release,
   tokenBalance,
   tokenBalanceOrZero,
@@ -59,8 +60,9 @@ describe('payout to a trustline-less account', () => {
     const seller = await freshAccountWithoutTrustline(h, 'trustline-payout-seller');
     expect(await hasTrustline(h.ctx, seller.publicKey(), h.usdc)).toBe(false);
 
+    const treasury = platformFeeRecipient(h);
     const buyerBefore = await tokenBalance(h, h.accounts.buyer.publicKey);
-    const treasuryBefore = await tokenBalance(h, h.accounts.treasury.publicKey);
+    const treasuryBefore = await tokenBalance(h, treasury);
     const contractBefore = await tokenBalance(h, h.contractId);
 
     // ── lock to the trustline-less seller ─────────────────────────────────
@@ -99,7 +101,7 @@ describe('payout to a trustline-less account', () => {
     // partial payout, no burn. The treasury did not get its 5% for a sale that
     // never completed.
     expect(await tokenBalance(h, h.contractId)).toBe(contractBefore + AMOUNT);
-    expect(await tokenBalance(h, h.accounts.treasury.publicKey)).toBe(treasuryBefore);
+    expect(await tokenBalance(h, treasury)).toBe(treasuryBefore);
     // Reads as zero via the trustline-aware helper: the SAC traps on balance()
     // for an account with no trustline rather than reporting 0.
     expect(await tokenBalanceOrZero(h, seller.publicKey())).toBe(0n);
@@ -114,7 +116,7 @@ describe('payout to a trustline-less account', () => {
 
     const { sellerCut, platformCut } = expectedSplit(AMOUNT);
     expect(await tokenBalance(h, seller.publicKey())).toBe(sellerCut);
-    expect(await tokenBalance(h, h.accounts.treasury.publicKey)).toBe(treasuryBefore + platformCut);
+    expect(await tokenBalance(h, treasury)).toBe(treasuryBefore + platformCut);
     expect(await tokenBalance(h, h.contractId)).toBe(contractBefore);
     expect((await getEscrow(h, escrowId)).released).toBe(true);
   }, 300_000);

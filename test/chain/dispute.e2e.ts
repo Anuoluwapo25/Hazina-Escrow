@@ -18,6 +18,7 @@ import {
   getEscrow,
   harness,
   lock,
+  platformFeeRecipient,
   raiseDispute,
   release,
   resolveDispute,
@@ -70,7 +71,7 @@ describe('dispute resolution', () => {
     await ensureBuyerFunded(h, 200);
     const buyer = h.accounts.buyer.publicKey;
     const seller = h.accounts.seller.publicKey;
-    const treasury = h.accounts.treasury.publicKey;
+    const treasury = platformFeeRecipient(h);
 
     const before = {
       buyer: await tokenBalance(h, buyer),

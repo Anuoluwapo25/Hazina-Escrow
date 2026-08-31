@@ -11,7 +11,7 @@
  *   5. asset      — issue devnet USDC, establish trustlines, distribute
  *   6. SAC        — wrap USDC (and XLM) as Soroban token contracts
  *   7. contract   — build wasm, upload, deploy at a fixed salt, initialize
- *   8. config     — set_treasury, set_arbitrator
+ *   8. config     — schedule_set_treasury, set_arbitrator
  *   9. seed       — deterministic marketplace datasets
  *  10. artifacts  — .env.devnet, devnet.accounts.json, summary
  *
@@ -314,7 +314,7 @@ async function ensureContractDeployed(
  * Note we do NOT probe with `get_default_fee` first: that getter is
  * `unwrap_or(500)`, so a freshly deployed, uninitialized contract happily
  * reports 500 and the probe would wrongly conclude the contract was ready —
- * leaving the next `set_treasury` to fail with NotInitialized. Attempting the
+ * leaving the next `schedule_set_treasury` to fail with NotInitialized. Attempting the
  * call and recognising AlreadyInitialized is the only honest check.
  */
 async function ensureInitialized(
@@ -360,22 +360,44 @@ async function configureContract(
 ): Promise<void> {
   const contract = new Contract(contractId);
 
+  // `set_treasury` was replaced by a timelocked schedule/execute pair
+  // (DEFAULT_TIMELOCK_DELAY_LEDGERS ≈ 3 days), so a freshly deployed devnet
+  // contract cannot have its treasury actually take effect within a single
+  // CI run. We schedule the change so the on-chain state reflects intent,
+  // but `execute_set_treasury` will keep failing with TimelockNotElapsed
+  // until real time passes. Until it executes, the contract's `release`
+  // falls back to paying the platform cut to `admin` instead of `treasury`
+  // (see `unwrap_or(admin.clone())` in lib.rs) — devnet e2e assertions
+  // account for that fallback rather than expecting `treasury` to be funded.
   const treasury = await simulateCall(ctx, admin.publicKey(), contractId, 'get_treasury').catch(
     () => null,
   );
   if (treasury === accounts.treasury.publicKey) {
     info('treasury already set');
   } else {
-    await submitSoroban(
+    const pending = (await simulateCall(
       ctx,
-      admin,
-      contract.call(
-        'set_treasury',
-        Address.fromString(admin.publicKey()).toScVal(),
-        Address.fromString(accounts.treasury.publicKey).toScVal(),
-      ),
-    );
-    info(`set_treasury  → ${accounts.treasury.publicKey}`);
+      admin.publicKey(),
+      contractId,
+      'get_pending_treasury_change',
+    ).catch(() => null)) as { treasury?: string } | null;
+    if (pending?.treasury === accounts.treasury.publicKey) {
+      info('treasury change already scheduled');
+    } else {
+      await submitSoroban(
+        ctx,
+        admin,
+        contract.call(
+          'schedule_set_treasury',
+          Address.fromString(admin.publicKey()).toScVal(),
+          Address.fromString(accounts.treasury.publicKey).toScVal(),
+        ),
+      );
+      info(
+        `schedule_set_treasury → ${accounts.treasury.publicKey} ` +
+          '(pending — will not execute within this devnet session; platform cut lands on admin until it does)',
+      );
+    }
   }
 
   // There is no get_arbitrator on the contract, so this one is unconditional.

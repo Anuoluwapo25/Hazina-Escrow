@@ -20,6 +20,7 @@ import {
   getEscrow,
   harness,
   lock,
+  platformFeeRecipient,
   release,
   ensureBuyerFunded,
   tokenBalance,
@@ -28,7 +29,7 @@ import {
   contractErrorCode,
 } from './helpers.ts';
 
-const AMOUNT = toStroops(100); // 100 USDC → 95 seller / 5 treasury
+const AMOUNT = toStroops(100); // 100 USDC → 95 seller / 5 platform
 
 describe('escrow lifecycle: lock → deliver → release', () => {
   let h: Harness;
@@ -38,10 +39,10 @@ describe('escrow lifecycle: lock → deliver → release', () => {
     await ensureBuyerFunded(h, 1_000);
   }, 120_000);
 
-  it('splits a released escrow 95/5 between seller and treasury on-chain', async () => {
+  it('splits a released escrow 95/5 between seller and the platform on-chain', async () => {
     const buyer = h.accounts.buyer.publicKey;
     const seller = h.accounts.seller.publicKey;
-    const treasury = h.accounts.treasury.publicKey;
+    const treasury = platformFeeRecipient(h);
 
     const before = {
       buyer: await tokenBalance(h, buyer),
