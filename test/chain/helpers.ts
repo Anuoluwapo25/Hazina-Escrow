@@ -157,6 +157,20 @@ export function expectedSplit(
   return { sellerCut: amount - platformCut, platformCut };
 }
 
+/**
+ * Who actually receives the platform cut on this devnet.
+ *
+ * `treasury` is set via `schedule_set_treasury`, which is timelocked
+ * (~3 days) and cannot execute within a devnet CI session — provisioning
+ * schedules it but the change never lands before the suite runs. Until
+ * `execute_set_treasury` actually executes, `release_one` falls back to
+ * paying the platform cut to `admin` (see `unwrap_or(admin.clone())` in
+ * lib.rs). Assert against this, not `h.accounts.treasury`.
+ */
+export function platformFeeRecipient(h: Harness): string {
+  return h.accounts.admin.publicKey;
+}
+
 // ── On-chain reads ───────────────────────────────────────────────────────────
 
 /**
