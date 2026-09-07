@@ -24,7 +24,7 @@
     "coverage:payments": "vitest run --config vitest.payment.config.ts --coverage"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.123.0",
     "@datadog/browser-logs": "^4.43.0",
     "@sentry/node": "^10.50.0",
     "@stellar/stellar-sdk": "^13.1.0",
